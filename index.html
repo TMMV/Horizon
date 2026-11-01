@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Privacy: scripts on this page cannot make network requests. Your plan never leaves this browser. -->
+  <meta http-equiv="Content-Security-Policy" content="connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">
+  <title>Horizon Planner</title>
+  <meta name="description" content="Private, local-first financial planner with UK and Scottish tax rules.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M6 22h20M9 22l5-8 4 5 5-9' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M6 22h20M9 22l5-8 4 5 5-9" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Horizon</span>
+    </div>
+    <div class="scenario-picker">
+      <label for="scenarioSelect" class="sr-only">Scenario</label>
+      <select id="scenarioSelect"></select>
+      <button type="button" class="btn ghost" id="dupScenario">Duplicate</button>
+    </div>
+    <div class="top-actions">
+      <div class="seg" role="group" aria-label="Money display">
+        <button type="button" data-real="1">Today's £</button>
+        <button type="button" data-real="0">Future £</button>
+      </div>
+      <button type="button" class="btn ghost icon-btn" id="themeBtn" aria-label="Switch theme"></button>
+      <details class="menu" id="dataMenu">
+        <summary class="btn ghost">Data</summary>
+        <div class="menu-pop" role="menu">
+          <button type="button" role="menuitem" id="exportBtn">Export to file</button>
+          <button type="button" role="menuitem" id="importBtn">Import from file</button>
+          <button type="button" role="menuitem" id="blankBtn">Start a blank plan</button>
+          <button type="button" role="menuitem" id="resetBtn">Reset to example</button>
+        </div>
+      </details>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" type="button" data-tab="overview" aria-selected="true">Overview</button>
+    <button role="tab" type="button" data-tab="goals" aria-selected="false">Goals</button>
+    <button role="tab" type="button" data-tab="plan" aria-selected="false">Plan</button>
+    <button role="tab" type="button" data-tab="cashflow" aria-selected="false">Cash flow</button>
+    <button role="tab" type="button" data-tab="montecarlo" aria-selected="false">Monte Carlo</button>
+    <button role="tab" type="button" data-tab="scenarios" aria-selected="false">Scenarios</button>
+    <button role="tab" type="button" data-tab="progress" aria-selected="false">Progress</button>
+    <button role="tab" type="button" data-tab="workings" aria-selected="false">Workings</button>
+  </nav>
+
+  <div class="status-strip" id="statusStrip" aria-live="polite"></div>
+
+  <main>
+    <div id="warnings"></div>
+
+    <!-- Overview -->
+    <section class="view" id="view-overview" role="tabpanel">
+      <section class="ov-hero" id="ovHero" aria-label="Summary">
+        <div class="hero-col hero-main">
+          <div id="heroMain"></div>
+          <div id="heroSpark"></div>
+          <p class="hero-note" id="heroSparkNote"></p>
+        </div>
+        <div class="hero-col hero-next" id="heroNext"></div>
+      </section>
+      <section class="card" id="ovGoalsCard" aria-labelledby="ovGoalsTitle">
+        <div class="card-head">
+          <div>
+            <h2 id="ovGoalsTitle">Your goals</h2>
+            <p class="sub">Everything in the plan works towards these. Each goal keeps its colour across every chart.</p>
+          </div>
+          <div class="controls">
+            <button type="button" class="btn small" id="ovManageGoals">Manage goals</button>
+            <button type="button" class="btn small primary" id="ovAddGoal">+ Add a goal</button>
+          </div>
+        </div>
+        <div class="goal-strip" id="ovGoalStrip"></div>
+      </section>
+      <div class="tiles" id="ovTiles"></div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Net worth by account</h2>
+            <p class="sub" id="ovChartSub"></p>
+          </div>
+        </div>
+        <div class="chart" id="ovChart"></div>
+        <div class="legend" id="ovLegend"></div>
+      </div>
+      <div class="grid-2 ov-bottom">
+        <div class="card">
+          <h2>Milestones</h2>
+          <p class="sub">On average returns. Your yearly review is on here too.</p>
+          <ol class="timeline" id="ovMilestones"></ol>
+        </div>
+        <div class="card" id="ovInsights"></div>
+      </div>
+    </section>
+
+    <!-- Goals -->
+    <section class="view" id="view-goals" role="tabpanel" hidden>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Your goals</h2>
+            <p class="sub">Each goal shows the chance of reaching it across simulated futures, when you would reach it on average returns, and what it would take.</p>
+          </div>
+          <div class="controls">
+            <button type="button" class="btn" id="lifeBtn">Life check-up</button>
+            <button type="button" class="btn primary" id="addGoalBtn">Add a goal</button>
+          </div>
+        </div>
+        <div class="goal-grid" id="goalCards"></div>
+      </div>
+      <div class="card" id="driversCard">
+        <div class="card-head">
+          <div>
+            <h2>What moves your goals</h2>
+            <p class="sub" id="driversSub">How much each change would raise or lower the chance of every goal, in percentage points. Choices you control first, then risks.</p>
+          </div>
+        </div>
+        <div id="driversBody"></div>
+      </div>
+      <div class="card" id="explorer">
+        <div class="card-head">
+          <div>
+            <h2>Try changes</h2>
+            <p class="sub">Move the sliders to see how each choice affects every goal at once. Your plan does not change until you apply it.</p>
+          </div>
+          <div class="controls">
+            <button type="button" class="btn small" id="expReset">Reset</button>
+            <button type="button" class="btn small" id="expScenario">Save as new scenario</button>
+            <button type="button" class="btn small primary" id="expApply">Apply to plan</button>
+          </div>
+        </div>
+        <div class="explorer">
+          <div class="explorer-levers" id="expLevers"></div>
+          <div class="explorer-results">
+            <p class="sub" id="expStatus" role="status"></p>
+            <div id="expImpact"></div>
+            <h3 class="chart-title">Net worth: your plan and with these changes</h3>
+            <div class="chart" id="expChart"></div>
+            <div class="legend" id="expLegend"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Plan editor -->
+    <section class="view" id="view-plan" role="tabpanel" hidden>
+      <div class="plan-layout">
+        <nav class="plan-nav" id="planNav" aria-label="Plan sections"></nav>
+        <div class="plan-body" id="planBody"></div>
+      </div>
+    </section>
+
+    <!-- Cash flow -->
+    <section class="view" id="view-cashflow" role="tabpanel" hidden>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Money in and out each year</h2>
+            <p class="sub">Above the line: where money comes from. Below: where it goes. Saving includes ISA, GIA, cash buffer and your own pension contributions.</p>
+          </div>
+        </div>
+        <div class="chart" id="cfChart"></div>
+        <div class="legend" id="cfLegend"></div>
+      </div>
+    </section>
+
+    <!-- Monte Carlo -->
+    <section class="view" id="view-montecarlo" role="tabpanel" hidden>
+      <div class="tiles" id="mcTiles"></div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Range of outcomes: liquid assets</h2>
+            <p class="sub" id="mcSub"></p>
+          </div>
+          <div class="controls">
+            <label>Simulations
+              <select id="runsSelect">
+                <option>500</option><option>1000</option><option>2000</option><option>5000</option><option>10000</option>
+              </select>
+            </label>
+            <button type="button" class="btn small" id="rerollBtn">Re-roll</button>
+          </div>
+        </div>
+        <div class="chart" id="mcChart"></div>
+        <div class="legend" id="mcLegend"></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Chance the money lasts</h2>
+          <p class="sub">Share of simulations still fully funded in each year.</p>
+          <div class="chart" id="mcFundedChart"></div>
+        </div>
+        <div class="card">
+          <h2>Chance of reaching your goal</h2>
+          <p class="sub" id="mcGoalSub"></p>
+          <div class="chart" id="mcGoalChart"></div>
+        </div>
+      </div>
+      <div class="card" id="histCard">
+        <div class="card-head">
+          <div>
+            <h2>Replaying history</h2>
+            <p class="sub" id="histSub"></p>
+          </div>
+        </div>
+        <div class="tiles" id="histTiles"></div>
+        <h3 class="chart-title">Money left at the end of the plan, by the year history starts (today’s £)</h3>
+        <div class="chart" id="histBars"></div>
+        <div class="legend" id="histBarsLegend"></div>
+        <h3 class="chart-title">Savings, investments and pensions through famous stretches of history (today’s £)</h3>
+        <div class="chart" id="histLines"></div>
+        <div class="legend" id="histLegend"></div>
+        <h3 class="chart-title">Your goals: random simulations and history</h3>
+        <div id="histGoals"></div>
+      </div>
+      <div class="card">
+        <h2>Percentiles at key years</h2>
+        <div class="table-wrap" id="mcTable"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Everything else that varies</h2>
+            <p class="sub" id="mcFansSub">Each simulation also draws its own inflation, salary growth, house prices and interest rates. These charts show the range. Switch any of them off in Plan → Markets &amp; inflation.</p>
+          </div>
+        </div>
+        <div class="fan-grid" id="mcFans"></div>
+      </div>
+    </section>
+
+    <!-- (Monte Carlo continued: everything else that varies) -->
+    <!-- Scenarios -->
+    <section class="view" id="view-scenarios" role="tabpanel" hidden>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Scenario ideas</h2>
+            <p class="sub">Common “what ifs”. Each one adds a scenario: a copy of this plan with that change, ready to compare below and to edit.</p>
+          </div>
+        </div>
+        <div class="idea-grid" id="ideaGrid"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Try a range</h2>
+            <p class="sub">Run one change at several levels and compare. Every variant uses the same simulated markets, so differences come from the change itself.</p>
+          </div>
+        </div>
+        <div class="sweep-controls">
+          <label class="field inline">What to vary
+            <select id="sweepLever"></select>
+          </label>
+          <button type="button" class="btn primary" id="sweepRun">Run comparison</button>
+          <span class="sub" id="sweepStatus" role="status"></span>
+        </div>
+        <div id="sweepResults"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Saved scenarios</h2>
+            <p class="sub">Each scenario is a full copy of the plan. Use Duplicate at the top to make a new one, then edit it.</p>
+          </div>
+          <button type="button" class="btn small" id="compareRun">Refresh comparison</button>
+        </div>
+        <div id="compareResults"></div>
+      </div>
+    </section>
+
+    <!-- Progress -->
+    <section class="view" id="view-progress" role="tabpanel" hidden>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Yearly check-ins</h2>
+            <p class="sub">Each October, the yearly review walks you through every number, compares it with last year’s prediction and rolls all your scenarios forward. Each check-in saves your actual numbers and the projection you made.</p>
+          </div>
+          <div class="controls">
+            <button type="button" class="btn primary" id="reviewBtn">Start yearly review</button>
+            <button type="button" class="btn" id="checkinBtn" title="Save today's numbers without the guided review">Quick check-in</button>
+          </div>
+        </div>
+        <div class="chart" id="progChart"></div>
+        <div class="legend" id="progLegend"></div>
+        <div class="table-wrap" id="progTable"></div>
+      </div>
+      <div class="card" id="progReview" hidden></div>
+      <details class="card">
+        <summary><h2 class="inline-h">Add a past year by hand</h2></summary>
+        <p class="sub">Backfill earlier years from old spreadsheets. Only net worth and spending are needed.</p>
+        <form class="inline-form" id="manualCheckin">
+          <label class="field">Year<input type="number" name="year" required min="1990" max="2100"></label>
+          <label class="field">Net worth (£)<input type="text" inputmode="decimal" name="netWorth" required></label>
+          <label class="field">Annual spending (£)<input type="text" inputmode="decimal" name="spending"></label>
+          <label class="field">Projected net worth one year later (£, optional)<input type="text" inputmode="decimal" name="predicted"></label>
+          <button type="submit" class="btn">Add</button>
+        </form>
+      </details>
+    </section>
+    <!-- Workings -->
+    <section class="view" id="view-workings" role="tabpanel" hidden>
+      <div class="card">
+        <h2>Workings</h2>
+        <p class="sub" id="wkIntro"></p>
+        <nav class="chips" id="wkNav" aria-label="Workings sections"></nav>
+      </div>
+      <div id="wkBody" class="stack"></div>
+    </section>
+  </main>
+
+  <dialog id="wizard" aria-labelledby="wizTitle">
+    <form method="dialog" class="wizard" id="wizForm">
+      <header class="wiz-head">
+        <div>
+          <p class="wiz-step" id="wizStep"></p>
+          <h2 id="wizTitle"></h2>
+          <p class="sub" id="wizIntro"></p>
+        </div>
+        <button type="button" class="btn ghost icon-btn" id="wizClose" aria-label="Close">✕</button>
+      </header>
+      <div class="wiz-progress"><span id="wizBar"></span></div>
+      <div class="wiz-body" id="wizBody"></div>
+      <footer class="wiz-foot">
+        <div class="wiz-total" id="wizTotal"></div>
+        <div class="controls">
+          <button type="button" class="btn" id="wizBack">Back</button>
+          <button type="button" class="btn primary" id="wizNext">Next</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="lifeWiz" aria-labelledby="lwTitle">
+    <form method="dialog" class="wizard" id="lwForm">
+      <header class="wiz-head">
+        <div>
+          <p class="wiz-step" id="lwStep"></p>
+          <h2 id="lwTitle"></h2>
+          <p class="sub" id="lwIntro"></p>
+        </div>
+        <button type="button" class="btn ghost icon-btn" id="lwClose" aria-label="Close">✕</button>
+      </header>
+      <div class="wiz-progress"><span id="lwBar"></span></div>
+      <div class="wiz-body" id="lwBody"></div>
+      <footer class="wiz-foot">
+        <div class="wiz-total" id="lwTotal"></div>
+        <div class="controls">
+          <button type="button" class="btn" id="lwBack">Back</button>
+          <button type="button" class="btn primary" id="lwNext">Next</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="goalWiz" class="wide" aria-labelledby="gwTitle">
+    <form method="dialog" class="wizard" id="gwForm">
+      <header class="wiz-head">
+        <div>
+          <p class="wiz-step" id="gwStep"></p>
+          <h2 id="gwTitle"></h2>
+          <p class="sub" id="gwIntro"></p>
+        </div>
+        <button type="button" class="btn ghost icon-btn" id="gwClose" aria-label="Close">✕</button>
+      </header>
+      <div class="wiz-progress"><span id="gwBar"></span></div>
+      <div class="wiz-body" id="gwBody"></div>
+      <footer class="wiz-foot">
+        <div class="wiz-total" id="gwNote"></div>
+        <div class="controls" id="gwButtons">
+          <button type="button" class="btn" id="gwBack">Back</button>
+          <button type="button" class="btn primary" id="gwNext">Next</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="reviewWiz" class="wide" aria-labelledby="rvTitle">
+    <form method="dialog" class="wizard" id="rvForm">
+      <header class="wiz-head">
+        <div>
+          <p class="wiz-step" id="rvStep"></p>
+          <h2 id="rvTitle"></h2>
+          <p class="sub" id="rvIntro"></p>
+        </div>
+        <button type="button" class="btn ghost icon-btn" id="rvClose" aria-label="Close">✕</button>
+      </header>
+      <div class="wiz-progress"><span id="rvBar"></span></div>
+      <div class="wiz-body" id="rvBody"></div>
+      <footer class="wiz-foot">
+        <div class="wiz-total" id="rvNote"></div>
+        <div class="controls">
+          <button type="button" class="btn" id="rvBack">Back</button>
+          <button type="button" class="btn primary" id="rvNext">Next</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <footer class="page-foot">
+    Horizon is a planning model, not financial advice. UK rules for tax year <span id="taxYear"></span>; check
+    figures on gov.uk and gov.scot. Your plan is stored only in this browser. Use Data → Export to back it up.
+  </footer>
+
+  <script src="data/market.js"></script>
+  <script src="data/history.js"></script>
+  <script src="src/uk-rules.js"></script>
+  <script src="src/engine.js"></script>
+  <script src="src/chart.js"></script>
+  <script src="src/spending-wizard.js"></script>
+  <script src="src/benchmarks.js"></script>
+  <script src="src/levers.js"></script>
+  <script src="src/scenario-ideas.js"></script>
+  <script src="src/life-wizard.js"></script>
+  <script src="src/review.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>

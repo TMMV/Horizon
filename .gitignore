@@ -1,0 +1,12 @@
+node_modules/
+test-results/
+playwright-report/
+screenshots/tmp/
+
+# Personal plan exports: never commit real financial data to this public repo.
+horizon-plan-*.json
+my-plan*.json
+*.private.json
+
+# Personal notes, decisions and scripts (real figures): never commit.
+private/
