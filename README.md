@@ -6,9 +6,28 @@ browser: there is no server, no account and no tracking, and the page is blocked
 making network requests.
 
 **Try it:** [tmmv.github.io/Horizon](https://tmmv.github.io/Horizon/). It runs entirely in your
-browser; your plan is saved only on your device (export it from the Data menu to back it up).
+browser; your plan is saved only on your device (use **Data → Save to a file** to keep a copy).
 
-![Overview](screenshots/light-overview.png)
+![Home](screenshots/light-home.png)
+
+## How it's organised
+
+You set the plan up once, then review it once a year.
+
+| Section | What's there |
+|---|---|
+| **Home** | Your portfolio *today*: every account, estimated from your last figures (or a balance you updated since), with net worth and how it's split. Your goals and whether each is on track. Where you're heading, what to invest each month this year, what's coming up, and a quick plan check. |
+| **Goals** | Every goal in a list, what moves each one, and milestones. Each goal has its own page: how it's tracking (its range of outcomes against the target), the chance by year, what moves it, what it would take, levers to try, and how it does if history repeated. |
+| **Money** | All your inputs, each with its own prediction: **Portfolio** (accounts and how each grows), **Income**, **Spending**, **Cash flow & tax**, and **Assumptions** (household, saving strategy, markets, tax rules). At the top: the date your figures are as at. |
+| **Outlook** | The range of outcomes across thousands of simulated futures, and the plan replayed through history since 1928. |
+| **Scenarios** | Ready-made "what ifs", sliders to try changes, ranges, and your saved scenarios side by side. |
+| **Review** | The yearly review, balance updates between reviews, and how earlier plans turned out. |
+
+**Figures "as at" a date.** Balances, pay and spending describe one date (shown at the top of
+Money). From there Horizon estimates every account for any later day: Home shows today's
+estimate, and the yearly review starts from the estimate for the review date, so you only type
+over what's different. Between reviews, **Update balances** records a figure from your banking
+app with its date; it shows on Home and feeds the next review.
 
 ## What it does
 
@@ -31,13 +50,13 @@ browser; your plan is saved only on your device (export it from the Data menu to
 - **Goals at the centre.** Retirement, emergency fund, mortgage-free, financial independence,
   an amount by a year, passive income, house deposit, university fund, big purchase, leaving
   an inheritance, or saving for anything else. Each goal has its own name, colour and icon
-  badge, used on every chart; the Overview leads with them (chance, progress, expected date).
-  Add or remove goals at any time; each has "what would it take" (the overpayment share,
+  badge, used on every chart; Home leads with them and each has its own page (chance,
+  progress, expected date, range of outcomes). Add or remove goals at any time; each has "what would it take" (the overpayment share,
   spending cut, cash buffer or retirement spending that gets you there).
 - **What moves your goals.** A heatmap shows how typical choices (retire later or earlier,
   spend less now or in retirement, pay more into pensions, overpay the mortgage) and risks
   (weaker markets, higher inflation, a crash next year) change the chance of every goal.
-  Each goal tile names its biggest help and biggest risk.
+  Each goal names its biggest help and biggest risk, and its page shows every change in points.
 - **Scenario ideas.** One click adds a ready-made "what if" as a scenario: retire earlier or
   later, part-time work, a year out, six months out of work, a new baby, a market crash,
   lower returns, higher inflation, a higher rate when the mortgage fix ends, overpaying,
@@ -47,14 +66,16 @@ browser; your plan is saved only on your device (export it from the Data menu to
   property, and stress tests. A side-by-side table shows how every goal moves, so you can see
   that paying the mortgage off faster costs investing, and apply the result or save it as a
   scenario.
-- **Workings.** Spreadsheet-style tables and charts for assumptions, income, spending, tax per
-  person and each account's roll-forward (start + growth + in − out = end, checked on every
+- **Workings under every input.** Each Money page shows its prediction as a chart and a
+  spreadsheet-style table: assumptions, income, spending, tax per person and each account's
+  roll-forward (start + growth + in − out = end, checked on every
   row), each downloadable as CSV. Income items show their typical trend range.
 - **Scenarios.** Duplicate the plan and change anything, or run a range on one lever
   (mortgage overpayment share, retirement age, spending, returns, inflation) and compare.
 - **Yearly review (every October).** A guided walk through every balance, income and
-  spending item, each prefilled with what last year's plan expected so you only correct what
-  changed. It shows how far you are ahead of or behind last year's prediction, which accounts
+  spending item, each prefilled with Horizon's estimate for the review date (or a balance you
+  updated since) so you only correct what changed. The review date becomes the date your
+  figures are as at. It shows how far you are ahead of or behind last year's prediction, which accounts
   made the difference, and how each goal moved. It then rolls every scenario forward,
   growing amounts the way the plan expected and keeping each scenario's own assumptions,
   and gives this year's "invest each month" figure. A banner reminds you from October. Quick
@@ -138,17 +159,21 @@ Horizon from your desktop.
 
 ### 3. Load your plan
 
-It opens with a fictional example household. Use **Data → Import** to load a plan file you
-exported before, or **Data → Start a blank plan** to begin your own.
+It opens with a fictional example household. Use **Data → Open a saved file** to load a plan you
+saved before, or **Data → Start a blank plan** to begin your own.
 
 ### Where your plan is kept
 
 - Your plan is saved in your browser, **for that address**. The start scripts always use the
   same address (http://localhost:8765) so it is there next time. Opening `index.html` directly, or
-  the [online copy](https://tmmv.github.io/Horizon/), keeps a separate plan: use **Data → Export**
-  and **Import** to move it between them.
-- **Data → Export** saves everything (scenarios, goals, check-ins and settings) to one JSON
-  file. Do it now and then as a backup; clearing your browser's data would delete the saved plan.
+  the [online copy](https://tmmv.github.io/Horizon/), keeps a separate plan.
+- **Data → Save to a file** saves everything (scenarios, goals, check-ins, balance updates and
+  settings) to one JSON file in your downloads. Horizon shows when you last saved (on Home and
+  in the Data menu) and offers to save after each yearly review. Clearing your browser's data
+  would delete the plan kept in the browser, so keep the file somewhere safe.
+- **Carrying on on another computer** (or next year on a new one): save to a file, copy it
+  across (USB stick, cloud drive, email to yourself), open Horizon there and use **Data → Open a
+  saved file**. The same works between the local copy and the online one.
 - `plans/example.json` is the fictional example. Keep your own export next to it as
   `plans/my-plan.json`: that name (and any `horizon-plan-*.json` export) is in `.gitignore`, so
   real figures never end up in the repository.
@@ -156,18 +181,20 @@ exported before, or **Data → Start a blank plan** to begin your own.
 ### Updating
 
 With Git: `git pull` in the Horizon folder. Without Git: download the ZIP again and replace the
-files (keep your `plans/my-plan.json`). Your saved plan stays in the browser either way.
+files (keep your `plans/my-plan.json`). Your plan stays in the browser either way, but save it
+to a file first to be safe.
 
 ### Matching a spreadsheet
 
 To reproduce a simple spreadsheet exactly, use the same simplifications it does:
 
-- Household → switch **Work out UK tax** off and enter take-home pay.
-- Markets → **Use your own return** for investments and pensions (e.g. 10% and 7%).
+- Money → Assumptions → switch **Work out UK tax** off and enter take-home pay.
+- Money → Assumptions → Markets → **Use your own return** for investments and pensions (e.g. 10% and 7%).
 - Set cash interest to 0 and the cash buffer to 0 so every penny of surplus is invested.
 - Enter rent with its exchange rate, costs (%) and a flat tax rate, as in the sheet.
 
-The Workings tab then shows the same year-by-year numbers, with a CSV download to compare.
+The tables under each Money page then show the same year-by-year numbers, with a CSV download
+to compare.
 
 ## Develop
 

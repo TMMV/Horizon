@@ -70,12 +70,15 @@
     return p;
   }
 
-  // What the plan expects each account to hold `years` from now on average returns.
-  // Each account takes its share of its type's projected total.
-  function expectedBalances(plan, years) {
-    const proj = E.project(plan);
-    const t = Math.min(years, proj.pre.N);
-    const row = proj.rows[t];
+  // What the plan expects each account to hold `years` (may be a fraction) after its figures
+  // date, on average returns. Each account takes its share of its type's projected total;
+  // between two years the values are interpolated.
+  function expectedBalances(plan, years, proj = E.project(plan)) {
+    const N = proj.pre.N;
+    const f = Math.min(Math.max(0, years), N);
+    const k = Math.min(N - 1, Math.floor(f)), x = f - k;
+    const row = {};
+    for (const type of TYPES) row[type] = proj.rows[k][type] + (proj.rows[k + 1][type] - proj.rows[k][type]) * x;
     const out = {};
     // Lifetime ISAs are part of the ISA total in a projection.
     const typeOf = a => (a.type === 'lisa' ? 'isa' : a.type);
@@ -88,11 +91,52 @@
       }
     }
     for (const a of plan.accounts.filter(x => x.excluded)) {
-      out[a.id] = a.type === 'property' ? a.balance * grow(a.rate, years) : a.balance;
+      out[a.id] = a.type === 'property' ? a.balance * grow(a.rate, f) : a.balance;
     }
     // Money the plan expects in a type with no account yet (e.g. a first general investment account).
     const missing = TYPES.filter(type => row[type] > 0.5 && !plan.accounts.some(a => typeOf(a) === type && !a.excluded));
     return { byId: out, missing: missing.map(type => ({ type, value: row[type] })), row };
+  }
+
+  // Years from one date to another, counting whole anniversaries (15 Oct to 15 Oct is
+  // exactly 1) and the fraction of the year after the last one. 0 if `to` is earlier.
+  function yearsBetween(from, to) {
+    const a = new Date(`${from}T00:00:00Z`), b = new Date(`${to}T00:00:00Z`);
+    if (!(b > a)) return 0;
+    const at = y => Date.UTC(a.getUTCFullYear() + y, a.getUTCMonth(), a.getUTCDate());
+    let y = b.getUTCFullYear() - a.getUTCFullYear();
+    if (at(y) > b) y--;
+    return y + (b - at(y)) / (at(y + 1) - at(y));
+  }
+
+  // Every account's estimated value on `date`: what the plan expects since its figures date,
+  // or, when a balance was read since then, that reading moved on the way the plan expects.
+  // `source` says which: 'figures' (the date itself), 'estimate', 'updated' (read that day)
+  // or 'updatedEstimate' (read earlier, moved on to `date`).
+  function estimateAt(plan, date, proj = E.project(plan)) {
+    const asOf = E.asOfDate(plan);
+    const f = yearsBetween(asOf, date);
+    const exp = expectedBalances(plan, f, proj);
+    const byId = {}, source = {}, reading = {};
+    for (const a of plan.accounts) {
+      let v = exp.byId[a.id] !== undefined ? exp.byId[a.id] : a.balance;
+      let src = f < 1 / 365 ? 'figures' : 'estimate';
+      const L = a.latest;
+      if (L && L.date >= asOf && L.date <= date) {
+        const e0 = expectedBalances(plan, yearsBetween(asOf, L.date), proj).byId[a.id];
+        const base = e0 !== undefined ? e0 : a.balance;
+        v = base > 1 ? L.value * (v / base) : L.value + (v - base);
+        src = L.date === date ? 'updated' : 'updatedEstimate';
+        reading[a.id] = L;
+      }
+      byId[a.id] = Math.max(0, v);
+      source[a.id] = src;
+    }
+    const byType = Object.fromEntries(TYPES.map(t => [t, 0]));
+    for (const a of plan.accounts) if (!a.excluded) byType[a.type === 'lisa' ? 'isa' : a.type] += byId[a.id];
+    for (const m of exp.missing) byType[m.type] += m.value;
+    const netWorth = TYPES.reduce((s, t) => s + (t === 'debt' ? -byType[t] : byType[t]), 0);
+    return { date, asOf, years: f, byId, expected: exp.byId, source, reading, byType, netWorth, missing: exp.missing };
   }
 
   // Values by type, as a check-in records them.
@@ -124,39 +168,75 @@
     return out;
   }
 
-  // Start a review of the active scenario for `year`.
+  // Start a review of the active scenario for `year`, with balances as at `date` (default
+  // today). Every balance starts as the plan's estimate for that date, or a reading taken
+  // since, ready to be corrected.
   function start(ws, opts = {}) {
     const scen = ws.scenarios.find(s => s.id === ws.activeId) || ws.scenarios[0];
     const original = E.clonePlan(scen.plan);
+    const date = E.isDate(opts.date) ? opts.date : E.todayISO(opts.today);
     const year = Math.max(original.startYear, opts.year || suggestedYear(original, opts.today));
     const years = year - original.startYear;
     const plan = rollPlan(original, years);
-    const exp = expectedBalances(original, years);
-    for (const a of plan.accounts) if (exp.byId[a.id] !== undefined) a.balance = Math.round(exp.byId[a.id]);
-    for (const m of exp.missing) {
+    plan.asOf = date;
+    for (const a of plan.accounts) a.latest = null;
+    const est = estimateAt(original, date);
+    for (const m of est.missing) {
       plan.accounts.push(E.normalizePlan({ ...plan, accounts: [{ name: TYPE_LABELS[m.type], type: m.type, owner: 'p1', balance: Math.round(m.value), basis: Math.round(m.value) }] }).accounts[0]);
     }
     const snap = list => Object.fromEntries(list.map(x => [x.id, x.type ? x.balance : x.amount]));
     const prev = previousCheckin(ws.checkins || [], year);
-    return {
-      year, years, scenarioId: scen.id, scenarioName: scen.name,
+    const draft = {
+      year, years, date, scenarioId: scen.id, scenarioName: scen.name,
       original, plan,
       expectedPlan: E.clonePlan(plan),
       last: { accounts: snap(original.accounts), income: snap(original.income), expenses: snap(original.expenses) },
-      expected: { accounts: snap(plan.accounts), income: snap(plan.income), expenses: snap(plan.expenses) },
+      expected: { accounts: {}, income: snap(plan.income), expenses: snap(plan.expenses) },
+      readings: {},
       touched: { accounts: {}, income: {}, expenses: {} },
       prev,
       predicted: predictedFor(prev, year),
       actualSpending: 0,
       market: Object.fromEntries(MARKET_FIELDS.map(f => [f, { current: original.assumptions[f], next: original.assumptions[f] }])),
     };
+    applyEstimates(draft, est);
+    return draft;
+  }
+
+  // Fill in the balances not yet entered from an estimate. "Expected" is the plan's own
+  // estimate; a balance read during the year (moved on to the review date) is used as the
+  // starting value and counts as entered.
+  function applyEstimates(draft, est) {
+    for (const a of draft.plan.accounts) {
+      const added = !draft.original.accounts.some(x => x.id === a.id);
+      const m = added ? est.missing.find(x => x.type === a.type) : null;
+      const exp = added ? (m ? m.value : a.balance) : est.expected[a.id];
+      if (exp === undefined) continue;
+      draft.expected.accounts[a.id] = Math.round(exp);
+      const e = draft.expectedPlan.accounts.find(x => x.id === a.id);
+      if (e) e.balance = Math.round(exp);
+      if (draft.touched.accounts[a.id] && !draft.readings[a.id]) continue;
+      const reading = est.reading[a.id];
+      a.balance = Math.round(reading ? est.byId[a.id] : exp);
+      if (reading) { draft.readings[a.id] = reading; draft.touched.accounts[a.id] = true; } else delete draft.readings[a.id];
+    }
+  }
+
+  // Change the date the balances are as at: anything not entered by hand is re-estimated.
+  function setDate(draft, date) {
+    if (!E.isDate(date)) return draft;
+    draft.date = date;
+    draft.plan.asOf = date;
+    draft.expectedPlan.asOf = date;
+    applyEstimates(draft, estimateAt(draft.original, date));
+    return draft;
   }
 
   function setValue(draft, kind, id, value) {
     const list = kind === 'accounts' ? draft.plan.accounts : kind === 'income' ? draft.plan.income : draft.plan.expenses;
     const item = list.find(x => x.id === id);
     if (!item) return;
-    if (kind === 'accounts') item.balance = Math.max(0, value); else item.amount = Math.max(0, value);
+    if (kind === 'accounts') { item.balance = Math.max(0, value); if (draft.readings) delete draft.readings[id]; } else item.amount = Math.max(0, value);
     draft.touched[kind][id] = true;
   }
 
@@ -216,6 +296,8 @@
         }
         for (const it of draft.plan.income) { const m = match(p.income, it); if (m) m.amount = it.amount; }
         for (const e of draft.plan.expenses) { const m = match(p.expenses, e); if (m) m.amount = e.amount; }
+        p.asOf = draft.date || p.asOf;
+        for (const a of p.accounts) a.latest = null;   // the review's figures replace any readings
       }
       for (const f of MARKET_FIELDS) {
         if (!market[f]) continue;
@@ -225,7 +307,7 @@
       s.plan = E.normalizePlan(p);
     }
     const active = out.scenarios.find(s => s.id === draft.scenarioId);
-    const c = E.makeCheckin(active.plan, active.name, opts.date);
+    const c = E.makeCheckin(active.plan, active.name, opts.date || draft.date);
     if (draft.actualSpending > 0) c.actual.spending = draft.actualSpending;
     c.goals = (opts.goals || []).map(g => ({ title: g.title, probability: g.probability, expectedYear: g.expectedYear ?? null }));
     if (opts.note) c.note = opts.note;
@@ -248,7 +330,23 @@
     return { due: false, next: reviewed || today.getMonth() >= 9 ? y + 1 : y };
   }
 
-  const api = { TYPES, TYPE_LABELS, MARKET_FIELDS, suggestedYear, rollPlan, expectedBalances, byType, previousCheckin, predictedFor, start, setValue, progress, variance, apply, due };
+  // Record balances read during the year (e.g. from a banking app) in every scenario that has
+  // the same account. `values` maps account id → balance. Returns a new workspace.
+  function recordReadings(ws, values, date) {
+    const out = JSON.parse(JSON.stringify(ws));
+    const active = out.scenarios.find(s => s.id === out.activeId) || out.scenarios[0];
+    for (const [id, value] of Object.entries(values)) {
+      const a = active.plan.accounts.find(x => x.id === id);
+      if (!a) continue;
+      for (const s of out.scenarios) {
+        const m = s === active ? a : match(s.plan.accounts, a, true);
+        if (m) m.latest = { value: Math.max(0, value), date };
+      }
+    }
+    return out;
+  }
+
+  const api = { TYPES, TYPE_LABELS, MARKET_FIELDS, suggestedYear, rollPlan, expectedBalances, estimateAt, yearsBetween, byType, previousCheckin, predictedFor, start, setDate, setValue, progress, variance, apply, recordReadings, due };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Review = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

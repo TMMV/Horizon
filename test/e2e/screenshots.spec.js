@@ -3,17 +3,21 @@
 // Run with `npm run screenshots`, then look at them. Uses only the fictional example plan.
 const { test, expect } = require('@playwright/test');
 const path = require('path');
-const { openApp, tab } = require('./helpers');
+const { openApp, tab, go } = require('./helpers');
 
 const OUT = path.resolve(__dirname, '../../screenshots');
-const TABS = ['overview', 'goals', 'plan', 'cashflow', 'montecarlo', 'scenarios', 'progress', 'workings'];
+const VIEWS = ['home', 'goals', 'goal', 'money/portfolio', 'money/income', 'money/spending', 'money/cashflow', 'money/assumptions', 'outlook', 'scenarios', 'review'];
 
 async function prepare(page) {
-  // A check-in history so the Progress tab has something to show.
+  // A check-in history so the Review tab has something to show, figures from a few months
+  // ago (so Home shows estimates) and one balance updated since.
   await page.evaluate(() => {
     const E = window.Engine;
     const h = window.__horizon;
     const p = h.ws.scenarios[0].plan;
+    const d = new Date(); d.setMonth(d.getMonth() - 5);
+    p.asOf = E.todayISO(d);
+    p.accounts[1].latest = { value: Math.round(p.accounts[1].balance * 1.09), date: E.todayISO(new Date(Date.now() - 20 * 864e5)) };
     const prev = E.rollForward(p, -2);
     const mid = E.rollForward(p, -1);
     for (const a of prev.accounts) if (a.type !== 'debt' && a.type !== 'property') a.balance *= 0.78;
@@ -22,7 +26,7 @@ async function prepare(page) {
     h.ws.checkins = [
       E.makeCheckin(prev, 'Base plan', `${prev.startYear}-11-01`),
       E.makeCheckin(mid, 'Base plan', `${mid.startYear}-11-01`),
-      E.makeCheckin(p, 'Base plan', `${p.startYear}-11-01`),
+      E.makeCheckin(p, 'Base plan', p.asOf),
     ];
     h.refresh();
   });
@@ -34,29 +38,40 @@ for (const scheme of ['light', 'dark']) {
     test(`all tabs (${scheme})`, async ({ page }) => {
       const { problems } = await openApp(page);
       await prepare(page);
-      for (const name of TABS) {
-        await tab(page, name);
+      for (const name of VIEWS) {
+        if (name === 'goal') await page.locator('#goalList .gl-row').first().click();
+        else await go(page, name);
         if (name === 'scenarios') {
           await page.click('#sweepRun');
           await expect(page.locator('#sweepResults tbody tr')).toHaveCount(5, { timeout: 30000 });
         }
-        if (name === 'overview' || name === 'goals') {
+        if (name === 'home') {
           await expect(page.locator('#ovGoalStrip .gt-driver').first()).not.toHaveClass(/muted/, { timeout: 30000 });
         }
-        if (name === 'goals') {
-          await expect(page.locator('#driversBody table.heat')).toBeVisible({ timeout: 30000 });
+        if (name === 'goals') await expect(page.locator('#driversBody table.heat')).toBeVisible({ timeout: 30000 });
+        if (name === 'goal') {
+          await expect(page.locator('#gpMoves .divbar').first()).toBeVisible({ timeout: 30000 });
+          await expect(page.locator('#gpHistory .goal-pct')).toBeVisible({ timeout: 15000 });
+        }
+        if (name === 'scenarios') {
           await page.locator('#expLevers input[aria-label="Share of surplus to overpay"]').fill('50');
           await expect(page.locator('#expImpact')).toContainText('▲', { timeout: 15000 });
         }
         await page.waitForTimeout(300);
-        await page.screenshot({ path: path.join(OUT, `${scheme}-${name}.png`), fullPage: name !== 'plan' });
+        await page.screenshot({ path: path.join(OUT, `${scheme}-${name.replace('/', '-')}.png`), fullPage: true });
       }
-      await tab(page, 'plan');
+      await go(page, 'home');
+      await page.click('#updateBtn');
+      await page.locator('#udBody .rv-row').nth(4).locator('input').fill('70000');
+      await page.waitForTimeout(150);
+      await page.screenshot({ path: path.join(OUT, `${scheme}-update-balances.png`) });
+      await page.click('#udCancel');
+      await go(page, 'money/spending');
       await page.click('#sec-expenses button:has-text("Spending check-up")');
       await page.waitForTimeout(200);
       await page.screenshot({ path: path.join(OUT, `${scheme}-wizard.png`) });
       await page.click('#wizClose');
-      await tab(page, 'goals');
+      await go(page, 'goals');
       await page.click('#addGoalBtn');
       await page.click('.goal-option:has-text("Mortgage-free")');
       await page.click('#gwNext');
@@ -85,20 +100,16 @@ for (const scheme of ['light', 'dark']) {
       await page.locator('#lwBody input[aria-label="Child 2 age"]').fill('4');
       await page.screenshot({ path: path.join(OUT, `${scheme}-life-checkup.png`) });
       await page.click('#lwClose');
-      await tab(page, 'workings');
-      await page.click('#wkNav button:has-text("Tax")');
-      await page.waitForTimeout(200);
-      await page.screenshot({ path: path.join(OUT, `${scheme}-workings-tax.png`), fullPage: true });
 
       // Every chart has a table view.
-      await tab(page, 'overview');
+      await go(page, 'home');
       await page.locator('#ovChart .chart-tools button:has-text("Table")').click();
       await page.locator('#ovChart').scrollIntoViewIfNeeded();
       await page.locator('#ovChart').locator('..').screenshot({ path: path.join(OUT, `${scheme}-chart-table.png`) });
       await page.locator('#ovChart .chart-tools button:has-text("Chart")').click();
 
       // Spending check-up with typical ranges.
-      await tab(page, 'plan');
+      await go(page, 'money/spending');
       await page.click('#sec-expenses button:has-text("Spending check-up")');
       await page.locator('#wizBody .wiz-q').filter({ hasText: 'Gas & electricity' }).locator('input').fill('240');
       await page.waitForTimeout(150);
@@ -109,7 +120,7 @@ for (const scheme of ['light', 'dark']) {
       await page.click('#wizClose');
 
       // Yearly review.
-      await tab(page, 'progress');
+      await go(page, 'review');
       await page.click('#reviewBtn');
       await page.click('#rvBody .goal-option >> nth=0');
       await page.waitForTimeout(150);
@@ -134,7 +145,7 @@ for (const scheme of ['light', 'dark']) {
       await page.click('#rvSave');
       await expect(page.locator('#reviewWiz')).toBeHidden({ timeout: 30000 });
       await page.waitForTimeout(200);
-      await page.screenshot({ path: path.join(OUT, `${scheme}-progress-after-review.png`), fullPage: true });
+      await page.screenshot({ path: path.join(OUT, `${scheme}-review-after.png`), fullPage: true });
       expect(problems).toEqual([]);
     });
   });
@@ -142,16 +153,20 @@ for (const scheme of ['light', 'dark']) {
 
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
-  test('overview and plan on a phone', async ({ page }) => {
+  test('home, a goal, money and the review on a phone', async ({ page }) => {
     const { problems } = await openApp(page);
-    await page.screenshot({ path: path.join(OUT, 'phone-overview.png'), fullPage: true });
-    await tab(page, 'plan');
-    await page.screenshot({ path: path.join(OUT, 'phone-plan.png') });
-    await page.locator('#sec-expenses').scrollIntoViewIfNeeded();
+    await prepare(page);
+    await page.screenshot({ path: path.join(OUT, 'phone-home.png'), fullPage: true });
+    await page.locator('#ovGoalStrip .goal-tile').first().click();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(OUT, 'phone-goal.png'), fullPage: true });
+    await go(page, 'money/portfolio');
+    await page.screenshot({ path: path.join(OUT, 'phone-money.png') });
+    await go(page, 'money/spending');
     await page.screenshot({ path: path.join(OUT, 'phone-spending.png') });
-    await tab(page, 'cashflow');
+    await go(page, 'money/cashflow');
     await page.screenshot({ path: path.join(OUT, 'phone-cashflow.png') });
-    await tab(page, 'progress');
+    await go(page, 'review');
     await page.click('#reviewBtn');
     await page.click('#rvNext');
     await page.screenshot({ path: path.join(OUT, 'phone-review.png') });

@@ -43,7 +43,7 @@
   const plain = v => (Number(v) || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 });
   const pct = v => `${Math.round(v * 100)}%`;
   const pct1 = v => `${(Math.round(v * 1000) / 10).toFixed(1)}%`;
-  const today = () => new Date().toISOString().slice(0, 10);
+  const today = () => E.todayISO();
 
   function parseAmount(s) {
     let t = String(s).trim().toLowerCase().replace(/[£,\s]/g, '');
@@ -89,6 +89,7 @@
       warnings: E.validatePlan(p),
       monthly: E.monthlyPlan(proj),
       goals: E.evaluateGoals(p, proj, mc, { runs: 500, seed: ws.settings.seed }),
+      est: RV.estimateAt(p, today(), proj),
     };
   }
 
@@ -294,27 +295,12 @@
 
   // ------------------------------------------------------------------ status & warnings
 
-  function renderStatus() {
-    const { mc, proj, monthly, goals } = model;
-    const strip = $('#statusStrip');
-    const s = statusFor(mc.successRate);
-    const onTrack = goals.filter(g => g.status === 'good').length;
-    strip.replaceChildren(...[
-      h('span', { class: `status ${s.cls}` }, icon(s.icon), h('strong', {}, pct(mc.successRate)), ' chance of success'),
-      h('span', {}, 'Net worth today ', h('strong', {}, money(proj.rows[0].netWorth))),
-      goals.length ? h('span', {}, 'Goals likely ', h('strong', {}, `${onTrack} of ${goals.length}`)) : null,
-      monthly.shortfall > 0
-        ? h('span', {}, 'Drawing ', h('strong', {}, `${money(monthly.shortfall)}/month`), ' from savings')
-        : h('span', {}, 'Invest ', h('strong', {}, `${money(monthly.invest)}/month`), ' this year'),
-   ].filter(Boolean));
-  }
-
   function renderWarnings() {
     const box = $('#warnings');
     const list = model.warnings.slice();
     const due = RV.due(ws);
     const out = [];
-    if (due.due) {
+    if (due.due && route.tab === 'home') {
       out.push(h('div', { class: 'banner review-due', role: 'note' },
         h('span', { class: 'banner-ico' }, glyph('review')),
         h('div', {},
@@ -344,11 +330,6 @@
     return list.sort((a, b) => a.year - b.year);
   }
 
-  // The headline goal: the first amount goal, else the first goal of any kind.
-  function headlineGoal() {
-    return model.goals.find(g => g.goal.type === 'netWorth') || model.goals[0] || null;
-  }
-
   // Every goal has its own colour (a fixed palette slot) and an icon badge.
   const goalColor = g => SERIES_COLORS[g && g.color >= 0 ? g.color % 8 : 0];
   const ICON_GLYPH = { retire: 'retire', shield: 'shield', debt: 'debt', goal: 'goal', piggy: 'piggy', sp: 'sp', star: 'fi', home: 'home', cap: 'cap', gift: 'gift', heart: 'heart' };
@@ -372,48 +353,125 @@
     return svg;
   }
 
-  function renderHero() {
-    const { proj, monthly } = model;
-    const r0 = proj.rows[0];
+  // ---- dates: the plan's figures are "as at" a date; estimates move them on to any other
+
+  const fmtDate = s => { const d = new Date(`${s}T12:00:00`); return Number.isNaN(+d) ? s : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
+  const asOf = () => E.asOfDate(plan());
+  // Every account's estimated value today (from the figures date, or a reading since).
+  const estimateToday = () => model.est;
+  const sinceText = days => (days <= 0 ? 'today' : days === 1 ? 'yesterday' : days < 60 ? `${days} days ago` : `${Math.round(days / 30.4)} months ago`);
+  const daysSince = d => Math.round((Date.parse(today()) - Date.parse(d)) / 864e5);
+
+  // ---- home: your portfolio today
+
+  const PF_GROUPS = [
+    { key: 'cash', label: 'Cash', color: '--s1' },
+    { key: 'isa', label: 'ISAs', color: '--s2' },
+    { key: 'gia', label: 'General investment', color: '--s3' },
+    { key: 'pension', label: 'Pensions', color: '--s4' },
+    { key: 'bonds', label: 'Bonds & gilts', color: '--s5' },
+    { key: 'property', label: 'Property', color: '--s6' },
+    { key: 'debt', label: 'Mortgage & loans', color: '--s8' },
+  ];
+
+  function sourceChip(est, a) {
+    const src = est.source[a.id];
+    const r = est.reading[a.id];
+    if (src === 'updated') return h('span', { class: 'src updated' }, glyph('good'), 'Updated today');
+    if (src === 'updatedEstimate') return h('span', { class: 'src updated', title: `You entered ${money(r.value)} on ${fmtDate(r.date)}; moved on since as the plan expects.` }, glyph('good'), `Updated ${fmtDate(r.date)}`);
+    if (src === 'figures') return h('span', { class: 'src' }, `As at ${fmtDate(est.asOf)}`);
+    return h('span', { class: 'src est', title: `Your figure on ${fmtDate(est.asOf)} was ${money(a.balance)}; moved on the way the plan expects, on average returns.` }, glyph('clock'), 'Estimated');
+  }
+
+  function renderPortfolio() {
     const p = plan();
-    const last = ws.checkins.filter(c => c.year < p.startYear).sort((a, b) => a.year - b.year).pop();
-    const delta = last ? r0.netWorth - last.actual.netWorth : null;
-    const parts = [
-      ['Savings & investments', r0.cash + r0.isa + r0.gia + r0.bonds, '--s2'],
-      ['Pensions', r0.pension, '--s4'],
-      ['Property', r0.property, '--s6'],
-      ['Mortgage & loans', -r0.debt, '--s8'],
-    ].filter(x => Math.abs(x[1]) > 0.5);
-    $('#heroMain').replaceChildren(...[
-      h('p', { class: 'eyebrow' }, `${p.startYear} · ${agesAt(0)}`),
-      h('div', { class: 'hero-label' }, 'Net worth today'),
-      h('div', { class: 'hero-value' }, money(r0.netWorth)),
-      delta != null
-        ? h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph('trend'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your ${last.year} check-in`)
-        : null,
-      h('ul', { class: 'hero-parts' }, parts.map(([k, v, c]) => h('li', {}, h('i', { class: 'key square', style: `--key:${cssVar(c)}` }), h('span', {}, k), h('strong', {}, money(v)))))].filter(Boolean));
+    const est = estimateToday();
+    const box = $('#homePortfolio');
+    const last = ws.checkins.filter(c => c.date < today()).sort((a, b) => a.date.localeCompare(b.date)).pop();
+    const delta = last ? est.netWorth - last.actual.netWorth : null;
+    const assets = PF_GROUPS.filter(g => g.key !== 'debt' && est.byType[g.key] > 0.5);
+    const totalAssets = assets.reduce((s, g) => s + est.byType[g.key], 0);
+    const debt = est.byType.debt || 0;
+    const scale = Math.max(1, totalAssets);
+    const bar = h('div', { class: 'pf-bar', role: 'img', 'aria-label': `Assets ${money(totalAssets)}, owed ${money(debt)}` },
+      h('div', { class: 'pf-track' }, assets.map(g => h('span', { style: `width:${(est.byType[g.key] / scale) * 100}%;--key:${cssVar(g.color)}`, title: `${g.label}: ${money(est.byType[g.key])}` }))),
+      debt > 0.5 ? h('div', { class: 'pf-track owed' }, h('span', { style: `width:${Math.min(100, (debt / scale) * 100)}%;--key:${cssVar('--s8')}`, title: `Mortgage & loans: ${money(debt)}` })) : null);
+    const keyList = h('ul', { class: 'pf-keys' }, PF_GROUPS.filter(g => est.byType[g.key] > 0.5).map(g => h('li', {},
+      h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }), h('span', {}, g.label), h('strong', {}, `${g.key === 'debt' ? '−' : ''}${money(est.byType[g.key])}`))));
 
-    // Sparkline: net worth over the next 15 years.
-    const N = Math.min(proj.pre.N, 15);
-    const xs = proj.pre.years.slice(0, N + 1);
-    const nw = proj.rows.slice(0, N + 1).map((r, t) => D(r.netWorth, t));
-    if (!charts.heroSpark) charts.heroSpark = new Chart($('#heroSpark'), { height: 64, spark: true, label: 'Net worth over the next 15 years' });
-    charts.heroSpark.set({
-      xs, lines: [{ label: 'Net worth', color: '--accent', values: nw, area: true }],
-      tooltip: i => ({ title: titleAt(i), rows: [{ label: 'Net worth', color: '--accent', shape: 'line', text: money(nw[i]) }] }),
-    });
-    $('#heroSparkNote').textContent = `Next ${N} years on average returns, ${unitLabel()}. Hover for each year.`;
+    // Accounts, grouped by type.
+    const order = PF_GROUPS.map(g => g.key);
+    const typeOf = a => (a.type === 'lisa' ? 'isa' : a.type);
+    const accounts = p.accounts.slice().sort((a, b) => order.indexOf(typeOf(a)) - order.indexOf(typeOf(b)));
+    const owner = a => (a.owner === 'joint' ? 'Joint' : (people()[E.personIndex(p, a.owner)] || {}).name || '');
+    const list = h('div', { class: 'pf-list', role: 'table', 'aria-label': 'Accounts, estimated today' },
+      h('div', { class: 'pf-row head', role: 'row' }, h('span', { role: 'columnheader' }, 'Account'), h('span', { role: 'columnheader' }, `On ${fmtDate(est.asOf)}`), h('span', { role: 'columnheader' }, 'Today'), h('span', { role: 'columnheader' }, '')),
+      accounts.map(a => {
+        const v = est.byId[a.id];
+        const debtish = a.type === 'debt';
+        const change = v - a.balance;
+        return h('div', { class: `pf-row${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, style: `--item-color:${cssVar(TYPE_COLOR[a.type])}` },
+          h('span', { class: 'pf-name', role: 'cell' }, h('strong', {}, a.name), h('small', {}, [ACCOUNT_LABELS[a.type], owner(a), a.excluded ? 'not counted' : ''].filter(Boolean).join(' · '))),
+          h('span', { class: 'pf-was', role: 'cell' }, `${debtish ? '−' : ''}${money(a.balance)}`),
+          h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, `${debtish ? '−' : ''}${money(v)}`),
+            Math.abs(change) >= 1 ? h('small', { class: (change > 0) !== debtish ? 'pos' : 'neg' }, `${change > 0 ? '+' : '−'}${money(Math.abs(change))}`) : null),
+          h('span', { class: 'pf-src', role: 'cell' }, sourceChip(est, a)));
+      }));
+    const readings = Object.keys(est.reading).length;
+    const days = daysSince(est.asOf);
+    box.replaceChildren(...[
+      h('div', { class: 'card-head' },
+        h('div', {}, h('p', { class: 'eyebrow' }, `Today · ${agesAt(0)}`), h('h2', { id: 'pfTitle' }, 'Your portfolio'),
+          h('p', { class: 'sub' }, days > 0
+            ? `Estimated for today from your figures as at ${fmtDate(est.asOf)} (${sinceText(days)}), on average returns${readings ? `, with ${readings} balance${readings === 1 ? '' : 's'} you updated since` : ''}.`
+            : `Your figures as at ${fmtDate(est.asOf)}. From here Horizon estimates each balance until your next review.`)),
+        h('div', { class: 'controls' },
+          h('button', { type: 'button', class: 'btn small', onclick: () => navigate('money/portfolio') }, 'Edit accounts'),
+          h('button', { type: 'button', class: 'btn small primary', id: 'updateBtn', onclick: openUpdate }, 'Update balances'))),
+      h('div', { class: 'pf-top' },
+        h('div', { class: 'pf-total' },
+          h('div', { class: 'hero-label' }, 'Net worth today'),
+          h('div', { class: 'hero-value' }, money(est.netWorth)),
+          delta != null && Math.abs(delta) >= 1 ? h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your ${fmtDate(last.date)} ${last.scenarioName === 'Manual' ? 'record' : 'review'}`) : null),
+        h('div', { class: 'pf-mix' }, bar, keyList)),
+      list,
+      readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null,
+    ].filter(Boolean));
+  }
 
-    const upcoming = allMilestones().filter(m => m.year >= p.startYear).slice(0, 3);
-    $('#heroNext').replaceChildren(
-      h('div', { class: 'hero-label' }, 'Coming up'),
+  // ---- home: this year (what to do now and what is coming)
+
+  function renderHomeYear() {
+    const { monthly } = model;
+    const p = plan();
+    const due = RV.due(ws);
+    const upcoming = allMilestones().filter(m => m.year >= p.startYear).slice(0, 4);
+    const breakdown = items => h('ul', { class: 'breakdown' }, items.filter(Boolean).map(([k, v]) => h('li', {}, h('span', {}, k), h('span', {}, v))));
+    const nextReview = due.due ? `now (${due.year})` : `October ${due.next}`;
+    const saved = ws.settings.lastSaved;
+    $('#homeYear').replaceChildren(
+      h('h2', {}, 'This year'),
+      monthly.shortfall > 0
+        ? h('div', { class: 'year-figure neg' }, h('span', { class: 'hero-label' }, 'Drawing from savings'), h('strong', {}, `${money(monthly.shortfall)} a month`), h('p', { class: 'note' }, 'Spending is higher than income, so this comes out of savings.'))
+        : h('div', { class: 'year-figure' }, h('span', { class: 'hero-label' }, 'Invest each month'), h('strong', {}, money(monthly.surplus)),
+          breakdown([
+            monthly.lisa > 0.5 && ['Into Lifetime ISAs (+25% bonus)', money(monthly.lisa)],
+            monthly.isa > 0.5 && ['Into ISAs', money(monthly.isa)],
+            monthly.gia > 0.5 && ['Into general investment', money(monthly.gia)],
+            monthly.overpay > 0.5 && ['Mortgage overpayment', money(monthly.overpay)],
+            monthly.cash > 0.5 && ['Top up cash buffer', money(monthly.cash)],
+            ['Pensions via payroll', money(monthly.pension)],
+          ])),
+      h('h3', { class: 'chart-title' }, 'Coming up'),
       h('ul', { class: 'next-list' }, upcoming.map(m => h('li', { style: `--mc:${cssVar(m.goal ? goalColor(m.goal) : MILESTONE_COLOR[m.kind] || '--muted')}` },
         h('span', { class: 'tl-dot small' }, glyph(m.goal ? ICON_GLYPH[m.goal.icon] || 'goal' : m.kind)),
         h('span', {}, m.short || m.label),
         h('strong', {}, m.year === p.startYear ? 'this year' : `in ${m.year - p.startYear} yr${m.year - p.startYear === 1 ? '' : 's'}`)))),
-      monthly.shortfall > 0
-        ? h('p', { class: 'hero-pill neg' }, `Drawing ${money(monthly.shortfall)}/month from savings`)
-        : h('p', { class: 'hero-pill' }, 'Invest ', h('strong', {}, `${money(monthly.invest)}/month`), ' this year'));
+      h('div', { class: 'year-actions' },
+        h('div', {}, h('span', { class: 'rv-k' }, 'Next yearly review'), h('strong', {}, nextReview),
+          due.due ? h('button', { type: 'button', class: 'btn small primary', onclick: () => openReview() }, 'Start review') : h('button', { type: 'button', class: 'btn small ghost', onclick: () => navigate('review') }, 'About the review')),
+        h('div', {}, h('span', { class: 'rv-k' }, 'Saved to a file'), h('strong', {}, saved ? fmtDate(saved) : 'Not yet'),
+          h('button', { type: 'button', class: 'btn small ghost', onclick: exportFile, title: 'Keep a copy, or move your plan to another computer' }, 'Save to a file'))));
   }
 
   function renderTimeline() {
@@ -444,10 +502,9 @@
     if (a === 'spending') return openWizard();
     if (a === 'review') return openReview();
     if (a === 'emergency') return openGoalWizard(null, 'emergency');
-    if (a === 'explorer') { showTab('goals'); $('#explorer').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-    showTab('plan');
-    const sec = $(`#sec-${a}`);
-    if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (a === 'explorer') { navigate('scenarios'); requestAnimationFrame(() => $('#explorer').scrollIntoView({ behavior: 'smooth', block: 'start' })); return; }
+    navigate(a === 'accounts' ? 'money/portfolio' : 'money/assumptions');
+    requestAnimationFrame(() => { const sec = $(`#sec-${a}`); if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   }
 
   function renderInsights() {
@@ -455,7 +512,7 @@
     const every = B.insights(plan(), model.proj);
     const all = every.filter(i => !hidden.has(i.id));
     const gone = every.filter(i => hidden.has(i.id));
-    const shown = insightsAll ? all : all.slice(0, 6);
+    const shown = insightsAll ? all : all.slice(0, 4);
     const toneLabel = { warn: 'Needs attention', tip: 'Tip', good: 'Looks good', info: 'For information' };
     const setHidden = (id, on) => {
       ws.dismissed = on ? [...new Set(ws.dismissed.concat([id]))] : ws.dismissed.filter(x => x !== id);
@@ -464,7 +521,7 @@
     };
     $('#ovInsights').replaceChildren(...[
       h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Worth a look'),
-        h('p', { class: 'sub' }, `A quick check of this plan against common UK rules of thumb and ${R.TAX_YEAR} rules. A starting point for your own research, not financial advice.`))),
+        h('p', { class: 'sub' }, `A quick check against common UK rules of thumb and ${R.TAX_YEAR} rules. A starting point for your own research, not financial advice.`))),
       h('ul', { class: 'insights' }, shown.map(i => h('li', { class: `insight ${i.tone}`, 'data-insight': i.id },
         h('span', { class: 'ins-ico' }, glyph(i.tone)),
         h('div', { class: 'ins-body' }, h('span', { class: 'sr-only' }, `${toneLabel[i.tone]}: `), h('strong', {}, i.title), h('p', {}, i.text)),
@@ -472,7 +529,7 @@
           i.action ? h('button', { type: 'button', class: 'btn small', onclick: () => insightAction(i.action) }, ACTION_LABEL[i.action]) : null,
           i.tone !== 'good' ? h('button', { type: 'button', class: 'btn small ghost', title: 'Already doing this, or not relevant: hide it', 'aria-label': `Hide: ${i.title}`, onclick: () => setHidden(i.id, true) }, 'Already sorted') : null)))),
       h('div', { class: 'add-row' },
-        all.length > 6 ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => { insightsAll = !insightsAll; renderInsights(); } }, insightsAll ? 'Show fewer' : `Show all ${all.length}`) : null,
+        all.length > 4 ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => { insightsAll = !insightsAll; renderInsights(); } }, insightsAll ? 'Show fewer' : `Show all ${all.length}`) : null,
         gone.length ? h('button', { type: 'button', class: 'btn small ghost', 'aria-expanded': String(insightsHidden), onclick: () => { insightsHidden = !insightsHidden; renderInsights(); } }, insightsHidden ? 'Hide sorted items' : `${gone.length} marked as sorted`) : null),
       insightsHidden && gone.length ? h('ul', { class: 'insights sorted' }, gone.map(i => h('li', { class: 'insight sorted' },
         h('span', { class: 'ins-ico' }, glyph('good')),
@@ -480,60 +537,26 @@
         h('div', { class: 'ins-actions' }, h('button', { type: 'button', class: 'btn small ghost', onclick: () => setHidden(i.id, false) }, 'Show again'))))) : null].filter(Boolean));
   }
 
-  function renderOverview() {
-    const { proj, mc, monthly, goals } = model;
-    const rows = proj.rows;
-    const tr = retireT();
-    const p1 = people()[0];
-    const breakdown = items => h('ul', { class: 'breakdown' }, items.filter(Boolean).map(([k, v]) => h('li', {}, h('span', {}, k), h('span', {}, v))));
-
-    renderHero();
-    $('#ovTiles').replaceChildren(
-      tile('Chance of success', pct(mc.successRate), [
-        badge(statusFor(mc.successRate)),
-        h('div', { class: 'meter', role: 'img', 'aria-label': `${pct(mc.successRate)} of simulations stayed funded` }, h('span', { style: `width:${mc.successRate * 100}%` })),
-        h('p', { class: 'note' }, `${(mc.runs - mc.fails).toLocaleString('en-GB')} of ${mc.runs.toLocaleString('en-GB')} simulated futures never ran out of money.`),
-      ], true),
-      monthly.shortfall > 0
-        ? tile('This year: monthly shortfall', money(monthly.shortfall), h('p', { class: 'note' }, 'Spending is higher than income, so this comes out of savings each month.'))
-        : tile('Invest each month this year', money(monthly.surplus), breakdown([
-          monthly.lisa > 0.5 && ['Into Lifetime ISAs (+25% bonus)', money(monthly.lisa)],
-          monthly.isa > 0.5 && ['Into ISAs', money(monthly.isa)],
-          monthly.gia > 0.5 && ['Into general investment', money(monthly.gia)],
-          monthly.overpay > 0.5 && ['Mortgage overpayment', money(monthly.overpay)],
-          monthly.cash > 0.5 && ['Top up cash buffer', money(monthly.cash)],
-          ['Pensions via payroll', money(monthly.pension)],
-        ])),
-      (() => {
-        const free = E.debtFreeYear(proj);
-        if (rows[0].debt > 0.5) return tile('Mortgage-free', free ? String(free) : 'Not in the plan', h('p', { class: 'note' }, free ? `On average returns, ${agesAt(tIndexOfYear(free))}. ${pct(mc.debtFreeByYear[tIndexOfYear(free)])} of simulations by then.` : 'Payments do not clear it within the plan.'));
-        const fi = model.milestones.find(m => m.kind === 'fi');
-        return tile('Financially independent', fi ? String(fi.year) : 'Not yet', h('p', { class: 'note' }, 'When savings, investments and pensions reach 25 times a year of spending.'));
-      })(),
-      tile(`At retirement (${model.proj.pre.years[tr]})`, money(D(rows[tr].liquid, tr)), h('p', { class: 'note' }, `Savings, investments and pensions, in ${unitLabel()}.`)),
-    );
-
+  // The projection by account type, with goal markers (home page).
+  function renderHomeChart() {
+    const rows = model.proj.rows;
     const xs = model.proj.pre.years;
     const col = key => rows.map((r, t) => D(r[key], t));
     const bars = ACCOUNT_SERIES.map(s => ({ ...s, values: col(s.key) })).filter(s => s.values.some(v => v > 0.5));
     if (rows.some(r => r.debt > 0.5)) bars.push({ key: 'debt', label: 'Mortgage & loans', color: '--s8', values: rows.map((r, t) => -D(r.debt, t)) });
     if (rows.some(r => r.shortfall > 0.5)) bars.push({ key: 'short', label: 'Unfunded spending', color: '--muted', values: rows.map((r, t) => -D(r.shortfall, t)) });
     const nw = col('netWorth');
-    // Markers: retirements, mortgage-free and the headline goal; a line at the goal amount
-    // when it measures total net worth in the units shown.
-    const ms = allMilestones();
     const markers = [];
     const seen = new Set();
-    for (const m of ms) {
+    for (const m of allMilestones()) {
       if (!['retire', 'debt', 'goal'].includes(m.kind) || seen.has(m.kind + m.year)) continue;
       seen.add(m.kind + m.year);
       markers.push({ x: m.year, label: m.kind === 'goal' ? m.short : m.label, color: m.goal ? goalColor(m.goal) : MILESTONE_COLOR[m.kind] });
     }
-    const hg = headlineGoal();
-    const refLines = hg && hg.goal.type === 'netWorth' && hg.goal.measure === 'all' && (hg.goal.basis === 'real') === real()
-      ? [{ y: hg.goal.amount, label: `${fmtCompact(hg.goal.amount)} goal` }] : [];
+    const hg = model.goals.find(g => g.goal.type === 'netWorth' && g.goal.measure === 'all' && (g.goal.basis === 'real') === real());
+    const refLines = hg ? [{ y: hg.goal.amount, label: `${fmtCompact(hg.goal.amount)} goal` }] : [];
     const ovCols = ['cash', 'isa', 'gia', 'pension', 'bonds', 'property'];
-    chart('ovChart', 340, 'Net worth by account type over time').set({
+    chart('ovChart', 320, 'Net worth by account type over time').set({
       xs, bars, markers, refLines,
       lines: [{ label: 'Net worth', color: '--text', values: nw }],
       tooltip: i => ({
@@ -549,12 +572,16 @@
         formats: [String, String, money, money, money, money, money, money, money, money],
       }),
     });
-    $('#ovChartSub').textContent = `Average returns, in ${unitLabel()}. Hover a year for details, click the legend to hide a series, or switch to Table for every number.`;
+    $('#ovChartSub').textContent = `Net worth by account type on average returns, from your figures as at ${fmtDate(asOf())}, in ${unitLabel()}. Hover a year, click the legend to hide a series, or switch to Table for every number.`;
     legend($('#ovLegend'), [...bars.map(b => ({ label: b.label, color: b.color })), { label: 'Net worth', color: '--text', shape: 'line' }], charts.ovChart);
+  }
 
-    renderTimeline();
-    renderInsights();
+  function renderHome() {
+    renderPortfolio();
     renderGoalStrip();
+    renderHomeChart();
+    renderHomeYear();
+    renderInsights();
   }
 
   // ---- goals on the Overview: one tile each, in the goal's colour
@@ -576,17 +603,6 @@
     return res.expectedYear ? `Expected ${res.expectedYear}` : 'Not reached on average';
   }
 
-  function openGoalOnTab(id) {
-    showTab('goals');
-    requestAnimationFrame(() => {
-      const card = $(`#goalCards [data-goal="${id}"]`);
-      if (!card) return;
-      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      card.classList.add('flash');
-      setTimeout(() => card.classList.remove('flash'), 1400);
-    });
-  }
-
   function driverLine(goalId) {
     const d = driverSummary(goalId);
     if (!d) return h('p', { class: 'gt-driver muted' }, 'Working out what moves it…');
@@ -598,20 +614,15 @@
 
   function renderGoalStrip() {
     const box = $('#ovGoalStrip');
-    if (!model.goals.length) {
-      const quick = (type, label) => h('button', { type: 'button', class: 'btn small', onclick: () => openGoalWizard(null, type) }, label);
-      box.replaceChildren(h('div', { class: 'goal-empty' }, h('p', {}, 'No goals yet. Most people start with one of these:'),
-        h('div', { class: 'add-row' }, quick('retire', 'Plan your retirement'), quick('emergency', 'Emergency fund'), quick('debtFree', 'Mortgage-free'), quick('fi', 'Financial independence'))));
-      return;
-    }
+    if (!model.goals.length) { box.replaceChildren(goalEmpty()); return; }
     box.replaceChildren(...model.goals.map(res => {
       const g = res.goal;
       const st = goalStatus(res.probability);
       const prog = goalProgress(res);
-      const open = () => openGoalOnTab(g.id);
+      const open = () => navigate(`goal/${g.id}`);
       return h('article', {
         class: 'goal-tile', style: `--gc:${cssVar(goalColor(g))}`, 'data-goal': g.id, tabindex: '0', role: 'button',
-        'aria-label': `${res.title}: ${pct(res.probability)} chance. Open on the Goals tab.`,
+        'aria-label': `${res.title}: ${pct(res.probability)} chance. Open its page.`,
         onclick: open, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } },
       },
       h('div', { class: 'gt-head' }, goalBadge(g),
@@ -634,8 +645,7 @@
 
   function scheduleDrivers() {
     clearTimeout(driverTimer);
-    const tab = currentTab();
-    if (tab !== 'overview' && tab !== 'goals') return;
+    if (route.tab !== 'home' && route.tab !== 'goals') return;
     if (drivers.done && drivers.key === driversKey()) return;
     driverTimer = setTimeout(computeDrivers, 600);
   }
@@ -654,7 +664,12 @@
       else drivers.rows.push({ driver: list[i], after: evalP(SI.variantOf(list[i], p)) });
       i++;
       if (i < list.length) setTimeout(step, 0);
-      else { drivers.done = true; renderGoalStrip(); if (currentTab() === 'goals') { renderDriversCard(); renderGoalCards(); } }
+      else {
+        drivers.done = true;
+        if (route.tab === 'home') renderGoalStrip();
+        if (route.tab === 'goals' && !route.sub) { renderDriversCard(); renderGoalList(); }
+        if (route.tab === 'goals' && route.sub) { const res = model.goals.find(x => x.goal.id === route.sub); if (res) renderGoalMoves(res); }
+      }
     };
     setTimeout(step, 0);
   }
@@ -703,7 +718,7 @@
     const raw = h('div', { class: 'table-wrap' }, table(['Change', ...goals.map(b => b.title)],
       [{ cells: ['Chance now', ...goals.map(b => pct(b.probability))] }].concat(drivers.rows.map(r => ({ cells: [r.driver.label, ...goals.map(b => { const a = r.after.find(x => x.goal.id === b.goal.id); return `${pct(a ? a.probability : 0)} (${Math.round(driverDelta(r, b.goal.id) * 100) >= 0 ? '+' : ''}${Math.round(driverDelta(r, b.goal.id) * 100)})`; })] })))));
     box.replaceChildren(viewToggle(heat, raw),
-      h('p', { class: 'hint' }, `Blue raises a goal’s chance and orange lowers it, in percentage points; darker means a bigger effect. ${DRIVER_RUNS} simulated futures per change, the same markets for each, so the differences come from the change itself. Try any of them for real in “Try changes” below.`));
+      h('p', { class: 'hint' }, `Blue raises a goal’s chance and orange lowers it, in percentage points; darker means a bigger effect. ${DRIVER_RUNS} simulated futures per change, the same markets for each, so the differences come from the change itself. Open a goal to try any of them for real.`));
 
   }
 
@@ -712,49 +727,302 @@
   const GOAL_TYPE_LABEL = { netWorth: 'Reach an amount', debtFree: 'Mortgage-free', retire: 'Retire', passiveIncome: 'Passive income', emergency: 'Emergency fund' };
   let goalSolve = {};
 
-  function renderGoalCards() {
-    const box = $('#goalCards');
-    const p = plan();
-    const cards = model.goals.map(res => {
+  function goalEmpty() {
+    const quick = (type, label) => h('button', { type: 'button', class: 'btn small', onclick: () => openGoalWizard(null, type) }, label);
+    return h('div', { class: 'goal-empty' }, h('p', {}, 'No goals yet. Most people start with one of these:'),
+      h('div', { class: 'add-row' }, quick('retire', 'Plan your retirement'), quick('emergency', 'Emergency fund'), quick('debtFree', 'Mortgage-free'), quick('fi', 'Financial independence')));
+  }
+
+  // The chance of a goal by year: reached by then, covered that year, or (retirement) still funded.
+  const chanceByYear = res => res.byYear || model.mc.fundedByYear;
+  const chanceLabel = g => ({ emergency: 'Covered that year', debtFree: 'Mortgage-free by then', retire: 'Money still lasting' }[g.type] || 'Reached by then');
+
+  function goalProgressBar(prog) {
+    if (!prog || !(prog.target > 0)) return null;
+    return h('div', { class: 'gt-progress' },
+      h('div', { class: 'gt-bar', role: 'img', 'aria-label': `${pct(Math.min(1, prog.cur / prog.target))} of the target today` }, h('span', { style: `width:${Math.min(100, (prog.cur / prog.target) * 100)}%` })),
+      h('span', {}, `${fmtCompact(prog.cur)} of ${fmtCompact(prog.target)}${prog.perYear ? ' a year' : ''} today`));
+  }
+
+  function renderGoalList() {
+    const box = $('#goalList');
+    if (!model.goals.length) { box.replaceChildren(goalEmpty()); return; }
+    box.replaceChildren(...model.goals.map(res => {
       const g = res.goal;
       const st = goalStatus(res.probability);
-      const card = h('article', { class: `goal-card ${st.cls}`, 'data-goal': g.id, style: `--gc:${cssVar(goalColor(g))}` },
-        h('div', { class: 'goal-card-head' }, goalBadge(g), h('div', {},
-          h('div', { class: 'goal-type' }, GOAL_TYPE_LABEL[g.type]),
-          h('h3', {}, res.title),
-          g.name ? h('p', { class: 'note' }, E.autoTitle(g, p)) : null)),
-        h('div', { class: 'goal-figure' }, h('span', { class: 'goal-pct big' }, pct(res.probability)), badge(st)),
-        h('div', { class: 'meter' }, h('span', { style: `width:${res.probability * 100}%` })),
+      const open = () => navigate(`goal/${g.id}`);
+      const spark = h('div', { class: 'gl-spark' });
+      const row = h('article', {
+        class: 'gl-row', style: `--gc:${cssVar(goalColor(g))}`, 'data-goal': g.id, tabindex: '0', role: 'link',
+        'aria-label': `${res.title}: ${pct(res.probability)} chance. Open its page.`,
+        onclick: open, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } },
+      },
+      goalBadge(g),
+      h('div', { class: 'gl-main' },
+        h('div', { class: 'gl-names' }, h('strong', {}, res.title), h('span', {}, g.name ? E.autoTitle(g, plan()) : GOAL_TYPE_LABEL[g.type])),
         h('p', { class: 'note' }, res.summary),
-        res.byYear ? h('div', { class: 'goal-chart' }) : null,
-        driverLine(g.id),
-        h('div', { class: 'goal-solve' }, goalSolve[g.id] || null),
-        h('div', { class: 'goal-actions' },
-          h('button', { type: 'button', class: 'btn small primary', onclick: e => solveGoal(e.currentTarget, res) }, 'What would it take?'),
-          h('button', { type: 'button', class: 'btn small', onclick: () => openGoalWizard(g) }, 'Edit'),
-          h('button', { type: 'button', class: 'btn small ghost', onclick: () => focusExplorer(g.type) }, 'Try levers'),
-          h('button', { type: 'button', class: 'btn small ghost danger', 'aria-label': `Remove goal ${res.title}`, onclick: () => {
-            if (!confirm(`Remove the goal “${res.title}”?`)) return;
-            p.goals = p.goals.filter(x => x.id !== g.id);
-            refresh();
-          } }, 'Remove')));
-      if (res.byYear) {
-        const host = $('.goal-chart', card);
-        const xs = model.mc.years;
-        const c = chartIn(host, 130, `Chance of ${res.title} by year`);
-        c.set({
-          xs, yDomain: [0, 1], yFormat: v => `${Math.round(v * 100)}%`,
-          lines: [{ label: 'Chance reached by', color: goalColor(g), values: res.byYear, area: true }],
-          markers: [{ x: g.year, label: 'Target', color: goalColor(g) }],
-          tooltip: i => ({ title: String(xs[i]), rows: [{ label: g.type === 'emergency' ? 'Covered that year' : 'Reached by then', color: goalColor(g), shape: 'line', text: pct(res.byYear[i]) }] }),
-        });
-      }
-      return card;
+        goalProgressBar(goalProgress(res)),
+        driverLine(g.id)),
+      h('div', { class: 'gl-chance' }, h('span', { class: 'goal-pct' }, pct(res.probability)), badge(st), h('span', { class: 'gt-when' }, goalWhen(res))),
+      spark,
+      h('span', { class: 'gl-open', 'aria-hidden': 'true' }, '›'));
+      const xs = model.mc.years;
+      const ys = chanceByYear(res);
+      const c = new Chart(spark, { height: 54, spark: true, label: `Chance of ${res.title} by year` });
+      c.set({ xs, yDomain: [0, 1], lines: [{ label: chanceLabel(g), color: goalColor(g), values: ys, area: true }],
+        tooltip: i => ({ title: String(xs[i]), rows: [{ label: chanceLabel(g), color: goalColor(g), shape: 'line', text: pct(ys[i]) }] }) });
+      return row;
+    }), h('button', { type: 'button', class: 'gl-row add', onclick: () => openGoalWizard() }, h('span', { class: 'plus' }, '+'),
+      h('span', {}, h('strong', {}, 'Add a goal'), h('span', { class: 'sub' }, ' Retirement, an emergency fund, mortgage-free, a house deposit, financial independence…'))));
+  }
+
+  // ---- one goal's own page
+
+  let gp = null;   // { id, values, open, timer }
+
+  function goalTargetText(res) {
+    const g = res.goal, p1 = people()[0];
+    const basis = g.basis === 'real' ? 'in today’s £' : 'in future £';
+    if (g.type === 'netWorth') return `${money(g.amount)} ${basis} by ${g.year}: ${E.GOAL_MEASURES[g.measure].toLowerCase()}`;
+    if (g.type === 'passiveIncome') return `${money(g.amount)} a year ${basis} by ${g.year}, at ${g.withdrawalRate}% of investments${g.includePensions ? ' including pensions' : ''}`;
+    if (g.type === 'emergency') return `${g.months} months (${money(res.need || 0)} today) by ${g.year}, ${g.counts === 'investments' ? 'counting ISAs and investments' : 'in cash'}`;
+    if (g.type === 'debtFree') return `No mortgage or loans left by ${g.year}`;
+    return `${p1.name} retires at ${g.age} (${res.expectedYear}), with ${g.confidence}% confidence wanted`;
+  }
+
+  function renderGoalPage(id) {
+    const box = $('#goalPage');
+    const res = model.goals.find(x => x.goal.id === id);
+    if (!res) {
+      box.replaceChildren(h('section', { class: 'card' }, h('p', {}, 'This goal is not in the current scenario.'),
+        h('button', { type: 'button', class: 'btn', onclick: () => navigate('goals') }, '‹ All goals')));
+      return;
+    }
+    if (!gp || gp.id !== id) gp = { id, values: null, open: {}, timer: null };
+    const g = res.goal;
+    const st = goalStatus(res.probability);
+    const p = plan();
+    const remove = () => {
+      if (!confirm(`Remove the goal “${res.title}”?`)) return;
+      p.goals = p.goals.filter(x => x.id !== g.id);
+      navigate('goals');
+      refresh();
+    };
+    const hero = h('section', { class: 'card goal-hero', style: `--gc:${cssVar(goalColor(g))}`, 'data-goal': g.id },
+      h('div', { class: 'gh-top' },
+        h('button', { type: 'button', class: 'btn small ghost', onclick: () => navigate('goals') }, '‹ All goals'),
+        h('div', { class: 'controls' },
+          h('button', { type: 'button', class: 'btn small', onclick: () => openGoalWizard(g) }, g.type === 'retire' ? 'Edit retirement plan' : 'Edit goal'),
+          h('button', { type: 'button', class: 'btn small ghost danger', 'aria-label': `Remove goal ${res.title}`, onclick: remove }, 'Remove'))),
+      h('div', { class: 'gh-main' },
+        goalBadge(g, 'large'),
+        h('div', { class: 'gh-names' }, h('p', { class: 'eyebrow' }, GOAL_TYPE_LABEL[g.type]), h('h2', {}, res.title), h('p', { class: 'sub' }, goalTargetText(res))),
+        h('div', { class: 'gh-chance' },
+          h('div', { class: 'ring-wrap' }, ring(res.probability, `${pct(res.probability)} chance`), h('span', { class: 'ring-centre goal-pct' }, pct(res.probability))),
+          badge(st))),
+      h('div', { class: 'gh-facts' },
+        h('div', {}, h('span', { class: 'rv-k' }, 'On average returns'), h('strong', {}, goalWhen(res))),
+        h('div', {}, h('span', { class: 'rv-k' }, 'Chance'), h('strong', {}, `${pct(res.probability)} ${g.type === 'retire' ? 'the money lasts' : `by ${g.year}`}`)),
+        h('div', {}, h('span', { class: 'rv-k' }, 'Measured from'), h('strong', {}, `Your figures as at ${fmtDate(asOf())}`))),
+      goalProgressBar(goalProgress(res)),
+      h('p', { class: 'note' }, res.summary));
+
+    const track = h('section', { class: 'card' });
+    const chance = h('section', { class: 'card' });
+    const hist = h('section', { class: 'card', id: 'gpHistory' }, h('h2', {}, 'If history repeated'), h('p', { class: 'sub working' }, 'Replaying every starting year since 1928…'));
+    const moves = h('section', { class: 'card', id: 'gpMoves' });
+    const take = h('section', { class: 'card', id: 'gpTake' });
+    const levers = h('section', { class: 'card', id: 'gpLevers' });
+    box.replaceChildren(...[hero, track, h('div', { class: 'grid-2' }, chance, hist), g.type === 'retire' ? retireSummary(res) : null, moves, take, levers].filter(Boolean));
+    goalTrackChart(track, res);
+    goalChanceChart(chance, res);
+    renderGoalMoves(res);
+    renderGoalTake(res);
+    renderGoalLevers(res);
+    setTimeout(() => renderGoalHistory(res), 30);
+  }
+
+  // The goal's own measure over time: its range across simulations, the average-returns
+  // path and the target.
+  function goalTrackChart(card, res) {
+    const g = res.goal;
+    const { proj, mc } = model;
+    const rows = proj.rows, pre = proj.pre, N = pre.N;
+    const col = goalColor(g);
+    let bands, expected, target = null, title, sub, len = mc.years.length, marker = { x: g.year, label: 'Target', color: col };
+    const tgt = t => D(g.basis === 'real' ? g.amount * rows[t].deflator : g.amount, t);
+    if (g.type === 'netWorth' || g.type === 'passiveIncome') {
+      bands = mc.goalBands[g.id][view()];
+      expected = rows.map((r, t) => D(g.type === 'passiveIncome' ? E.passiveIncome(r, E.nonWorkIncome(pre, t), g) : E.goalValue(r, g.measure), t));
+      target = rows.map((r, t) => tgt(t));
+      title = g.type === 'passiveIncome' ? 'Passive income it could pay' : E.GOAL_MEASURES[g.measure];
+      sub = g.type === 'passiveIncome' ? `${g.withdrawalRate}% of investments a year plus rent, gifts and pensions being paid, a year, in ${unitLabel()}.` : `In ${unitLabel()}. The target line is ${g.basis === 'real' ? 'in today’s money, so in future pounds it rises with prices' : 'in future pounds'}.`;
+    } else if (g.type === 'emergency') {
+      len = Math.min(len, Math.max(g.year - p0Year() + 6, 12));
+      bands = mc.goalBands[g.id][view()];
+      expected = rows.map((r, t) => D(E.emergencyHave(g, r), t));
+      target = rows.map((r, t) => D(E.emergencyNeed(g, pre, t < N ? r.debtRegular : 0, t), t));
+      title = g.counts === 'investments' ? 'Cash and investments against what you need' : 'Cash against what you need';
+      sub = `What counts towards the fund, against ${g.months} months of spending and mortgage payments, in ${unitLabel()}.`;
+    } else if (g.type === 'debtFree') {
+      bands = mc.series.debt[view()];
+      expected = rows.map((r, t) => D(r.debt, t));
+      title = 'Mortgage and loans still owed';
+      sub = `Interest rates vary after any fixed period, so the payoff date varies too. In ${unitLabel()}.`;
+    } else {
+      bands = mc.series.liquid[view()];
+      expected = rows.map((r, t) => D(r.liquid, t));
+      marker = { x: p0Year() + retireT(), label: 'Retire', color: col };
+      title = 'Savings, investments and pensions';
+      sub = `They grow while you work and pay for retirement after. If they run out, retirement fails in that simulation. In ${unitLabel()}.`;
+    }
+    const cut = a => a.slice(0, len);
+    const xs = cut(mc.years);
+    const b = Object.fromEntries(Object.entries(bands).map(([k, v]) => [k, cut(v)]));
+    const cfg = fanConfig(xs, b, { expected: cut(expected), title: titleAt, color: col, band: col, markers: [marker] });
+    if (target) {
+      const tv = cut(target);
+      const tLabel = g.type === 'emergency' ? 'Needed' : 'Target';
+      cfg.lines.push({ label: tLabel, color: '--text', values: tv, dash: [2, 3] });
+      const baseTip = cfg.tooltip, baseTable = cfg.table;
+      cfg.tooltip = i => { const t = baseTip(i); t.rows.push({ label: tLabel, color: '--text', shape: 'dash', text: money(tv[i]) }); return t; };
+      cfg.table = () => { const t = baseTable(); t.headers.push(tLabel); t.rows.forEach((r, i) => r.push(tv[i])); t.formats.push(money); return t; };
+    }
+    const host = h('div', { class: 'chart' });
+    const lg = h('div', { class: 'legend' });
+    card.replaceChildren(h('h2', {}, 'How it’s tracking'), h('p', { class: 'sub' }, `${title}. ${sub}`), host, lg);
+    const c = new Chart(host, { height: 300, label: `${res.title}: range over time`, name: `goal-${g.id}` });
+    c.set(cfg);
+    legend(lg, [
+      { label: 'Median', color: col, shape: 'line' },
+      { label: 'Average returns', series: 'Expected', color: '--muted', shape: 'dash' },
+      ...(target ? [{ label: g.type === 'emergency' ? 'Needed' : 'Target', color: '--text', shape: 'dash' }] : []),
+      { label: 'Middle half of outcomes', color: col, shape: 'band' },
+      { label: '10th–90th percentile', color: col, shape: 'band' },
+    ], c);
+  }
+
+  const p0Year = () => plan().startYear;
+
+  function goalChanceChart(card, res) {
+    const g = res.goal;
+    const xs = model.mc.years;
+    const ys = chanceByYear(res);
+    const host = h('div', { class: 'chart' });
+    card.replaceChildren(h('h2', {}, g.type === 'retire' ? 'Chance the money lasts, year by year' : g.type === 'emergency' ? 'Chance it is covered, year by year' : 'Chance of reaching it, by year'),
+      h('p', { class: 'sub' }, g.type === 'retire' ? 'Share of simulations with money left in each year.' : g.type === 'emergency' ? 'Share of simulations where what counts covers the need that year.' : 'Share of simulations that have reached it by each year.'), host);
+    new Chart(host, { height: 200, label: `Chance of ${res.title} by year`, name: `goal-chance-${g.id}` }).set({
+      xs, yDomain: [0, 1], yFormat: v => `${Math.round(v * 100)}%`,
+      lines: [{ label: chanceLabel(g), color: goalColor(g), values: ys, area: true }],
+      markers: g.type === 'retire' ? [{ x: p0Year() + retireT(), label: 'Retire', color: goalColor(g) }] : [{ x: g.year, label: 'Target', color: goalColor(g) }],
+      tooltip: i => ({ title: titleAt(i), rows: [{ label: chanceLabel(g), color: goalColor(g), shape: 'line', text: pct(ys[i]) }] }),
     });
-    cards.push(h('button', { type: 'button', class: 'goal-card add', onclick: () => openGoalWizard() },
-      h('span', { class: 'plus' }, '+'), h('span', {}, 'Add a goal'),
-      h('span', { class: 'sub' }, 'Retirement, an emergency fund, mortgage-free, a house deposit, financial independence…')));
-    box.replaceChildren(...cards);
+  }
+
+  function renderGoalHistory(res) {
+    const card = $('#gpHistory');
+    const r = historyRuns();
+    if (!card || !r) { if (card) card.hidden = true; return; }
+    const rate = r.goalRates[res.goal.id] || 0;
+    card.replaceChildren(h('h2', {}, 'If history repeated'),
+      h('div', { class: 'goal-figure' }, h('span', { class: 'goal-pct big' }, pct(rate)), badge(goalStatus(rate))),
+      h('p', { class: 'note' }, `Reached in ${Math.round(rate * r.starts.length)} of ${r.starts.length} starting years since ${r.first}, replaying that period’s real markets with UK inflation. The random simulations give ${pct(res.probability)}.`),
+      h('button', { type: 'button', class: 'btn small ghost', onclick: () => { navigate('outlook'); requestAnimationFrame(() => $('#histCard').scrollIntoView({ behavior: 'smooth', block: 'start' })); } }, 'See every starting year'));
+  }
+
+  // What moves this goal: each typical change, in percentage points.
+  function renderGoalMoves(res) {
+    const card = $('#gpMoves');
+    if (!card) return;
+    const head = [h('h2', {}, 'What moves it'), h('p', { class: 'sub' }, 'How much each change would raise or lower this goal’s chance, in percentage points. Choices you control, then risks.')];
+    if (!drivers.done || drivers.key !== driversKey()) {
+      card.replaceChildren(...head, h('p', { class: 'sub working' }, `Working it out: each change is simulated across ${DRIVER_RUNS} futures…`));
+      scheduleDrivers();
+      return;
+    }
+    const b = drivers.base.find(x => x.goal.id === res.goal.id);
+    const rows = drivers.rows.map(r => {
+      const a = r.after.find(x => x.goal.id === res.goal.id);
+      return { label: r.driver.label, kind: r.driver.kind, before: b ? b.probability : 0, after: a ? a.probability : 0, pts: Math.round(driverDelta(r, res.goal.id) * 100) };
+    });
+    const max = Math.max(5, ...rows.map(r => Math.abs(r.pts)));
+    const bars = h('div', { class: 'divbars', role: 'list' }, rows.map(r => {
+      const w = r.pts === 0 ? 0 : Math.max(0.5, (Math.abs(r.pts) / max) * 50);
+      return h('div', { class: 'divbar', role: 'listitem', tabindex: '0', title: `${r.label}: ${pct(r.before)} → ${pct(r.after)}` },
+        h('span', { class: 'db-label' }, h('span', { class: `kind ${r.kind}` }, r.kind === 'risk' ? 'Risk' : 'Choice'), r.label),
+        h('span', { class: 'db-track' }, h('span', { class: 'db-mid' }), h('span', { class: `db-bar ${r.pts >= 0 ? 'pos' : 'neg'}`, style: `${r.pts >= 0 ? 'left' : 'right'}:50%;width:${w}%` })),
+        h('span', { class: `db-val${r.pts === 0 ? ' flat' : ''}` }, r.pts === 0 ? 'No change' : `${r.pts > 0 ? '+' : '−'}${Math.abs(r.pts)} pts`));
+    }));
+    const tbl = h('div', { class: 'table-wrap' }, table(['Change', 'Chance now', 'With the change', 'Points'], rows.map(r => ({ cells: [r.label, pct(r.before), pct(r.after), { text: `${r.pts > 0 ? '+' : ''}${r.pts}`, cls: r.pts > 0 ? 'pos' : r.pts < 0 ? 'neg' : '' }] }))));
+    card.replaceChildren(...head, viewToggle(bars, tbl),
+      h('p', { class: 'hint' }, `${DRIVER_RUNS} simulated futures per change, the same markets for each. Try them for real below.`));
+  }
+
+  function renderGoalTake(res) {
+    const card = $('#gpTake');
+    if (!card) return;
+    card.replaceChildren(h('div', { class: 'card-head' },
+      h('div', {}, h('h2', {}, 'What would it take?'), h('p', { class: 'sub' }, { debtFree: 'The share of your surplus to overpay to clear it by the target year.', emergency: 'The cash buffer that covers it.', netWorth: 'How much less to spend each month before retirement.', passiveIncome: 'How much less to spend each month before retirement.', retire: 'The earliest you could retire, and what you could spend, at your chosen confidence.' }[res.goal.type])),
+      h('button', { type: 'button', class: 'btn small primary', onclick: e => solveGoal(e.currentTarget, res) }, 'Work it out')),
+    h('div', { class: 'goal-solve' }, goalSolve[res.goal.id] || null));
+  }
+
+  // Levers for this goal, with the effect on every goal (the trade-offs).
+  function renderGoalLevers(res) {
+    const card = $('#gpLevers');
+    if (!card) return;
+    const groups = L.GOAL_GROUPS[res.goal.type] || [];
+    groups.forEach((k, i) => { if (gp.open[k] === undefined) gp.open[k] = i === 0; });
+    if (!gp.values) gp.values = L.currentValues(plan());
+    const status = h('p', { class: 'sub', id: 'gpStatus', role: 'status' });
+    const impact = h('div', { id: 'gpImpact' });
+    const apply = h('button', { type: 'button', class: 'btn small primary', id: 'gpApply', onclick: () => applyExplorer(false, gp.values) }, 'Apply to plan');
+    const asScen = h('button', { type: 'button', class: 'btn small', id: 'gpScenario', onclick: () => applyExplorer(true, gp.values) }, 'Save as new scenario');
+    card.replaceChildren(h('div', { class: 'card-head' },
+      h('div', {}, h('h2', {}, 'Try changes'), h('p', { class: 'sub' }, 'The levers that matter most for this goal. Each one moves your other goals too: the table shows the trade-offs. Nothing changes until you apply it.')),
+      h('div', { class: 'controls' }, h('button', { type: 'button', class: 'btn small', onclick: () => { gp.values = null; renderGoalLevers(res); } }, 'Reset'), asScen, apply)),
+    h('div', { class: 'explorer in-wizard' },
+      h('div', { class: 'explorer-levers' }, leverGroups(groups.concat(['stress']), gp.values, scheduleGoalTry, gp.open)),
+      h('div', { class: 'explorer-results' }, status, impact)));
+    updateGoalTry();
+  }
+
+  function scheduleGoalTry() {
+    const st = $('#gpStatus');
+    if (st) st.textContent = 'Updating…';
+    clearTimeout(gp.timer);
+    gp.timer = setTimeout(updateGoalTry, 250);
+  }
+
+  function updateGoalTry() {
+    if (!gp || !$('#gpImpact')) return;
+    const changed = L.changed(plan(), gp.values);
+    const before = baseComparison();
+    const after = changed.length ? evaluatePlan(L.apply(plan(), gp.values)) : before;
+    $('#gpImpact').replaceChildren(impactTable({ before, after }));
+    $('#gpStatus').textContent = changed.length
+      ? `${changed.length} change${changed.length === 1 ? '' : 's'}: ${changed.map(d => `${d.label} ${fmtLever(d, gp.values[d.key])}`).join(' · ')}.`
+      : `Move a slider to compare. ${EXPLORE_RUNS} simulated futures each, same markets for both.`;
+    $('#gpApply').disabled = !changed.length;
+    $('#gpScenario').disabled = !changed.length;
+  }
+
+  function retireSummary(res) {
+    const p = plan();
+    const s = p.strategy;
+    const travel = p.expenses.find(e => e.key === 'life:travel');
+    const dbs = p.income.filter(i => i.kind === 'dbpension');
+    const item = (k, v) => h('li', {}, h('span', {}, k), h('strong', {}, v));
+    return h('section', { class: 'card' },
+      h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Your retirement plan'), h('p', { class: 'sub' }, 'What the chance above assumes. Change it with the retirement questionnaire.')),
+        h('button', { type: 'button', class: 'btn small', onclick: () => openGoalWizard(res.goal) }, 'Edit retirement plan')),
+      h('ul', { class: 'rq-facts wide' },
+        people().map(x => item(`${x.name} retires at`, `${x.retireAge} (${p.startYear + x.retireAge - x.age})`)),
+        item('Spending in retirement', s.retireSpending ? `${money(s.retireSpending)} a year (today’s £)` : 'As your spending list'),
+        travel ? item('Extra in the early years', `${money(travel.amount)} a year to age ${travel.endAge}`) : null,
+        s.slowDownAge ? item('Spending later on', `${s.slowDownPct}% from age ${s.slowDownAge}`) : null,
+        people().map(x => item(`${x.name}'s State Pension`, `${money(x.statePension)} a year from ${x.statePensionAge}`)),
+        dbs.map(i => item(i.name, `${money(i.amount)} a year built up, paid from ${i.startAge}`))));
   }
 
   function solveGoal(btn, res) {
@@ -764,12 +1032,12 @@
       const p = plan();
       const g = res.goal;
       const conf = g.confidence / 100;
-      const apply = (label, fn) => h('button', { type: 'button', class: 'btn small', onclick: () => { fn(); goalSolve = {}; renderPlan(); refresh(); } }, label);
+      const apply = (label, fn) => h('button', { type: 'button', class: 'btn small', onclick: () => { fn(); goalSolve = {}; gp = null; renderPlan(); refresh(); } }, label);
       let out;
       if (g.type === 'debtFree') {
         const r = E.solveDebtFree(p, g.year);
         if (r.already) out = h('p', {}, `Your plan already pays the mortgage off by ${g.year} on average returns.`);
-        else if (r.overpayPct === null) out = h('p', {}, `Even overpaying with all your surplus doesn't clear it by ${g.year}. Try a one-off overpayment in Try levers.`);
+        else if (r.overpayPct === null) out = h('p', {}, `Even overpaying with all your surplus doesn't clear it by ${g.year}. Try a one-off overpayment in Try changes below.`);
         else out = h('p', {}, `Overpay with ${r.overpayPct}% of your surplus${r.capNeeded ? ' and remove the 10%-a-year overpayment limit' : ''}. `,
           apply('Apply', () => { p.strategy.overpayPct = r.overpayPct; if (r.capNeeded) p.strategy.overpayCapPct = 0; }));
       } else if (g.type === 'emergency') {
@@ -796,7 +1064,7 @@
             apply('Use this spending', () => { p.strategy.retireSpending = spend.amount; for (const x of people()) x.retireAge += delta; })) : null);
       }
       goalSolve[g.id] = out;
-      renderGoalCards();
+      renderGoalTake(res);
     }, 30);
   }
 
@@ -947,15 +1215,8 @@
     $('#expScenario').disabled = !changed.length;
   }
 
-  function focusExplorer(goalType) {
-    for (const k of Object.keys(explorerOpen)) explorerOpen[k] = false;
-    for (const g of L.GOAL_GROUPS[goalType] || []) explorerOpen[g] = true;
-    renderExplorer();
-    $('#explorer').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  function applyExplorer(asScenario) {
-    const next = L.apply(plan(), explorerValues);
+  function applyExplorer(asScenario, values = explorerValues) {
+    const next = L.apply(plan(), values);
     if (asScenario) {
       const name = prompt('Name for the new scenario', `${scenario().name} – adjusted`);
       if (!name) return;
@@ -966,6 +1227,7 @@
       scenario().plan = E.normalizePlan(next);
     }
     explorerValues = null;
+    if (gp) gp.values = null;
     afterScenarioChange();
   }
 
@@ -1281,7 +1543,7 @@
           h('p', { class: 'hint' }, 'Spending often falls from the late 70s, though care costs can rise (see the life check-up).')),
         sec(5, 'Pensions you will be paid',
           h('div', { class: 'fields' }, sps),
-          h('p', { class: 'hint' }, `Full new State Pension: ${money(R.STATE_PENSION_FULL)} a year. Get your own forecast at gov.uk/check-state-pension.${dbs.length ? ` Also counted: ${dbs.map(i => i.name).join(', ')} (edit in Plan → Income).` : ''}`)),
+          h('p', { class: 'hint' }, `Full new State Pension: ${money(R.STATE_PENSION_FULL)} a year. Get your own forecast at gov.uk/check-state-pension.${dbs.length ? ` Also counted: ${dbs.map(i => i.name).join(', ')} (edit in Money → Income).` : ''}`)),
         sec(6, 'How sure do you want to be?',
           h('div', { class: 'fields' }, h('label', { class: 'field' }, h('span', {}, 'Confidence'),
             h('select', { onchange: e => { gw.goal.confidence = +e.target.value; r.answers = null; previewRetire(); } }, [70, 75, 80, 85, 90, 95].map(v => h('option', { value: v, selected: gw.goal.confidence === v }, `${v}% of simulated futures`))))),
@@ -1396,7 +1658,7 @@
     goalSolve = {};
     explorerValues = null;
     afterScenarioChange();
-    showTab('goals');
+    navigate(`goal/${g.id}`);
   }
 
   // ------------------------------------------------------------------ cash flow
@@ -1451,7 +1713,7 @@
     );
     const a = plan().assumptions;
     const varied = [a.varyInflation && 'inflation', a.varySalaries && 'salaries', a.varyHouses && 'house prices', a.varyRates && 'interest rates'].filter(Boolean);
-    $('#mcSub').textContent = `Liquid assets (cash, ISAs, GIA, bonds and pensions) in ${unitLabel()}. Each simulation draws random stock and bond returns${varied.length ? `, and also ${varied.join(', ')}` : ''}.`;
+    $('#mcSub').textContent = `Cash, ISAs, general investments, bonds and pensions, in ${unitLabel()}. Each simulation draws random stock and bond returns${varied.length ? `, and also ${varied.join(', ')}` : ''}.`;
     $('#runsSelect').value = String(ws.settings.runs);
 
     chart('mcChart', 340, 'Monte Carlo percentile bands for liquid assets').set({
@@ -1470,15 +1732,6 @@
       lines: [{ label: 'Still funded', color: '--s1', values: mc.fundedByYear, area: true }],
       tooltip: i => ({ title: titleAt(i), rows: [{ label: 'Still funded', color: '--s1', shape: 'line', text: pct(mc.fundedByYear[i]) }] }),
     });
-    const nwGoal = model.goals.find(g => g.goal.type === 'netWorth');
-    $('#mcGoalSub').textContent = nwGoal ? `${nwGoal.title}: ${E.GOAL_MEASURES[nwGoal.goal.measure].toLowerCase()} (${nwGoal.goal.basis === 'real' ? "today's" : 'future'} £). Edit goals on the Goals tab.` : 'Add an amount goal on the Goals tab to see this.';
-    chart('mcGoalChart', 220, 'Chance of having reached the goal by year').set({
-      xs, ...pctAxis,
-      lines: [{ label: 'Goal reached', color: nwGoal ? goalColor(nwGoal.goal) : '--s3', values: nwGoal ? nwGoal.byYear : xs.map(() => 0), area: true }],
-      markers: nwGoal ? [{ x: nwGoal.goal.year, label: 'Target' }] : [],
-      tooltip: i => ({ title: titleAt(i), rows: [{ label: 'Goal reached', color: nwGoal ? goalColor(nwGoal.goal) : '--s3', shape: 'line', text: pct(nwGoal ? nwGoal.byYear[i] : 0) }] }),
-    });
-
     const keyTs = [...new Set([Math.min(5, N), tr, Math.min(N, tr + 10), Math.min(N, tr + 20), N])].sort((x, y) => x - y);
     $('#mcTable').replaceChildren(table(
       ['Year', 'Ages', '10th', '25th', 'Median', '75th', '90th', 'Still funded'],
@@ -1492,13 +1745,19 @@
   const ERAS = { 1929: 'Wall Street Crash', 1937: '1937 recession', 1966: 'Stagflation era', 1973: 'Oil crisis', 2000: 'Dot-com bust', 2008: 'Financial crisis' };
   let histCache = { key: null, res: null };
 
-  function renderHistory() {
+  // The plan replayed from every starting year in history (cached per plan).
+  function historyRuns() {
     const H = window.HISTORY_DATA;
-    const card = $('#histCard');
-    if (!H) { card.hidden = true; return; }
+    if (!H) return null;
     const key = driversKey();
     if (histCache.key !== key) histCache = { key, res: E.historicalRuns(plan(), H) };
-    const r = histCache.res;
+    return histCache.res;
+  }
+
+  function renderHistory() {
+    const card = $('#histCard');
+    const r = historyRuns();
+    if (!r) { card.hidden = true; return; }
     const p = plan();
     const p1 = people()[0];
     const ageAt = y => p1.age + (y - p.startYear);
@@ -1592,22 +1851,63 @@
     }
   }
 
-  // ------------------------------------------------------------------ workings
+  // ------------------------------------------------------------------ money: every input, with its own prediction
 
-  let wkSection = 'assumptions';
+  const MONEY_PAGES = [
+    ['portfolio', 'Portfolio', () => plan().accounts.length],
+    ['income', 'Income', () => plan().income.length],
+    ['spending', 'Spending', () => plan().expenses.length + plan().events.length],
+    ['cashflow', 'Cash flow & tax'],
+    ['assumptions', 'Assumptions'],
+  ];
+  let moneyPage = 'portfolio';
   let wkPerson = 0;
   let wkAccount = 'isa';
-  const WK_SECTIONS = [
-    ['assumptions', 'Assumptions'], ['income', 'Income'], ['spending', 'Spending'],
-    ['tax', 'Tax'], ['accounts', 'Accounts'],
-  ];
 
-  function renderWorkings() {
-    $('#wkIntro').textContent = `Every number behind the projection, year by year, like a spreadsheet. This is the average-returns path in ${unitLabel()} (switch at the top). Download any table as CSV to check the maths yourself.`;
-    $('#wkNav').replaceChildren(...WK_SECTIONS.map(([k, l]) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(wkSection === k), onclick: () => { wkSection = k; renderWorkings(); } }, l)));
-    const body = $('#wkBody');
-    body.replaceChildren();
-    ({ assumptions: wkAssumptions, income: wkIncome, spending: wkSpending, tax: wkTax, accounts: wkAccounts })[wkSection](body);
+  function renderMoneyNav() {
+    $('#moneyNav').replaceChildren(...MONEY_PAGES.map(([k, l, count]) => h('a', {
+      href: `#money/${k}`, 'aria-current': k === moneyPage ? 'page' : null,
+      onclick: e => { e.preventDefault(); navigate(`money/${k}`); },
+    }, h('span', {}, l), count ? h('span', { class: 'count' }, String(count())) : null)));
+  }
+
+  // "Your figures are as at …": the date every input describes.
+  function renderAsOfBar() {
+    const p = plan();
+    const due = RV.due(ws);
+    const last = ws.checkins.filter(c => c.scenarioName !== 'Manual').sort((a, b) => a.date.localeCompare(b.date)).pop();
+    const input = h('input', {
+      type: 'date', value: asOf(), 'aria-label': 'Figures as at',
+      onchange: e => {
+        if (!E.isDate(e.target.value)) return;
+        p.asOf = e.target.value;
+        p.startYear = +p.asOf.slice(0, 4);
+        renderAsOfBar();
+        renderSection('accounts');
+        refresh();
+      },
+    });
+    $('#asOfBar').replaceChildren(...[
+      h('span', { class: 'banner-ico' }, glyph('review')),
+      h('div', { class: 'asof-text' },
+        h('label', { class: 'asof-label' }, h('strong', {}, 'Your figures are as at'), input),
+        h('p', { class: 'sub' }, `Balances, pay and spending below are what they were on this date, and every prediction grows them from here. The yearly review moves the date on and carries the real numbers in.${last ? ` Last review: ${fmtDate(last.date)}.` : ''}`)),
+      h('div', { class: 'controls' },
+        h('button', { type: 'button', class: due.due ? 'btn small primary' : 'btn small', onclick: () => openReview() }, due.due ? 'Start yearly review' : 'Yearly review')),
+    ]);
+  }
+
+  // The predictions under each Money page's inputs.
+  function renderMoneyPage() {
+    for (const el of $$('#view-money .money-page')) el.hidden = el.dataset.page !== moneyPage;
+    renderMoneyNav();
+    renderAsOfBar();
+    const fill = (id, fn) => { const body = $(id); body.replaceChildren(); fn(body); };
+    if (moneyPage === 'portfolio') fill('#mpPortfolio', wkAccounts);
+    if (moneyPage === 'income') { fill('#mpIncome', wkIncome); requestAnimationFrame(updateIncomeTrends); }
+    if (moneyPage === 'spending') fill('#mpSpending', wkSpending);
+    if (moneyPage === 'cashflow') { renderCashflow(); fill('#mpTax', wkTax); }
+    if (moneyPage === 'assumptions') fill('#mpAssumptions', wkAssumptions);
   }
 
   function wkCard(body, title, explain) {
@@ -1621,7 +1921,7 @@
     const p = plan();
     const a = p.assumptions;
     const rows = model.proj.rows;
-    const card = wkCard(body, 'Assumptions by year', [
+    const card = wkCard(body, 'Prices and tax thresholds by year', [
       h('p', {}, `Prices rise ${a.inflation}% a year, so the price index for year t is (1 + ${a.inflation}%)^t. Values in today's money are future values divided by the price index.`),
       h('p', {}, `Tax thresholds stay frozen until April ${a.thresholdFreezeUntil}, then rise with prices (threshold factor). Investments move from ${a.stockPctNow}% to ${a.stockPctRetire}% stocks by retirement; the expected return is the mix of ${a.stockReturn}% for stocks and ${a.bondReturn}% for bonds.`),
     ]);
@@ -1651,7 +1951,7 @@
     const p = plan();
     const rows = model.proj.rows.slice(0, -1);
     const items = p.income;
-    const card = wkCard(body, 'Income', [
+    const card = wkCard(body, 'Income over time', [
       h('p', {}, 'Each amount = today\'s amount × (1 + its growth rate)^years (inflation-linked items use the price index), × any exchange rate, minus costs. Shown before tax; flat taxes appear in Cash flow. Items stop at their end age (for salaries usually retirement).'),
       h('p', {}, `State Pension = your forecast × price index from State Pension age. Simulations add random salary surprises (±${p.assumptions.salaryVolatility}% a year) and inflation surprises on top.`),
     ]);
@@ -1679,7 +1979,7 @@
     const notes = [h('p', {}, 'Each item = today\'s amount × price index (or its own growth rate). Items stop at their end age.')];
     if (s.spendNowPct !== 100) notes.push(h('p', {}, `Before retirement, spending is scaled to ${s.spendNowPct}% (the adjustment column).`));
     if (s.retireSpending > 0) notes.push(h('p', {}, `After retirement the list is replaced by ${money(s.retireSpending)} a year in today's money (× price index).`));
-    const card = wkCard(body, 'Spending', notes);
+    const card = wkCard(body, 'Spending over time', notes);
     const xs = rows.map(r => r.year);
     const byItem = items.map(it => rows.map((r, t) => E.streamAt(it, p, t)));
     const top = items.map((it, k) => ({ it, k, total: byItem[k].reduce((x, y) => x + y, 0) })).sort((x, y) => y.total - x.total);
@@ -1706,11 +2006,11 @@
     const pre = model.proj.pre;
     const n = people().length;
     if (wkPerson >= n) wkPerson = 0;
-    const card = wkCard(body, 'Tax', [
+    const card = wkCard(body, 'Tax by year', [
       h('p', {}, `Income tax uses ${R.INCOME_TAX[p.household.region].label} bands (${R.TAX_YEAR}) on taxable income: gross salary minus your pension contributions, plus other taxable income, State Pension and 75% of pension withdrawals (25% is tax-free up to the lump sum allowance).`),
       h('p', {}, 'National Insurance is on earnings (after salary sacrifice) until State Pension age. Capital gains tax applies when the general investment account is sold, shared between the household.'),
     ]);
-    if (n > 1) card.append(h('div', { class: 'chips' }, people().map((x, i) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(i === wkPerson), onclick: () => { wkPerson = i; renderWorkings(); } }, x.name))));
+    if (n > 1) card.append(h('div', { class: 'chips' }, people().map((x, i) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(i === wkPerson), onclick: () => { wkPerson = i; renderMoneyPage(); } }, x.name))));
     const i = wkPerson;
     const P = pre.people[i];
     const xs = rows.map(r => r.year);
@@ -1753,11 +2053,11 @@
     const avail = Object.keys(WK_ACCOUNTS).filter(k => rows.some(r => Math.abs(r[WK_ACCOUNTS[k].bal]) > 0.5));
     if (!avail.includes(wkAccount)) wkAccount = avail[0] || 'cash';
     const A = WK_ACCOUNTS[wkAccount];
-    const card = wkCard(body, 'Accounts: year-by-year roll-forward', [
+    const card = wkCard(body, 'How each account grows', [
       h('p', {}, 'Start + growth + paid in − taken out = end. The check column confirms each row adds up.'),
       h('p', {}, A.explain),
     ]);
-    card.append(h('div', { class: 'chips' }, avail.map(k => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(k === wkAccount), onclick: () => { wkAccount = k; renderWorkings(); } }, WK_ACCOUNTS[k].label))));
+    card.append(h('div', { class: 'chips' }, avail.map(k => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(k === wkAccount), onclick: () => { wkAccount = k; renderMoneyPage(); } }, WK_ACCOUNTS[k].label))));
     const flows = rows.slice(0, -1);
     const xs = rows.map(r => r.year);
     const c = chartIn(card, 220, `${A.label} balance`);
@@ -1959,7 +2259,6 @@
 
   let rv = null;
   const RV_STEPS = ['Start', 'Balances', 'Income', 'Spending', 'Markets', 'How you did', 'Update scenarios'];
-  const fmtDate = s => { const d = new Date(`${s}T12:00:00`); return Number.isNaN(+d) ? s : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
 
   function openReview() {
     newReview();
@@ -1967,7 +2266,7 @@
   }
 
   function newReview(year) {
-    const draft = RV.start(ws, year ? { year } : {});
+    const draft = RV.start(ws, { ...(year ? { year } : {}), ...(rv && year ? { date: rv.draft.date } : {}) });
     rv = { step: rv && year ? rv.step : 0, draft, market: {}, scenarioIds: new Set(ws.scenarios.map(s => s.id)), note: '', evals: null, expNW: RV.byType(draft.expectedPlan).netWorth };
     renderReview();
   }
@@ -2000,6 +2299,7 @@
       h('div', { class: 'goal-options two' }, years.map(y => (y > o.startYear
         ? choice(y, `Start ${y}`, `Everyone is ${y - o.startYear === 1 ? 'a year' : `${y - o.startYear} years`} older. Amounts are grown the way the plan expected, ready for you to correct.`)
         : choice(y, `Update ${y}`, 'Refresh this year’s numbers without moving the plan on.')))),
+      h('p', { class: 'sub' }, `Your figures are as at ${fmtDate(o.asOf || E.asOfDate(o))}. Next, every balance is estimated for ${fmtDate(d.date)} for you to correct.`),
       d.prev
         ? h('div', { class: 'rv-recap' }, h('span', { class: 'banner-ico' }, glyph('review')), h('div', {},
           h('strong', {}, `Last check-in: ${fmtDate(d.prev.date)} (${d.prev.year})`),
@@ -2029,7 +2329,7 @@
       const setDiff = () => {
         const dv = cur() - exp;
         const touched = d.touched[kind][id];
-        if (Math.abs(dv) < 0.5) { diff.textContent = touched ? 'As expected' : 'Not updated yet'; diff.className = 'rv-diff muted'; return; }
+        if (Math.abs(dv) < 0.5) { diff.textContent = touched ? 'As expected' : 'Estimate: check it'; diff.className = 'rv-diff muted'; return; }
         const good = (dv > 0) !== !!opts.lowerIsBetter(it);
         diff.textContent = `${dv > 0 ? '+' : '−'}${fmtA(Math.abs(dv))} vs plan`;
         diff.className = `rv-diff ${good ? 'pos' : 'neg'}`;
@@ -2045,9 +2345,9 @@
       setDiff();
       const pre = it.fx && it.fx !== 1 ? null : h('span', { class: 'pre' }, '£');
       row.append(
-        h('div', { class: 'rv-name' }, h('span', {}, it.name), h('span', { class: 'tag' }, opts.tag(it))),
+        h('div', { class: 'rv-name' }, h('span', {}, it.name), h('span', { class: 'tag' }, opts.tag(it)), opts.note ? opts.note(it) : null),
         h('div', { class: 'rv-num' }, h('span', { class: 'rv-k' }, 'Last time'), last === undefined ? '—' : fmtA(last)),
-        h('div', { class: 'rv-num' }, h('span', { class: 'rv-k' }, 'Plan expected'), fmtA(exp)),
+        h('div', { class: 'rv-num' }, h('span', { class: 'rv-k' }, opts.expLabel || 'Plan expected'), fmtA(exp)),
         h('label', { class: 'rv-in' }, h('span', { class: 'rv-k' }, opts.nowLabel(it)), h('div', { class: `adorn${pre ? ' has-pre' : ''}` }, pre, input)),
         diff);
       const extra = opts.extra ? opts.extra(it, row) : null;
@@ -2055,13 +2355,22 @@
       return row;
     });
     updateProg();
-    const keep = h('button', { type: 'button', class: 'btn small', onclick: () => { for (const it of items) d.touched[kind][it.id] = true; renderReview(); } }, 'Keep the rest as expected');
+    const keep = h('button', { type: 'button', class: 'btn small', onclick: () => { for (const it of items) d.touched[kind][it.id] = true; renderReview(); } }, 'Keep the rest as they are');
     return [h('div', { class: 'rv-toolbar' }, prog, keep), h('div', { class: 'rv-rows' }, rows)];
   }
 
   function rvBalances() {
-    $('#rvIntro').textContent = `What every account holds now. “Plan expected” is where last year’s plan said you would be on average returns.`;
     const d = rv.draft;
+    $('#rvIntro').textContent = `What every account holds. Each one is filled in with Horizon’s estimate for the date below (where last year’s plan said you would be, on average returns, or a balance you updated since): type over it with the real figure.`;
+    const dateIn = h('input', { type: 'date', value: d.date, 'aria-label': 'Balances as at', onchange: e => {
+      if (!E.isDate(e.target.value)) return;
+      RV.setDate(d, e.target.value);
+      rv.evals = null;
+      rv.expNW = RV.byType(d.expectedPlan).netWorth;
+      renderReview();
+    } });
+    const dateRow = h('label', { class: 'asof-label' }, h('strong', {}, 'Balances as at'), dateIn,
+      h('span', { class: 'hint' }, 'Usually today. This becomes the date your figures are as at.'));
     const debtExtra = (a, row) => {
       if (a.type !== 'debt') return null;
       const mark = () => { d.touched.accounts[a.id] = true; row.classList.add('done'); rv.evals = null; updateReviewNote(); };
@@ -2072,13 +2381,15 @@
       return h('details', { class: 'more rv-extra' }, h('summary', {}, 'Remortgaged or changed the payment?'),
         h('div', { class: 'fields' }, num('rate', 'Interest rate', 0.01, '%'), num('payment', 'Monthly payment', 1), num('fixedUntil', 'Fixed until (year)', 1, ' ')));
     };
-    return rvRows('accounts', d.plan.accounts, {
+    return [dateRow, ...rvRows('accounts', d.plan.accounts, {
+      expLabel: 'Estimate',
+      note: a => (d.readings && d.readings[a.id] ? h('small', { class: 'rv-note' }, `From your update on ${fmtDate(d.readings[a.id].date)}`) : null),
       tag: a => (a.excluded ? 'Not counted' : ACCOUNT_LABELS[a.type]),
       color: a => TYPE_COLOR[a.type],
       lowerIsBetter: a => a.type === 'debt',
       nowLabel: a => (a.type === 'debt' ? 'Owed now' : a.type === 'property' ? 'Worth now' : 'Balance now'),
       extra: debtExtra,
-    });
+    })];
   }
 
   function rvIncome() {
@@ -2106,7 +2417,7 @@
         nowLabel: e => `Now (${e.freq === 'month' ? 'a month' : 'a year'})`,
       }),
       actual,
-      h('p', { class: 'hint' }, 'For a walk-through with typical UK amounts for each category, run the Spending check-up (Plan → Spending) after the review.'),
+      h('p', { class: 'hint' }, 'For a walk-through with typical UK amounts for each category, run the Spending check-up (Money → Spending) after the review.'),
     ];
   }
 
@@ -2260,7 +2571,7 @@
     const d = rv.draft;
     const finish = () => {
       const goals = rv.evals.after.goals.map(g => ({ title: g.title, probability: g.probability, expectedYear: g.expectedYear }));
-      ws = RV.apply(ws, d, { scenarioIds: [...rv.scenarioIds], market: rv.market, date: today(), goals, note: rv.note });
+      ws = RV.apply(ws, d, { scenarioIds: [...rv.scenarioIds], market: rv.market, date: d.date, goals, note: rv.note });
       $('#reviewWiz').close();
       rv = null;
       goalSolve = {};
@@ -2268,8 +2579,8 @@
       renderScenarioPicker();
       renderPlan();
       refresh();
-      showTab('progress');
-      toast(`${d.year} review saved: your scenarios now start in ${d.year}. Invest ${money(model.monthly.invest)} a month this year.`);
+      navigate('review');
+      toast(`${d.year} review saved: figures as at ${fmtDate(d.date)}, and every scenario now starts in ${d.year}. Invest ${money(model.monthly.invest)} a month this year. Save a copy to a file to keep it safe.`, { label: 'Save to a file', run: exportFile });
     };
     const btn = $('#rvSave');
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
@@ -2280,12 +2591,12 @@
   }
 
   let toastTimer = null;
-  function toast(text) {
+  function toast(text, action) {
     const t = $('#toast');
-    t.textContent = text;
+    t.replaceChildren(h('span', {}, text), action ? h('button', { type: 'button', class: 'btn small', onclick: () => { t.hidden = true; action.run(); } }, action.label) : null);
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 7000);
+    toastTimer = setTimeout(() => { t.hidden = true; }, action ? 14000 : 7000);
   }
 
   // Progress tab: the most recent check-in against the prediction made before it.
@@ -2319,6 +2630,89 @@
         }))));
     }
     box.replaceChildren(...kids);
+  }
+
+  // Review tab: what the yearly review does, and when.
+  function renderReviewIntro() {
+    const due = RV.due(ws);
+    const last = ws.checkins.filter(c => c.scenarioName !== 'Manual').sort((a, b) => a.date.localeCompare(b.date)).pop();
+    const saved = ws.settings.lastSaved;
+    $('#reviewIntro').replaceChildren(
+      h('div', { class: 'card-head' },
+        h('div', {}, h('h2', {}, due.due ? `Time for your ${due.year} yearly review` : 'Yearly review'),
+          h('p', { class: 'sub' }, 'Once a year, swap Horizon’s estimates for the real numbers. Every balance, income and spending item is already filled in with what the plan expected by the review date, so you only correct what is different. Horizon then shows how close last year’s plan was, moves every scenario on a year and saves the check-in for next time.')),
+        h('div', { class: 'controls' },
+          h('button', { type: 'button', class: 'btn', onclick: openUpdate }, 'Update balances'),
+          h('button', { type: 'button', class: 'btn primary', id: 'reviewBtn', onclick: () => openReview() }, due.due ? 'Start review' : 'Start yearly review'))),
+      h('ol', { class: 'rv-steps' }, ['Balances, as at the review date', 'Income', 'Spending', 'Market assumptions', 'How you did', 'Update scenarios'].map(x => h('li', {}, x))),
+      h('div', { class: 'gh-facts' },
+        h('div', {}, h('span', { class: 'rv-k' }, 'Your figures are as at'), h('strong', {}, fmtDate(asOf()))),
+        h('div', {}, h('span', { class: 'rv-k' }, 'Last review'), h('strong', {}, last ? fmtDate(last.date) : 'None yet')),
+        h('div', {}, h('span', { class: 'rv-k' }, 'Next review'), h('strong', {}, due.due ? 'Due now' : `October ${due.next}`)),
+        h('div', {}, h('span', { class: 'rv-k' }, 'Saved to a file'), h('strong', {}, saved ? fmtDate(saved) : 'Not yet'),
+          h('button', { type: 'button', class: 'btn small ghost', onclick: exportFile }, 'Save to a file'))));
+  }
+
+  // ------------------------------------------------------------------ update balances (between reviews)
+
+  let ud = null;
+
+  function openUpdate() {
+    ud = { date: today(), values: {} };
+    renderUpdate();
+    $('#updateDlg').showModal();
+  }
+
+  function renderUpdate() {
+    const p = plan();
+    const est = RV.estimateAt(p, ud.date, model.proj);
+    const dateIn = h('input', { type: 'date', value: ud.date, max: today(), 'aria-label': 'Balances as at', onchange: e => { if (E.isDate(e.target.value)) { ud.date = e.target.value; renderUpdate(); } } });
+    const rows = p.accounts.map(a => {
+      const v = est.byId[a.id];
+      const debtish = a.type === 'debt';
+      const diff = h('span', { class: 'rv-diff muted' });
+      const row = h('div', { class: `rv-row${ud.values[a.id] !== undefined ? ' done' : ''}`, style: `--item-color:${cssVar(TYPE_COLOR[a.type])}` });
+      const setDiff = () => {
+        const x = ud.values[a.id];
+        if (x === undefined) { diff.textContent = est.reading[a.id] ? `Updated ${fmtDate(est.reading[a.id].date)}` : 'Estimated'; diff.className = 'rv-diff muted'; return; }
+        const dv = x - v;
+        if (Math.abs(dv) < 0.5) { diff.textContent = 'As estimated'; diff.className = 'rv-diff muted'; return; }
+        diff.textContent = `${dv > 0 ? '+' : '−'}${money(Math.abs(dv))} vs estimate`;
+        diff.className = `rv-diff ${(dv > 0) !== debtish ? 'pos' : 'neg'}`;
+      };
+      const input = h('input', { type: 'text', inputmode: 'decimal', value: plain(Math.round(ud.values[a.id] !== undefined ? ud.values[a.id] : v)), 'aria-label': `${a.name} now` });
+      input.addEventListener('input', () => { ud.values[a.id] = parseAmount(input.value); row.classList.add('done'); setDiff(); updateUpdateNote(); });
+      input.addEventListener('focus', () => input.select());
+      setDiff();
+      row.append(
+        h('div', { class: 'rv-name' }, h('span', {}, a.name), h('span', { class: 'tag' }, a.excluded ? 'Not counted' : ACCOUNT_LABELS[a.type])),
+        h('div', { class: 'rv-num' }, h('span', { class: 'rv-k' }, `On ${fmtDate(est.asOf)}`), money(a.balance)),
+        h('div', { class: 'rv-num' }, h('span', { class: 'rv-k' }, 'Estimated'), money(v)),
+        h('label', { class: 'rv-in' }, h('span', { class: 'rv-k' }, debtish ? 'Owed now' : a.type === 'property' ? 'Worth now' : 'Balance now'), h('div', { class: 'adorn has-pre' }, h('span', { class: 'pre' }, '£'), input)),
+        diff);
+      return row;
+    });
+    $('#udBody').replaceChildren(
+      h('label', { class: 'asof-label' }, h('strong', {}, 'Balances as at'), dateIn),
+      p.accounts.length ? h('div', { class: 'rv-rows' }, rows) : h('p', { class: 'sub' }, 'No accounts yet: add them in Money → Portfolio.'));
+    updateUpdateNote();
+  }
+
+  function updateUpdateNote() {
+    const n = Object.keys(ud.values).length;
+    $('#udNote').textContent = n ? `${n} balance${n === 1 ? '' : 's'} to save, as at ${fmtDate(ud.date)}.` : 'Type over any estimate to update it.';
+    $('#udSave').disabled = !n;
+  }
+
+  function saveUpdate() {
+    const n = Object.keys(ud.values).length;
+    if (!n) return;
+    ws = RV.recordReadings(ws, ud.values, ud.date);
+    $('#updateDlg').close();
+    ud = null;
+    renderPlan();
+    refresh();
+    toast(`Updated ${n} balance${n === 1 ? '' : 's'}. They show on Home now and fill in your next yearly review.`);
   }
 
   function addManualCheckin(e) {
@@ -2434,15 +2828,10 @@
     { id: 'scenario', title: 'This scenario', render: renderScenarioSection },
   ];
 
+  // Render every input section once (they keep focus while the results update).
   function renderPlan() {
-    const nav = $('#planNav');
-    const body = $('#planBody');
-    nav.replaceChildren(...SECTIONS.map(s => h('a', {
-      href: `#sec-${s.id}`,
-      onclick: e => { e.preventDefault(); $(`#sec-${s.id}`).scrollIntoView({ behavior: 'smooth', block: 'start' }); },
-    }, h('span', {}, s.title), s.count ? h('span', { class: 'count', 'data-count': s.id }, String(s.count())) : null)));
-    body.replaceChildren(...SECTIONS.map(s => h('section', { class: 'card', id: `sec-${s.id}`, 'aria-labelledby': `h-${s.id}` })));
     for (const s of SECTIONS) renderSection(s.id);
+    renderMoneyNav();
   }
 
   function renderSection(id) {
@@ -2450,9 +2839,18 @@
     const el = $(`#sec-${id}`);
     if (!s || !el) return;
     el.replaceChildren(...[].concat(s.render()));
-    const c = $(`[data-count="${id}"]`);
-    if (c && s.count) c.textContent = String(s.count());
+    if (s.count) renderMoneyNav();
     if (id === 'income') requestAnimationFrame(updateIncomeTrends);
+    if (id === 'accounts') updateAccountFigures();
+  }
+
+  // Each account's estimate for today, kept in step without re-rendering the inputs.
+  function updateAccountFigures() {
+    if (!model) return;
+    for (const el of $$('[data-est]')) {
+      const v = model.est.byId[el.dataset.est];
+      el.textContent = v === undefined ? '' : `≈ ${money(v)} today`;
+    }
   }
 
   function sectionHead(id, title, sub, ...actions) {
@@ -2504,8 +2902,7 @@
         h('div', { class: 'field' }, h('span', {}, 'Tax'),
           switchInput('Work out UK tax', () => !hh.ignoreTax, v => { hh.ignoreTax = !v; }, { rerender: 'household', after: () => { renderSection('income'); renderSection('tax'); } }),
           h('span', { class: 'hint' }, hh.ignoreTax ? 'Off: every amount is treated as already taxed. Good for a quick plan with take-home figures.' : 'Income tax, NI and capital gains tax for each person. Turn off to ignore tax everywhere.')),
-        hh.ignoreTax ? null : field('Tax rules', selectInput([['scotland', 'Scotland'], ['ruk', 'England, Wales & NI']], ...bind(hh, 'region'), { rerender: 'tax' })),
-        field('Plan starts in', numInput(...bind(plan(), 'startYear'), { min: 2000, max: 2100 }), 'Use Progress → Start next year to roll forward.')),
+        hh.ignoreTax ? null : field('Tax rules', selectInput([['scotland', 'Scotland'], ['ruk', 'England, Wales & NI']], ...bind(hh, 'region'), { rerender: 'tax' }))),
       h('div', { class: 'people' }, cards),
     ];
   }
@@ -2845,6 +3242,7 @@
         h('div', { class: 'item-head' },
           h('input', { type: 'text', class: 'name', value: a.name, 'aria-label': 'Account name', oninput: e => { a.name = e.target.value; schedule(); } }),
           h('span', { class: 'tag' }, a.excluded ? 'Not counted' : ACCOUNT_LABELS[a.type]),
+          h('span', { class: 'tag est', 'data-est': a.id, title: 'Estimated value today, moved on from this figure the way the plan expects' }),
           deleteButton(`Remove ${a.name}`, () => removeFrom(p.accounts, a, 'accounts'))),
         h('div', { class: 'fields' }, main),
         more(`account-${a.id}`, 'More options', h('div', { class: 'fields' }, extra)));
@@ -2856,7 +3254,7 @@
       refresh();
     } }, `+ ${ACCOUNT_LABELS[type]}`);
     return [
-      sectionHead('accounts', 'Accounts', 'What you have and what you owe today. Update these at each yearly check-in.'),
+      sectionHead('accounts', 'Accounts', `What you had and owed on ${fmtDate(asOf())}. The yearly review brings them up to date; for a quick update between reviews, use Update balances on Home.`),
       h('div', { class: 'items' }, items),
       h('div', { class: 'add-row' }, Object.keys(ACCOUNT_LABELS).map(add)),
     ];
@@ -2956,16 +3354,15 @@
   function renderScenarioSection() {
     const s = scenario();
     return [
-      sectionHead('scenario', 'This scenario', 'Scenarios are full copies of the plan you can change independently.'),
       h('div', { class: 'fields' },
-        field('Name', h('input', { type: 'text', value: s.name, oninput: e => { s.name = e.target.value || 'Untitled'; renderScenarioPicker(); save(); } }))),
-      h('div', { class: 'add-row' },
-        h('button', { type: 'button', class: 'btn small danger', disabled: ws.scenarios.length < 2, onclick: () => {
-          if (!confirm(`Delete scenario “${s.name}”?`)) return;
-          ws.scenarios = ws.scenarios.filter(x => x.id !== s.id);
-          ws.activeId = ws.scenarios[0].id;
-          afterScenarioChange();
-        } }, 'Delete scenario')),
+        field('Name of this scenario', h('input', { type: 'text', value: s.name, 'aria-label': 'Scenario name', oninput: e => { s.name = e.target.value || 'Untitled'; renderScenarioPicker(); save(); compareDirty = true; } })),
+        h('div', { class: 'field' }, h('span', {}, ' '),
+          h('button', { type: 'button', class: 'btn small danger', disabled: ws.scenarios.length < 2, onclick: () => {
+            if (!confirm(`Delete scenario “${s.name}”?`)) return;
+            ws.scenarios = ws.scenarios.filter(x => x.id !== s.id);
+            ws.activeId = ws.scenarios[0].id;
+            afterScenarioChange();
+          } }, 'Delete this scenario'))),
     ];
   }
 
@@ -3217,25 +3614,69 @@
     refresh();
   }
 
-  // ------------------------------------------------------------------ chrome: tabs, scenario picker, theme, data
+  // ------------------------------------------------------------------ chrome: navigation, scenario picker, theme, files
 
-  const TABS = ['overview', 'goals', 'plan', 'cashflow', 'montecarlo', 'scenarios', 'progress', 'workings'];
+  const TABS = ['home', 'goals', 'money', 'outlook', 'scenarios', 'review'];
+  // Addresses from before the sections were reorganised still work.
+  const LEGACY = { overview: 'home', plan: 'money/portfolio', cashflow: 'money/cashflow', workings: 'money/portfolio', montecarlo: 'outlook', progress: 'review' };
+  let route = { tab: 'home', sub: null };
 
-  function showTab(name) {
-    for (const b of $$('.tabs button')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
-    for (const v of $$('main > .view')) v.hidden = v.id !== `view-${name}`;
-    try { history.replaceState(null, '', `#${name}`); } catch { /* file:// in some browsers */ }
-    if (name === 'scenarios' && compareDirty) runCompare();
-    if (name === 'progress') renderProgress();
-    if (name === 'goals') { renderGoalCards(); renderDriversCard(); renderExplorer(); }
-    if (name === 'scenarios') renderIdeas();
-    if (name === 'montecarlo') renderHistory();
-    if (name === 'workings') renderWorkings();
+  // "#goal/<id>" opens a goal's page; "#money/<page>" a Money page; otherwise a tab.
+  function parseRoute(hash) {
+    let s = String(hash || '').replace(/^#/, '');
+    if (LEGACY[s]) s = LEGACY[s];
+    const [a, b] = s.split('/');
+    if (a === 'goal' && b) return { tab: 'goals', sub: decodeURIComponent(b) };
+    if (a === 'money') return { tab: 'money', sub: MONEY_PAGES.some(x => x[0] === b) ? b : moneyPage };
+    return { tab: TABS.includes(a) ? a : 'home', sub: null };
+  }
+  const routeHash = r => (r.tab === 'goals' && r.sub ? `goal/${encodeURIComponent(r.sub)}` : r.tab === 'money' ? `money/${r.sub}` : r.tab);
+
+  function navigate(hash) {
+    const r = parseRoute(hash);
+    const target = `#${routeHash(r)}`;
+    if (location.hash !== target) {
+      try { history.pushState(null, '', target); } catch { /* some file:// pages: the address just doesn't change */ }
+    }
+    applyRoute(r);
+  }
+
+  function routeChrome(r) {
+    route = r;
+    if (r.tab === 'money') moneyPage = r.sub;
+    for (const b of $$('.tabs button')) b.setAttribute('aria-selected', String(b.dataset.tab === r.tab));
+    for (const v of $$('main > .view')) v.hidden = v.id !== `view-${r.tab}`;
+  }
+
+  function applyRoute(r) {
+    const moved = route.tab !== r.tab || route.sub !== r.sub;
+    routeChrome(r);
+    renderWarnings();
+    renderView();
     scheduleDrivers();
+    if (moved) window.scrollTo(0, 0);
     requestAnimationFrame(() => Object.values(charts).forEach(c => c.draw()));
   }
 
-  const currentTab = () => ($('.tabs button[aria-selected="true"]') || {}).dataset?.tab;
+  // Older name, kept for the tests and the console.
+  const showTab = (name, sub) => navigate(sub ? (name === 'goals' ? `goal/${sub}` : `${name}/${sub}`) : name);
+  const currentTab = () => route.tab;
+
+  // Draw whatever is on screen.
+  function renderView() {
+    const r = route;
+    if (r.tab === 'home') renderHome();
+    if (r.tab === 'goals') {
+      $('#goalsList').hidden = !!r.sub;
+      $('#goalPage').hidden = !r.sub;
+      if (r.sub) renderGoalPage(r.sub);
+      else { renderGoalList(); renderDriversCard(); renderTimeline(); }
+    }
+    if (r.tab === 'money') renderMoneyPage();
+    if (r.tab === 'outlook') { renderMC(); renderHistory(); }
+    if (r.tab === 'scenarios') { renderIdeas(); renderExplorer(); if (compareDirty) runCompare(); }
+    if (r.tab === 'review') { renderReviewIntro(); renderProgress(); }
+  }
 
   function renderScenarioPicker() {
     const sel = $('#scenarioSelect');
@@ -3245,10 +3686,10 @@
   function afterScenarioChange() {
     goalSolve = {};
     explorerValues = null;
+    gp = null;
     renderScenarioPicker();
     renderPlan();
     refresh();
-    if (!$('#view-scenarios').hidden) runCompare();
   }
 
   function applyTheme() {
@@ -3261,7 +3702,7 @@
     $('#themeBtn').title = labels[t][1];
     requestAnimationFrame(() => {
       Object.values(charts).forEach(c => c.draw());
-      if (!$('#view-plan').hidden) renderPlan(); // item colours come from tokens
+      if (route.tab === 'money') renderPlan(); // item colours come from tokens
       if (model) renderResults();
     });
   }
@@ -3270,67 +3711,75 @@
     for (const b of $$('.seg button')) b.setAttribute('aria-pressed', String((b.dataset.real === '1') === real()));
   }
 
-  function renderResults() {
-    renderStatus();
-    renderWarnings();
-    renderOverview();
-    renderCashflow();
-    renderMC();
-    const tab = currentTab();
-    if (tab === 'progress') renderProgress();
-    if (tab === 'goals') { renderGoalCards(); renderDriversCard(); renderExplorer(); }
-    if (tab === 'scenarios') renderIdeas();
-    if (tab === 'montecarlo') renderHistory();
-    if (tab === 'workings') renderWorkings();
-    scheduleDrivers();
-    updateIncomeTrends();
-    updateIncomeFigures();
-    renderMoneyToggle();
+  function renderSavedNote() {
+    const d = ws.settings.lastSaved;
+    $('#savedNote').textContent = `${d ? `Last saved to a file on ${fmtDate(d)}.` : 'Not saved to a file yet.'} A saved file keeps a copy and lets you carry on on another computer.`;
   }
 
+  function renderResults() {
+    renderWarnings();
+    renderView();
+    if (route.tab === 'money' && moneyPage === 'income') updateIncomeTrends();
+    updateIncomeFigures();
+    updateAccountFigures();
+    renderMoneyToggle();
+    renderSavedNote();
+    scheduleDrivers();
+  }
+
+  // Save everything (every scenario, goal, check-in and setting) to one file.
   function exportFile() {
+    ws.settings.lastSaved = today();
+    save();
     const blob = new Blob([JSON.stringify(ws, null, 2)], { type: 'application/json' });
     const a = h('a', { href: URL.createObjectURL(blob), download: `horizon-plan-${today()}.json` });
     document.body.append(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    renderSavedNote();
+    if (route.tab === 'home') renderHomeYear();
+    if (route.tab === 'review') renderReviewIntro();
+    toast('Saved to your downloads. To carry on on another computer, open Horizon there and use Data → Open a saved file.');
   }
 
   async function importFile(file) {
     try {
       const data = JSON.parse(await file.text());
       if (!data || typeof data !== 'object' || !(Array.isArray(data.scenarios) || data.household || data.accounts)) throw new Error('This does not look like a Horizon plan file.');
-      if (!confirm('Replace everything in Horizon with this file?')) return;
+      if (!confirm('Open this file? It replaces the plan in this browser, so save yours to a file first if you want to keep it.')) return;
       ws = E.normalizeWorkspace(data);
       afterImport();
+      toast(`Opened your plan: figures as at ${fmtDate(asOf())}.`);
     } catch (err) {
-      alert(`Could not import: ${err.message}`);
+      alert(`Could not open the file: ${err.message}`);
     }
   }
 
   function afterImport() {
     goalSolve = {};
     explorerValues = null;
+    gp = null;
     applyTheme();
     renderScenarioPicker();
     renderPlan();
     refresh();
-    renderProgress();
   }
 
   // ------------------------------------------------------------------ wiring
 
   function wire() {
-    for (const b of $$('.tabs button')) b.addEventListener('click', () => showTab(b.dataset.tab));
+    for (const b of $$('.tabs button')) b.addEventListener('click', () => navigate(b.dataset.tab));
     $('.tabs').addEventListener('keydown', e => {
       if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
       const tabs = $$('.tabs button');
       const i = tabs.findIndex(b => b.getAttribute('aria-selected') === 'true');
       const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
       next.focus();
-      showTab(next.dataset.tab);
+      navigate(next.dataset.tab);
     });
+    window.addEventListener('popstate', () => applyRoute(parseRoute(location.hash)));
+    window.addEventListener('hashchange', () => { const r = parseRoute(location.hash); if (r.tab !== route.tab || r.sub !== route.sub) applyRoute(r); });
     $('#scenarioSelect').addEventListener('change', e => { ws.activeId = e.target.value; afterScenarioChange(); });
     $('#dupScenario').addEventListener('click', () => {
       const s = scenario();
@@ -3338,10 +3787,12 @@
       ws.scenarios.push({ id, name: `${s.name} (copy)`, plan: E.clonePlan(s.plan) });
       ws.activeId = id;
       afterScenarioChange();
-      showTab('plan');
-      $('#sec-scenario').scrollIntoView({ block: 'start' });
+      navigate('scenarios');
+      const name = $('#sec-scenario input');
+      if (name) { name.scrollIntoView({ block: 'center' }); name.focus(); name.select(); }
+      toast('A copy of the plan. Rename it here, then change anything in it: every edit applies to this scenario only.');
     });
-    for (const b of $$('.seg button')) b.addEventListener('click', () => { ws.settings.realDollars = b.dataset.real === '1'; save(); renderResults(); compareDirty = true; });
+    for (const b of $$('.seg button')) b.addEventListener('click', () => { ws.settings.realDollars = b.dataset.real === '1'; save(); compareDirty = true; renderResults(); });
     $('#themeBtn').addEventListener('click', () => {
       const order = ['auto', 'light', 'dark'];
       ws.settings.theme = order[(order.indexOf(ws.settings.theme) + 1) % 3];
@@ -3354,32 +3805,24 @@
     $('#importBtn').addEventListener('click', () => { $('#dataMenu').open = false; $('#importFile').click(); });
     $('#importFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); });
     $('#ovAddGoal').addEventListener('click', () => openGoalWizard());
-    $('#ovManageGoals').addEventListener('click', () => showTab('goals'));
+    $('#ovManageGoals').addEventListener('click', () => navigate('goals'));
     $('#blankBtn').addEventListener('click', () => {
       $('#dataMenu').open = false;
-      if (!confirm('Start a blank plan? This replaces everything in Horizon. Export first if you want to keep your data.')) return;
+      if (!confirm('Start a blank plan? This replaces everything in Horizon. Save to a file first if you want to keep your data.')) return;
       const id = E.uid();
-      const blank = E.normalizePlan({ startYear: E.currentYear(), household: { region: 'scotland', people: [{ name: 'You', age: 35, retireAge: 65 }] }, accounts: [], income: [], expenses: [], events: [], goals: [] });
+      const blank = E.normalizePlan({ startYear: E.currentYear(), asOf: today(), household: { region: 'scotland', people: [{ name: 'You', age: 35, retireAge: 65 }] }, accounts: [], income: [], expenses: [], events: [], goals: [] });
       ws = E.normalizeWorkspace({ scenarios: [{ id, name: 'My plan', plan: blank }], activeId: id, checkins: [], settings: ws.settings });
       afterImport();
-      showTab('plan');
-      toast('A blank plan: start with Household, then add income, spending and accounts. Add goals from the Overview or Goals tab.');
+      navigate('money/assumptions');
+      toast('A blank plan, with figures as at today. Start with who it is for, then add accounts, income and spending; then add goals on Home.');
     });
     $('#resetBtn').addEventListener('click', () => {
       $('#dataMenu').open = false;
-      if (!confirm('Replace everything with the example plan? Export first if you want to keep your data.')) return;
+      if (!confirm('Replace everything with the example plan? Save to a file first if you want to keep your data.')) return;
       ws = E.defaultWorkspace();
       afterImport();
     });
     document.addEventListener('click', e => { const m = $('#dataMenu'); if (m.open && !m.contains(e.target)) m.open = false; });
-
-    for (const b of $$('[data-toggle-table]')) {
-      b.addEventListener('click', () => {
-        const t = $('#' + b.dataset.toggleTable);
-        t.hidden = !t.hidden;
-        b.textContent = t.hidden ? 'Show table' : 'Hide table';
-      });
-    }
 
     $('#runsSelect').addEventListener('change', e => { ws.settings.runs = parseInt(e.target.value, 10); refresh(); });
     $('#rerollBtn').addEventListener('click', () => { ws.settings.seed = Math.floor(Math.random() * 2 ** 31); refresh(); });
@@ -3389,12 +3832,16 @@
     $('#compareRun').addEventListener('click', runCompare);
 
     $('#checkinBtn').addEventListener('click', recordCheckin);
-    $('#reviewBtn').addEventListener('click', openReview);
     $('#rvNext').addEventListener('click', () => { if (rv.step < RV_STEPS.length - 1) { rv.step++; renderReview(); } });
     $('#rvBack').addEventListener('click', () => { if (rv.step > 0) { rv.step--; renderReview(); } });
     $('#rvClose').addEventListener('click', () => $('#reviewWiz').close());
     $('#rvForm').addEventListener('submit', e => e.preventDefault());
     $('#manualCheckin').addEventListener('submit', addManualCheckin);
+
+    $('#udSave').addEventListener('click', saveUpdate);
+    $('#udCancel').addEventListener('click', () => $('#updateDlg').close());
+    $('#udClose').addEventListener('click', () => $('#updateDlg').close());
+    $('#udForm').addEventListener('submit', e => e.preventDefault());
 
     $('#wizNext').addEventListener('click', wizardNext);
     $('#wizBack').addEventListener('click', () => { if (wiz.step > 0) { wiz.step--; renderWizard(); } });
@@ -3424,11 +3871,10 @@
   wire();
   applyTheme();
   renderScenarioPicker();
+  routeChrome(parseRoute(location.hash));
   renderPlan();
   refresh();
-  const initial = (location.hash || '').slice(1);
-  showTab(TABS.includes(initial) ? initial : 'overview');
 
   // Exposed for automated tests only.
-  window.__horizon = { get ws() { return ws; }, get model() { return model; }, refresh, showTab, openReview };
+  window.__horizon = { get ws() { return ws; }, get model() { return model; }, get route() { return route; }, refresh, showTab, navigate, openReview, openUpdate };
 })();

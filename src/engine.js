@@ -57,6 +57,19 @@
     return new Date().getFullYear();
   }
 
+  // Dates are ISO strings (YYYY-MM-DD), in local time.
+  const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  function todayISO(d = new Date()) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  const isDate = v => typeof v === 'string' && ISO_DATE.test(v) && !Number.isNaN(Date.parse(v));
+
+  // The date a plan's figures describe (balances, pay and spending as they were then).
+  // Year 0 of the projection starts on this date. Older plans without one start on 1 January.
+  function asOfDate(plan) {
+    return isDate(plan.asOf) ? plan.asOf : `${plan.startYear}-01-01`;
+  }
+
   function defaultAssumptions() {
     return {
       inflation: 2.5,
@@ -120,6 +133,7 @@
     const p2 = { id: 'p2', name: 'Sam', age: 36, retireAge: 55, endAge: 95, statePension: R.STATE_PENSION_FULL, statePensionAge: 68, pensionAccessAge: R.MIN_PENSION_AGE, extraPension: 0 };
     return {
       startYear,
+      asOf: startYear === currentYear() ? todayISO() : `${startYear}-01-01`,
       household: { region: 'scotland', ignoreTax: false, people: [p1, p2] },
       accounts: [
         { id: uid(), name: 'Current & savings', type: 'cash', owner: 'joint', balance: 18000 },
@@ -164,7 +178,7 @@
       scenarios: [{ id, name: 'Base plan', plan: defaultPlan() }],
       checkins: [],
       dismissed: [],
-      settings: { realDollars: true, runs: 1000, seed: 42, theme: 'auto', confidence: 90 },
+      settings: { realDollars: true, runs: 1000, seed: 42, theme: 'auto', confidence: 90, lastSaved: null },
     };
   }
 
@@ -286,6 +300,10 @@
         contribution: Math.min(R.LISA.maxContribution, Math.max(0, num(a.contribution, type === 'lisa' ? R.LISA.maxContribution : 0))),
         purpose: oneOf(a.purpose, ['retirement', 'home'], 'retirement'),
         homeYear: Math.round(num(a.homeYear, 0)),
+        // A balance read since the plan's figures date (e.g. from a banking app). It shows on
+        // the home page and feeds the next yearly review; the projection keeps the figures.
+        latest: a.latest && typeof a.latest === 'object' && isDate(a.latest.date) && Number.isFinite(+a.latest.value)
+          ? { value: Math.max(0, +a.latest.value), date: a.latest.date } : null,
       };
     });
 
@@ -345,6 +363,7 @@
 
     return {
       startYear,
+      asOf: isDate(p.asOf) ? p.asOf : null,   // filled in by normalizeWorkspace when missing
       household: { region: oneOf(hh.region, ['scotland', 'ruk'], 'scotland'), ignoreTax: !!hh.ignoreTax, people },
       accounts, income, expenses, events,
       strategy: fill(p.strategy, defaultStrategy()),
@@ -401,7 +420,9 @@
     if (!w || typeof w !== 'object') return defaultWorkspace();
     if (!Array.isArray(w.scenarios) && (w.household || w.accounts)) {
       const id = uid();
-      return { ...defaultWorkspace(), activeId: id, scenarios: [{ id, name: 'Imported plan', plan: normalizePlan(w) }] };
+      const plan = normalizePlan(w);
+      if (!plan.asOf) plan.asOf = plan.startYear === currentYear() ? todayISO() : `${plan.startYear}-01-01`;
+      return { ...defaultWorkspace(), activeId: id, scenarios: [{ id, name: 'Imported plan', plan }] };
     }
     const scenarios = arr(w.scenarios).map((s, i) => ({
       id: str(s.id, uid()), name: str(s.name, `Scenario ${i + 1}`), plan: normalizePlan(s.plan),
@@ -409,11 +430,19 @@
     if (!scenarios.length) return defaultWorkspace();
     const ds = defaultWorkspace().settings;
     const st = w.settings || {};
+    const checkins = arr(w.checkins).map(normalizeCheckin).sort((a, b) => a.date.localeCompare(b.date));
+    // Plans saved before figures had a date: the check-in recorded for that year, else today
+    // for this year's plan, else 1 January.
+    for (const s of scenarios) {
+      if (s.plan.asOf) continue;
+      const c = checkins.filter(x => x.year === s.plan.startYear && isDate(x.date)).pop();
+      s.plan.asOf = c ? c.date : s.plan.startYear === currentYear() ? todayISO() : `${s.plan.startYear}-01-01`;
+    }
     return {
       version: 4,
       activeId: scenarios.some(s => s.id === w.activeId) ? w.activeId : scenarios[0].id,
       scenarios,
-      checkins: arr(w.checkins).map(normalizeCheckin).sort((a, b) => a.date.localeCompare(b.date)),
+      checkins,
       dismissed: Array.isArray(w.dismissed) ? [...new Set(w.dismissed.filter(x => typeof x === 'string'))] : [],
       settings: {
         realDollars: st.realDollars !== undefined ? !!st.realDollars : ds.realDollars,
@@ -421,6 +450,7 @@
         seed: Math.round(num(st.seed, ds.seed)),
         theme: oneOf(st.theme, ['auto', 'light', 'dark'], 'auto'),
         confidence: Math.min(99, Math.max(50, num(st.confidence, ds.confidence))),
+        lastSaved: isDate(st.lastSaved) ? st.lastSaved : null,   // when the plan was last saved to a file
       },
     };
   }
@@ -1560,7 +1590,8 @@
     const nwGoals = plan.goals.filter(g => g.type === 'netWorth' || g.type === 'passiveIncome');
     const efGoals = plan.goals.filter(g => g.type === 'emergency');
     const hits = {};
-    for (const g of nwGoals.concat(efGoals)) hits[g.id] = new Float64Array(T);
+    const gvals = {};   // each goal's own measure, every run and year (for its range chart)
+    for (const g of nwGoals.concat(efGoals)) { hits[g.id] = new Float64Array(T); gvals[g.id] = new Float64Array(T * runs); }
     const debtPayments = plan.accounts.filter(a => a.type === 'debt' && !a.excluded).reduce((acc, a) => acc + a.payment * 12, 0);
     const failYears = [];
     const snap = { cash: 0, isa: 0, gia: 0, pension: 0, bonds: 0, property: 0, debt: 0, short: 0 };
@@ -1588,14 +1619,15 @@
         if (!paid && out.debt[t] <= 0.5) paid = true;
         if (paid) debtFree[t] += 1;
         nwGoals.forEach((g, j) => {
-          if (!reached[j]) {
-            const v = g.type === 'passiveIncome' ? passiveIncome(snap, nonWorkIncome(pre, t), g) : goalValue(snap, g.measure);
-            reached[j] = v >= goalTarget(g, econ.price[t]);
-          }
+          const v = g.type === 'passiveIncome' ? passiveIncome(snap, nonWorkIncome(pre, t), g) : goalValue(snap, g.measure);
+          gvals[g.id][k] = v;
+          if (!reached[j]) reached[j] = v >= goalTarget(g, econ.price[t]);
           if (reached[j]) hits[g.id][t] += 1;
         });
         for (const g of efGoals) {
-          if (t < N && emergencyHave(g, snap) >= emergencyNeed(g, pre, out.debt[t] > 0.5 ? debtPayments : 0, t) - 0.5) hits[g.id][t] += 1;
+          const have = emergencyHave(g, snap);
+          gvals[g.id][k] = have;
+          if (t < N && have >= emergencyNeed(g, pre, out.debt[t] > 0.5 ? debtPayments : 0, t) - 0.5) hits[g.id][t] += 1;
         }
       }
       if (out.short[N] > 0) {
@@ -1605,12 +1637,15 @@
       }
     }
 
-    const series = {};
-    for (const k of SERIES) {
+    const both = arr => {
       const real = new Float64Array(T * runs);
-      for (let j = 0; j < real.length; j++) real[j] = data[k][j] / price[j];
-      series[k] = { nominal: bandsOf(data[k], runs, T), real: bandsOf(real, runs, T) };
-    }
+      for (let j = 0; j < real.length; j++) real[j] = arr[j] / price[j];
+      return { nominal: bandsOf(arr, runs, T), real: bandsOf(real, runs, T) };
+    };
+    const series = {};
+    for (const k of SERIES) series[k] = both(data[k]);
+    const goalBands = {};
+    for (const id in gvals) goalBands[id] = both(gvals[id]);
     const years = [];
     for (let t = 0; t < T; t++) years.push(plan.startYear + t);
     for (const id in hits) hits[id] = Array.from(hits[id], c => c / runs);
@@ -1623,6 +1658,7 @@
       fundedByYear: Array.from(funded, c => c / runs),
       debtFreeByYear: Array.from(debtFree, c => c / runs),
       goalHits: hits,
+      goalBands,
       fails: failYears.length,
       successRate: (runs - failYears.length) / runs,
       medianFailYear: failYears.length ? failYears[Math.floor(failYears.length / 2)] : null,
@@ -1904,7 +1940,7 @@
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
     incomeAfterCosts, taxOf, dbPensionAt, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
-    uid, currentYear, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
+    uid, currentYear, todayISO, isDate, asOfDate, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     streamAt, streamWindow, isActive, growthFactor, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,

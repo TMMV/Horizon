@@ -1,12 +1,13 @@
 {
   "version": 4,
-  "activeId": "mvy3mj0a807s1",
+  "activeId": "mvy9mdqnonr51",
   "scenarios": [
     {
-      "id": "mvy3mj0a807s1",
+      "id": "mvy9mdqnonr51",
       "name": "Base plan",
       "plan": {
         "startYear": 2026,
+        "asOf": "2026-11-01",
         "household": {
           "region": "scotland",
           "ignoreTax": false,
@@ -37,7 +38,7 @@
         },
         "accounts": [
           {
-            "id": "mvy3mj0c2fgf2",
+            "id": "mvy9mdqpxqwy2",
             "name": "Current & savings",
             "type": "cash",
             "owner": "joint",
@@ -54,10 +55,11 @@
             "inIsa": false,
             "contribution": 0,
             "purpose": "retirement",
-            "homeYear": 0
+            "homeYear": 0,
+            "latest": null
           },
           {
-            "id": "mvy3mj0cbvyb3",
+            "id": "mvy9mdqpuvnr3",
             "name": "Alex stocks & shares ISA",
             "type": "isa",
             "owner": "p1",
@@ -74,10 +76,11 @@
             "inIsa": false,
             "contribution": 0,
             "purpose": "retirement",
-            "homeYear": 0
+            "homeYear": 0,
+            "latest": null
           },
           {
-            "id": "mvy3mj0clsfc4",
+            "id": "mvy9mdqqu8fk4",
             "name": "Sam stocks & shares ISA",
             "type": "isa",
             "owner": "p2",
@@ -94,10 +97,11 @@
             "inIsa": false,
             "contribution": 0,
             "purpose": "retirement",
-            "homeYear": 0
+            "homeYear": 0,
+            "latest": null
           },
           {
-            "id": "mvy3mj0chpmx5",
+            "id": "mvy9mdqqe1fc5",
             "name": "General investment account",
             "type": "gia",
             "owner": "joint",
@@ -114,10 +118,11 @@
             "inIsa": false,
             "contribution": 0,
             "purpose": "retirement",
-            "homeYear": 0
+            "homeYear": 0,
+            "latest": null
           },
           {
-            "id": "mvy3mj0c92nm6",
+            "id": "mvy9mdqqkafa6",
             "name": "Alex workplace pension",
             "type": "pension",
             "owner": "p1",
@@ -134,10 +139,11 @@
             "inIsa": false,
             "contribution": 0,
             "purpose": "retirement",
-            "homeYear": 0
+            "homeYear": 0,
+            "latest": null
           },
           {
-            "id": "mvy3mj0cx8or7",
+            "id": "mvy9mdqqel7p7",
             "name": "Sam workplace pension",
             "type": "pension",
             "owner": "p2",
@@ -154,10 +160,11 @@
             "inIsa": false,
             "contribution": 0,
             "purpose": "retirement",
-            "homeYear": 0
+            "homeYear": 0,
+            "latest": null
           },
           {
-            "id": "mvy3mj0c17wl8",
+            "id": "mvy9mdqqn4va8",
             "name": "Gilts",
             "type": "bonds",
             "owner": "joint",
@@ -174,10 +181,11 @@
             "inIsa": false,
             "contribution": 0,
             "purpose": "retirement",
-            "homeYear": 0
+            "homeYear": 0,
+            "latest": null
           },
           {
-            "id": "mvy3mj0ccg599",
+            "id": "mvy9mdqqtpej9",
             "name": "Home",
             "type": "property",
             "owner": "joint",
@@ -194,10 +202,11 @@
             "inIsa": false,
             "contribution": 0,
             "purpose": "retirement",
-            "homeYear": 0
+            "homeYear": 0,
+            "latest": null
           },
           {
-            "id": "mvy3mj0c1jqla",
+            "id": "mvy9mdqqikuua",
             "name": "Mortgage",
             "type": "debt",
             "owner": "joint",
@@ -214,12 +223,13 @@
             "inIsa": false,
             "contribution": 0,
             "purpose": "retirement",
-            "homeYear": 0
+            "homeYear": 0,
+            "latest": null
           }
         ],
         "income": [
           {
-            "id": "mvy3mj0covj2b",
+            "id": "mvy9mdqq0fqwb",
             "name": "Alex salary",
             "owner": "p1",
             "kind": "salary",
@@ -247,7 +257,7 @@
             "sacrifice": true
           },
           {
-            "id": "mvy3mj0cddxvc",
+            "id": "mvy9mdqqtyhzc",
             "name": "Sam take-home pay",
             "owner": "p2",
             "kind": "salary",
@@ -275,7 +285,7 @@
             "sacrifice": false
           },
           {
-            "id": "mvy3mj0cpifed",
+            "id": "mvy9mdqqb4vbd",
             "name": "Rental flat",
             "owner": "joint",
             "kind": "rental",
@@ -305,7 +315,7 @@
         ],
         "expenses": [
           {
-            "id": "mvy3mj0c44ate",
+            "id": "mvy9mdqqdyn8e",
             "name": "Groceries",
             "key": "",
             "category": "",
@@ -320,7 +330,7 @@
             "endAge": 95
           },
           {
-            "id": "mvy3mj0c4tixf",
+            "id": "mvy9mdqq79ggf",
             "name": "Council tax",
             "key": "",
             "category": "",
@@ -335,7 +345,7 @@
             "endAge": 95
           },
           {
-            "id": "mvy3mj0c978jg",
+            "id": "mvy9mdqqx0t2g",
             "name": "Energy",
             "key": "",
             "category": "",
@@ -350,7 +360,7 @@
             "endAge": 95
           },
           {
-            "id": "mvy3mj0csee3h",
+            "id": "mvy9mdqqodgvh",
             "name": "Insurance & subscriptions",
             "key": "",
             "category": "",
@@ -365,7 +375,7 @@
             "endAge": 95
           },
           {
-            "id": "mvy3mj0cypy7i",
+            "id": "mvy9mdqqi1bdi",
             "name": "Everything else",
             "key": "",
             "category": "",
@@ -380,7 +390,7 @@
             "endAge": 95
           },
           {
-            "id": "mvy3mj0c4h7hj",
+            "id": "mvy9mdqqypoqj",
             "name": "Childcare",
             "key": "",
             "category": "",
@@ -395,7 +405,7 @@
             "endAge": 46
           },
           {
-            "id": "mvy3mj0cze4zk",
+            "id": "mvy9mdqq7twsk",
             "name": "Holidays",
             "key": "",
             "category": "",
@@ -412,14 +422,14 @@
         ],
         "events": [
           {
-            "id": "mvy3mj0csuo3l",
+            "id": "mvy9mdqq20wgl",
             "name": "Replace car",
             "kind": "expense",
             "year": 2029,
             "amount": 18000
           },
           {
-            "id": "mvy3mj0c91g7m",
+            "id": "mvy9mdqq6s3km",
             "name": "Kitchen renovation",
             "kind": "expense",
             "year": 2032,
@@ -466,7 +476,7 @@
         },
         "goals": [
           {
-            "id": "mvy3mj0cmwugn",
+            "id": "mvy9mdqqyg5zn",
             "name": "",
             "color": 0,
             "icon": "goal",
@@ -483,7 +493,7 @@
             "counts": "cash"
           },
           {
-            "id": "mvy3mj0c16emo",
+            "id": "mvy9mdqq44v3o",
             "name": "",
             "color": 1,
             "icon": "debt",
@@ -500,7 +510,7 @@
             "counts": "cash"
           },
           {
-            "id": "mvy3mj0cek6bp",
+            "id": "mvy9mdqqg1ctp",
             "name": "",
             "color": 2,
             "icon": "retire",
@@ -528,6 +538,7 @@
     "runs": 1000,
     "seed": 42,
     "theme": "auto",
-    "confidence": 90
+    "confidence": 90,
+    "lastSaved": null
   }
 }

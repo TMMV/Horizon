@@ -30,8 +30,9 @@
       <details class="menu" id="dataMenu">
         <summary class="btn ghost">Data</summary>
         <div class="menu-pop" role="menu">
-          <button type="button" role="menuitem" id="exportBtn">Export to file</button>
-          <button type="button" role="menuitem" id="importBtn">Import from file</button>
+          <button type="button" role="menuitem" id="exportBtn">Save to a file…</button>
+          <button type="button" role="menuitem" id="importBtn">Open a saved file…</button>
+          <p class="menu-note" id="savedNote"></p>
           <button type="button" role="menuitem" id="blankBtn">Start a blank plan</button>
           <button type="button" role="menuitem" id="resetBtn">Reset to example</button>
         </div>
@@ -41,88 +42,197 @@
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
-    <button role="tab" type="button" data-tab="overview" aria-selected="true">Overview</button>
+    <button role="tab" type="button" data-tab="home" aria-selected="true">Home</button>
     <button role="tab" type="button" data-tab="goals" aria-selected="false">Goals</button>
-    <button role="tab" type="button" data-tab="plan" aria-selected="false">Plan</button>
-    <button role="tab" type="button" data-tab="cashflow" aria-selected="false">Cash flow</button>
-    <button role="tab" type="button" data-tab="montecarlo" aria-selected="false">Monte Carlo</button>
+    <button role="tab" type="button" data-tab="money" aria-selected="false">Money</button>
+    <button role="tab" type="button" data-tab="outlook" aria-selected="false">Outlook</button>
     <button role="tab" type="button" data-tab="scenarios" aria-selected="false">Scenarios</button>
-    <button role="tab" type="button" data-tab="progress" aria-selected="false">Progress</button>
-    <button role="tab" type="button" data-tab="workings" aria-selected="false">Workings</button>
+    <button role="tab" type="button" data-tab="review" aria-selected="false">Review</button>
   </nav>
-
-  <div class="status-strip" id="statusStrip" aria-live="polite"></div>
 
   <main>
     <div id="warnings"></div>
 
-    <!-- Overview -->
-    <section class="view" id="view-overview" role="tabpanel">
-      <section class="ov-hero" id="ovHero" aria-label="Summary">
-        <div class="hero-col hero-main">
-          <div id="heroMain"></div>
-          <div id="heroSpark"></div>
-          <p class="hero-note" id="heroSparkNote"></p>
-        </div>
-        <div class="hero-col hero-next" id="heroNext"></div>
-      </section>
+    <!-- Home: what you have today and how your goals are doing -->
+    <section class="view" id="view-home" role="tabpanel">
+      <section class="card portfolio" id="homePortfolio" aria-labelledby="pfTitle"></section>
       <section class="card" id="ovGoalsCard" aria-labelledby="ovGoalsTitle">
         <div class="card-head">
           <div>
             <h2 id="ovGoalsTitle">Your goals</h2>
-            <p class="sub">Everything in the plan works towards these. Each goal keeps its colour across every chart.</p>
+            <p class="sub" id="ovGoalsSub">Everything in the plan works towards these. Open one to see how it is tracking and what moves it.</p>
           </div>
           <div class="controls">
-            <button type="button" class="btn small" id="ovManageGoals">Manage goals</button>
+            <button type="button" class="btn small" id="ovManageGoals">All goals</button>
             <button type="button" class="btn small primary" id="ovAddGoal">+ Add a goal</button>
           </div>
         </div>
         <div class="goal-strip" id="ovGoalStrip"></div>
       </section>
-      <div class="tiles" id="ovTiles"></div>
-      <div class="card">
+      <section class="card">
         <div class="card-head">
           <div>
-            <h2>Net worth by account</h2>
+            <h2>Where you’re heading</h2>
             <p class="sub" id="ovChartSub"></p>
           </div>
         </div>
         <div class="chart" id="ovChart"></div>
         <div class="legend" id="ovLegend"></div>
-      </div>
+      </section>
       <div class="grid-2 ov-bottom">
-        <div class="card">
-          <h2>Milestones</h2>
-          <p class="sub">On average returns. Your yearly review is on here too.</p>
-          <ol class="timeline" id="ovMilestones"></ol>
-        </div>
-        <div class="card" id="ovInsights"></div>
+        <section class="card" id="homeYear"></section>
+        <section class="card" id="ovInsights"></section>
       </div>
     </section>
 
-    <!-- Goals -->
+    <!-- Goals: the list, and one page per goal -->
     <section class="view" id="view-goals" role="tabpanel" hidden>
+      <div class="stack" id="goalsList">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Your goals</h2>
+              <p class="sub">The chance of reaching each one across simulated futures, and when you would on average returns. Open a goal for its own projection, what moves it and what it would take.</p>
+            </div>
+            <div class="controls">
+              <button type="button" class="btn" id="lifeBtn">Life check-up</button>
+              <button type="button" class="btn primary" id="addGoalBtn">+ Add a goal</button>
+            </div>
+          </div>
+          <div class="goal-list" id="goalList"></div>
+        </section>
+        <section class="card" id="driversCard">
+          <div class="card-head">
+            <div>
+              <h2>What moves your goals</h2>
+              <p class="sub" id="driversSub">How much each change would raise or lower the chance of every goal, in percentage points. Choices you control first, then risks.</p>
+            </div>
+          </div>
+          <div id="driversBody"></div>
+        </section>
+        <section class="card">
+          <h2>Milestones</h2>
+          <p class="sub">On average returns. Your yearly review is on here too.</p>
+          <ol class="timeline" id="ovMilestones"></ol>
+        </section>
+      </div>
+      <div class="stack" id="goalPage" hidden></div>
+    </section>
+
+    <!-- Money: every input, each with its own prediction -->
+    <section class="view" id="view-money" role="tabpanel" hidden>
+      <div class="asof-bar card" id="asOfBar"></div>
+      <div class="plan-layout">
+        <nav class="plan-nav" id="moneyNav" aria-label="Money sections"></nav>
+        <div class="plan-body">
+          <div class="money-page stack" data-page="portfolio">
+            <section class="card" id="sec-accounts" aria-labelledby="h-accounts"></section>
+            <div class="stack" id="mpPortfolio"></div>
+          </div>
+          <div class="money-page stack" data-page="income" hidden>
+            <section class="card" id="sec-income" aria-labelledby="h-income"></section>
+            <div class="stack" id="mpIncome"></div>
+          </div>
+          <div class="money-page stack" data-page="spending" hidden>
+            <section class="card" id="sec-expenses" aria-labelledby="h-expenses"></section>
+            <section class="card" id="sec-events" aria-labelledby="h-events"></section>
+            <div class="stack" id="mpSpending"></div>
+          </div>
+          <div class="money-page stack" data-page="cashflow" hidden>
+            <section class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Money in and out each year</h2>
+                  <p class="sub">Above the line: where money comes from. Below: where it goes. Saving includes ISA, GIA, cash buffer and your own pension contributions.</p>
+                </div>
+              </div>
+              <div class="chart" id="cfChart"></div>
+              <div class="legend" id="cfLegend"></div>
+            </section>
+            <div class="stack" id="mpTax"></div>
+          </div>
+          <div class="money-page stack" data-page="assumptions" hidden>
+            <section class="card" id="sec-household" aria-labelledby="h-household"></section>
+            <section class="card" id="sec-strategy" aria-labelledby="h-strategy"></section>
+            <section class="card" id="sec-market" aria-labelledby="h-market"></section>
+            <div class="stack" id="mpAssumptions"></div>
+            <section class="card" id="sec-tax" aria-labelledby="h-tax"></section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Outlook: the range of outcomes -->
+    <section class="view" id="view-outlook" role="tabpanel" hidden>
+      <div class="tiles" id="mcTiles"></div>
       <div class="card">
         <div class="card-head">
           <div>
-            <h2>Your goals</h2>
-            <p class="sub">Each goal shows the chance of reaching it across simulated futures, when you would reach it on average returns, and what it would take.</p>
+            <h2>Range of outcomes: savings, investments and pensions</h2>
+            <p class="sub" id="mcSub"></p>
           </div>
           <div class="controls">
-            <button type="button" class="btn" id="lifeBtn">Life check-up</button>
-            <button type="button" class="btn primary" id="addGoalBtn">Add a goal</button>
+            <label>Simulations
+              <select id="runsSelect">
+                <option>500</option><option>1000</option><option>2000</option><option>5000</option><option>10000</option>
+              </select>
+            </label>
+            <button type="button" class="btn small" id="rerollBtn">Re-roll</button>
           </div>
         </div>
-        <div class="goal-grid" id="goalCards"></div>
+        <div class="chart" id="mcChart"></div>
+        <div class="legend" id="mcLegend"></div>
       </div>
-      <div class="card" id="driversCard">
+      <div class="grid-2">
+        <div class="card">
+          <h2>Chance the money lasts</h2>
+          <p class="sub">Share of simulations still fully funded in each year.</p>
+          <div class="chart" id="mcFundedChart"></div>
+        </div>
+        <div class="card">
+          <h2>Percentiles at key years</h2>
+          <p class="sub">Savings, investments and pensions. The highlighted row is retirement.</p>
+          <div class="table-wrap" id="mcTable"></div>
+        </div>
+      </div>
+      <div class="card" id="histCard">
         <div class="card-head">
           <div>
-            <h2>What moves your goals</h2>
-            <p class="sub" id="driversSub">How much each change would raise or lower the chance of every goal, in percentage points. Choices you control first, then risks.</p>
+            <h2>Replaying history</h2>
+            <p class="sub" id="histSub"></p>
           </div>
         </div>
-        <div id="driversBody"></div>
+        <div class="tiles" id="histTiles"></div>
+        <h3 class="chart-title">Money left at the end of the plan, by the year history starts (today’s £)</h3>
+        <div class="chart" id="histBars"></div>
+        <div class="legend" id="histBarsLegend"></div>
+        <h3 class="chart-title">Savings, investments and pensions through famous stretches of history (today’s £)</h3>
+        <div class="chart" id="histLines"></div>
+        <div class="legend" id="histLegend"></div>
+        <h3 class="chart-title">Your goals: random simulations and history</h3>
+        <div id="histGoals"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Everything else that varies</h2>
+            <p class="sub" id="mcFansSub">Each simulation also draws its own inflation, salary growth, house prices and interest rates. These charts show the range. Switch any of them off in Money → Assumptions.</p>
+          </div>
+        </div>
+        <div class="fan-grid" id="mcFans"></div>
+      </div>
+    </section>
+
+    <!-- Scenarios -->
+    <section class="view" id="view-scenarios" role="tabpanel" hidden>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Scenario ideas</h2>
+            <p class="sub">Common “what ifs”. Each one adds a scenario: a copy of this plan with that change, ready to compare below and to edit.</p>
+          </div>
+        </div>
+        <div class="idea-grid" id="ideaGrid"></div>
       </div>
       <div class="card" id="explorer">
         <div class="card-head">
@@ -147,107 +257,6 @@
           </div>
         </div>
       </div>
-    </section>
-
-    <!-- Plan editor -->
-    <section class="view" id="view-plan" role="tabpanel" hidden>
-      <div class="plan-layout">
-        <nav class="plan-nav" id="planNav" aria-label="Plan sections"></nav>
-        <div class="plan-body" id="planBody"></div>
-      </div>
-    </section>
-
-    <!-- Cash flow -->
-    <section class="view" id="view-cashflow" role="tabpanel" hidden>
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Money in and out each year</h2>
-            <p class="sub">Above the line: where money comes from. Below: where it goes. Saving includes ISA, GIA, cash buffer and your own pension contributions.</p>
-          </div>
-        </div>
-        <div class="chart" id="cfChart"></div>
-        <div class="legend" id="cfLegend"></div>
-      </div>
-    </section>
-
-    <!-- Monte Carlo -->
-    <section class="view" id="view-montecarlo" role="tabpanel" hidden>
-      <div class="tiles" id="mcTiles"></div>
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Range of outcomes: liquid assets</h2>
-            <p class="sub" id="mcSub"></p>
-          </div>
-          <div class="controls">
-            <label>Simulations
-              <select id="runsSelect">
-                <option>500</option><option>1000</option><option>2000</option><option>5000</option><option>10000</option>
-              </select>
-            </label>
-            <button type="button" class="btn small" id="rerollBtn">Re-roll</button>
-          </div>
-        </div>
-        <div class="chart" id="mcChart"></div>
-        <div class="legend" id="mcLegend"></div>
-      </div>
-      <div class="grid-2">
-        <div class="card">
-          <h2>Chance the money lasts</h2>
-          <p class="sub">Share of simulations still fully funded in each year.</p>
-          <div class="chart" id="mcFundedChart"></div>
-        </div>
-        <div class="card">
-          <h2>Chance of reaching your goal</h2>
-          <p class="sub" id="mcGoalSub"></p>
-          <div class="chart" id="mcGoalChart"></div>
-        </div>
-      </div>
-      <div class="card" id="histCard">
-        <div class="card-head">
-          <div>
-            <h2>Replaying history</h2>
-            <p class="sub" id="histSub"></p>
-          </div>
-        </div>
-        <div class="tiles" id="histTiles"></div>
-        <h3 class="chart-title">Money left at the end of the plan, by the year history starts (today’s £)</h3>
-        <div class="chart" id="histBars"></div>
-        <div class="legend" id="histBarsLegend"></div>
-        <h3 class="chart-title">Savings, investments and pensions through famous stretches of history (today’s £)</h3>
-        <div class="chart" id="histLines"></div>
-        <div class="legend" id="histLegend"></div>
-        <h3 class="chart-title">Your goals: random simulations and history</h3>
-        <div id="histGoals"></div>
-      </div>
-      <div class="card">
-        <h2>Percentiles at key years</h2>
-        <div class="table-wrap" id="mcTable"></div>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Everything else that varies</h2>
-            <p class="sub" id="mcFansSub">Each simulation also draws its own inflation, salary growth, house prices and interest rates. These charts show the range. Switch any of them off in Plan → Markets &amp; inflation.</p>
-          </div>
-        </div>
-        <div class="fan-grid" id="mcFans"></div>
-      </div>
-    </section>
-
-    <!-- (Monte Carlo continued: everything else that varies) -->
-    <!-- Scenarios -->
-    <section class="view" id="view-scenarios" role="tabpanel" hidden>
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Scenario ideas</h2>
-            <p class="sub">Common “what ifs”. Each one adds a scenario: a copy of this plan with that change, ready to compare below and to edit.</p>
-          </div>
-        </div>
-        <div class="idea-grid" id="ideaGrid"></div>
-      </div>
       <div class="card">
         <div class="card-head">
           <div>
@@ -264,29 +273,30 @@
         </div>
         <div id="sweepResults"></div>
       </div>
-      <div class="card">
+      <div class="card" id="savedScenarios">
         <div class="card-head">
           <div>
-            <h2>Saved scenarios</h2>
-            <p class="sub">Each scenario is a full copy of the plan. Use Duplicate at the top to make a new one, then edit it.</p>
+            <h2>Your scenarios</h2>
+            <p class="sub">Each scenario is a full copy of the plan. Duplicate (at the top) to make a new one, then change anything in it.</p>
           </div>
           <button type="button" class="btn small" id="compareRun">Refresh comparison</button>
         </div>
+        <div class="scenario-edit" id="sec-scenario"></div>
         <div id="compareResults"></div>
       </div>
     </section>
 
-    <!-- Progress -->
-    <section class="view" id="view-progress" role="tabpanel" hidden>
+    <!-- Review: the yearly review and past check-ins -->
+    <section class="view" id="view-review" role="tabpanel" hidden>
+      <section class="card review-intro" id="reviewIntro"></section>
       <div class="card">
         <div class="card-head">
           <div>
-            <h2>Yearly check-ins</h2>
-            <p class="sub">Each October, the yearly review walks you through every number, compares it with last year’s prediction and rolls all your scenarios forward. Each check-in saves your actual numbers and the projection you made.</p>
+            <h2>How your plans have turned out</h2>
+            <p class="sub">Each review saves your actual numbers and the projection you made, so the next one can show how close it was.</p>
           </div>
           <div class="controls">
-            <button type="button" class="btn primary" id="reviewBtn">Start yearly review</button>
-            <button type="button" class="btn" id="checkinBtn" title="Save today's numbers without the guided review">Quick check-in</button>
+            <button type="button" class="btn small" id="checkinBtn" title="Save today's figures and projection without the guided review">Save a snapshot</button>
           </div>
         </div>
         <div class="chart" id="progChart"></div>
@@ -305,15 +315,6 @@
           <button type="submit" class="btn">Add</button>
         </form>
       </details>
-    </section>
-    <!-- Workings -->
-    <section class="view" id="view-workings" role="tabpanel" hidden>
-      <div class="card">
-        <h2>Workings</h2>
-        <p class="sub" id="wkIntro"></p>
-        <nav class="chips" id="wkNav" aria-label="Workings sections"></nav>
-      </div>
-      <div id="wkBody" class="stack"></div>
     </section>
   </main>
 
@@ -405,11 +406,32 @@
     </form>
   </dialog>
 
+  <dialog id="updateDlg" class="wide" aria-labelledby="udTitle">
+    <form method="dialog" class="wizard" id="udForm">
+      <header class="wiz-head">
+        <div>
+          <p class="wiz-step">Between reviews</p>
+          <h2 id="udTitle">Update balances</h2>
+          <p class="sub">Enter what an account holds on the date below, from a banking app or statement. Leave the rest as estimated. Your goals keep using the figures from your last review; these updates feed into the next one.</p>
+        </div>
+        <button type="button" class="btn ghost icon-btn" id="udClose" aria-label="Close">✕</button>
+      </header>
+      <div class="wiz-body" id="udBody"></div>
+      <footer class="wiz-foot">
+        <div class="wiz-total" id="udNote"></div>
+        <div class="controls">
+          <button type="button" class="btn" id="udCancel">Cancel</button>
+          <button type="button" class="btn primary" id="udSave">Save updates</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <footer class="page-foot">
     Horizon is a planning model, not financial advice. UK rules for tax year <span id="taxYear"></span>; check
-    figures on gov.uk and gov.scot. Your plan is stored only in this browser. Use Data → Export to back it up.
+    figures on gov.uk and gov.scot. Your plan is stored only in this browser. Use Data → Save to a file to keep a copy or move to another computer.
   </footer>
 
   <script src="data/market.js"></script>

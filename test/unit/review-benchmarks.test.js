@@ -10,9 +10,12 @@ const B = require('../../src/benchmarks');
 function workspace() {
   const ws = E.defaultWorkspace();
   const p = ws.scenarios[0].plan;
-  ws.checkins.push(E.makeCheckin(p, 'Base plan', `${p.startYear}-10-15`));
+  p.asOf = `${p.startYear}-10-15`;
+  ws.checkins.push(E.makeCheckin(p, 'Base plan', p.asOf));
   return ws;
 }
+// A review a year after the figures date.
+const nextYear = ws => { const y = ws.scenarios[0].plan.startYear + 1; return { year: y, date: `${y}-10-15` }; };
 
 test('check-ins record the prediction by account type', () => {
   const ws = workspace();
@@ -49,7 +52,7 @@ test('defined benefit pensions build up by a year of accrual when rolled forward
 
 test('a review left untouched matches the prediction exactly', () => {
   const ws = workspace();
-  const d = RV.start(ws, { year: ws.scenarios[0].plan.startYear + 1 });
+  const d = RV.start(ws, nextYear(ws));
   assert.equal(d.years, 1);
   assert.ok(d.predicted && d.predicted.byType);
   const v = RV.variance(d);
@@ -60,7 +63,7 @@ test('a review left untouched matches the prediction exactly', () => {
 
 test('the variance explains the difference by account type', () => {
   const ws = workspace();
-  const d = RV.start(ws, { year: ws.scenarios[0].plan.startYear + 1 });
+  const d = RV.start(ws, nextYear(ws));
   const isa = d.plan.accounts.find(a => a.type === 'isa');
   const debt = d.plan.accounts.find(a => a.type === 'debt');
   RV.setValue(d, 'accounts', isa.id, isa.balance + 10000);
@@ -82,7 +85,7 @@ test('applying a review rolls every selected scenario and records a check-in', (
   const third = { id: 'own', name: 'Own inflation', plan: E.clonePlan(base.plan) };
   third.plan.assumptions.inflation = 4;
   ws.scenarios.push(third);
-  const d = RV.start(ws, { year: base.plan.startYear + 1 });
+  const d = RV.start(ws, nextYear(ws));
   const isa = d.plan.accounts.find(a => a.type === 'isa');
   RV.setValue(d, 'accounts', isa.id, 99999);
   d.market.inflation.next = 3;
@@ -104,7 +107,7 @@ test('applying a review rolls every selected scenario and records a check-in', (
 test('unselected scenarios are left alone', () => {
   const ws = workspace();
   ws.scenarios.push({ id: 'x', name: 'X', plan: E.clonePlan(ws.scenarios[0].plan) });
-  const d = RV.start(ws, { year: ws.scenarios[0].plan.startYear + 1 });
+  const d = RV.start(ws, nextYear(ws));
   const out = RV.apply(ws, d, { scenarioIds: [d.scenarioId], date: '2030-10-01' });
   assert.equal(out.scenarios.find(s => s.id === 'x').plan.startYear, ws.scenarios[0].plan.startYear);
 });

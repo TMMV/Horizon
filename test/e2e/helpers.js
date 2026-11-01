@@ -18,8 +18,29 @@ async function openApp(page, hash = '') {
   return { problems, external };
 }
 
+// A top-level section, by clicking its tab.
 async function tab(page, name) {
   await page.click(`.tabs button[data-tab="${name}"]`);
+  await page.waitForTimeout(150);
+}
+
+// Any page by its address: "money/income", "goal/<id>", "outlook"...
+async function go(page, route) {
+  const [top, sub] = route.split('/');
+  if (top === 'money' && sub) {
+    if (!(await page.locator('#view-money').isVisible())) await tab(page, 'money');
+    await page.click(`#moneyNav a[href="#money/${sub}"]`);
+    await page.waitForTimeout(150);
+    return;
+  }
+  await page.evaluate(r => window.__horizon.navigate(r), route);
+  await page.waitForTimeout(150);
+}
+
+// Open a goal's own page from the Goals list.
+async function openGoal(page, text) {
+  await tab(page, 'goals');
+  await page.locator('#goalList .gl-row', { hasText: text }).first().click();
   await page.waitForTimeout(150);
 }
 
@@ -28,4 +49,4 @@ async function settle(page) {
   await page.waitForTimeout(400);
 }
 
-module.exports = { APP_URL, openApp, tab, settle };
+module.exports = { APP_URL, openApp, tab, go, openGoal, settle };
