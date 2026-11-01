@@ -108,18 +108,55 @@ browser; your plan is saved only on your device (export it from the Data menu to
   `data/market.js` and refreshed weekly by a GitHub Action, with suggested planning
   assumptions you can apply in one click.
 
-## Use it
+## Run it on your computer
 
-Open `index.html` in a browser. That's it: no build step, no install. It opens with a
-fictional example household; **Data → Start a blank plan** starts your own from scratch.
+Horizon is a set of plain files: nothing to build and no account. Your plan stays on your
+computer either way.
 
-Your plan is saved in the browser's local storage. **Data → Export** saves everything
-(scenarios, goals, check-ins and display settings) to one JSON file, and **Data → Import**
-loads it back, on this or another device.
+### 1. Get the files
 
-`plans/example.json` is the fictional example, ready to import. Keep your own plan next to
-it as `plans/my-plan.json`: that name (and any `horizon-plan-*.json` export) is in
-`.gitignore`, so real figures never end up in the repository.
+- **With Git:** `git clone https://github.com/TMMV/Horizon.git`
+- **Without Git:** on the [GitHub page](https://github.com/TMMV/Horizon), click **Code →
+  Download ZIP**, then unzip it somewhere you'll find it again (e.g. Documents\Horizon).
+
+### 2. Start it
+
+| On | Do this |
+|---|---|
+| **Windows** | Double-click **`start-horizon.bat`** in the Horizon folder. |
+| **macOS / Linux** | In a terminal in the Horizon folder: `./start-horizon.sh` |
+| **Anywhere with Node.js** | `npm start` |
+
+Your browser opens **http://localhost:8765**. Keep the small window that appears open while
+you use Horizon; close it (or press Ctrl+C) to stop. The scripts use
+[Node.js](https://nodejs.org) if it is installed, otherwise Python, and only this computer can
+reach the page. If you have neither, they open `index.html` straight from the folder, which
+also works.
+
+Tip (Windows): right-click `start-horizon.bat` → **Send to → Desktop (create shortcut)** to start
+Horizon from your desktop.
+
+### 3. Load your plan
+
+It opens with a fictional example household. Use **Data → Import** to load a plan file you
+exported before, or **Data → Start a blank plan** to begin your own.
+
+### Where your plan is kept
+
+- Your plan is saved in your browser, **for that address**. The start scripts always use the
+  same address (http://localhost:8765) so it is there next time. Opening `index.html` directly, or
+  the [online copy](https://tmmv.github.io/Horizon/), keeps a separate plan: use **Data → Export**
+  and **Import** to move it between them.
+- **Data → Export** saves everything (scenarios, goals, check-ins and settings) to one JSON
+  file. Do it now and then as a backup; clearing your browser's data would delete the saved plan.
+- `plans/example.json` is the fictional example. Keep your own export next to it as
+  `plans/my-plan.json`: that name (and any `horizon-plan-*.json` export) is in `.gitignore`, so
+  real figures never end up in the repository.
+
+### Updating
+
+With Git: `git pull` in the Horizon folder. Without Git: download the ZIP again and replace the
+files (keep your `plans/my-plan.json`). Your saved plan stays in the browser either way.
 
 ### Matching a spreadsheet
 
@@ -140,6 +177,8 @@ npm test               # unit tests (Node's built-in runner)
 npm run test:e2e       # browser tests with Playwright
 npm run screenshots    # capture every view, light and dark, desktop and phone
 npm run update-market  # refresh data/market.js from the Bank of England and ONS
+npm run update-history # refresh data/history.js (market history since 1928)
+npm start              # run it locally at http://localhost:8765 and open the browser
 ```
 
 On Windows the browser tests use the installed Microsoft Edge. Elsewhere run
@@ -162,6 +201,8 @@ On Windows the browser tests use the installed Microsoft Edge. Elsewhere run
 | `src/app.js` | The interface |
 | `data/market.js` | Bundled market data |
 | `scripts/update-market-data.mjs` | Fetches Bank Rate, CPI and gilt yields |
+| `scripts/update-history-data.mjs` | Builds `data/history.js` from Damodaran (NYU), FRED and ONS |
+| `scripts/serve.mjs`, `start-horizon.bat`, `start-horizon.sh` | Run it locally at http://localhost:8765 |
 | `test/unit`, `test/e2e` | Tests |
 
 ### Updating for a new tax year

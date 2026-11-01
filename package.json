@@ -4,6 +4,8 @@
   "private": true,
   "description": "Private, local-first financial planner with UK and Scottish tax rules, Monte Carlo simulation, scenarios and yearly check-ins.",
   "scripts": {
+    "start": "node scripts/serve.mjs --open",
+    "serve": "node scripts/serve.mjs",
     "test": "node --test \"test/unit/**/*.test.js\"",
     "test:e2e": "playwright test",
     "test:all": "npm test && npm run test:e2e",
