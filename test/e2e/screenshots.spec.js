@@ -59,7 +59,7 @@ for (const scheme of ['light', 'dark']) {
         await page.waitForTimeout(300);
         await page.screenshot({ path: path.join(OUT, `${scheme}-${name.replace('/', '-')}.png`), fullPage: true });
       }
-      await go(page, 'home');
+      await go(page, 'finances/portfolio');
       await page.click('#updateBtn');
       await page.locator('#udBody .rv-row').nth(4).locator('input').fill('70000');
       await page.waitForTimeout(150);

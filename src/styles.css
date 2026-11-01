@@ -1165,6 +1165,24 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 .pf-two > span { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pf-two small { color: var(--muted); font-size: 0.76rem; }
 
+.pf-toggle { display: inline-flex; align-items: center; gap: 5px; border: none; background: none; color: var(--muted); font: inherit; font-size: 0.78rem; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+.pf-toggle:hover { color: var(--text); background: var(--hover); }
+.pf-toggle .chev { display: inline-block; transition: transform 0.15s; }
+.pf-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.pf-row.group:not(.open):not(.single) { border-radius: 8px; }
+
+/* a goal's actions this year */
+.goal-year { border-left: 4px solid var(--gc); }
+.year-acts { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.year-acts li { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.year-acts li.main { background: color-mix(in srgb, var(--gc) 12%, var(--surface)); }
+.year-acts .ya-label { font-size: 0.78rem; color: var(--text-2); }
+.year-acts strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.year-acts small { color: var(--text-2); font-size: 0.8rem; }
+.goal-tile .gt-action { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-size: 0.82rem; padding: 6px 9px; border-radius: 8px; background: rgba(255, 255, 255, 0.14); margin: 2px 0 0; }
+.goal-tile .gt-action span { color: rgba(255, 255, 255, 0.82); }
+.goal-tile .gt-action strong { color: #fff; text-align: right; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
