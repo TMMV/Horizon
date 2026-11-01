@@ -21,6 +21,11 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+  // Replace an element's children, skipping empty ones (null/false never show as text).
+  function setKids(el, ...kids) {
+    el.replaceChildren(...kids.flat(Infinity).filter(k => k != null && k !== false));
+  }
+
   function h(tag, props, ...kids) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(props || {})) {
@@ -161,7 +166,7 @@
   // Legend under a chart. With the chart passed in, each item is a button that hides or
   // shows its series (`series` names the series when it differs from the label).
   function legend(box, items, c) {
-    box.replaceChildren(...items.map(it => {
+    setKids(box, ...items.map(it => {
       const key = h('i', { class: `key ${it.shape || 'square'}`, style: `--key:${cssVar(it.color)}` });
       if (!c) return h('span', {}, key, it.label);
       const name = it.series || it.label;
@@ -197,6 +202,8 @@
     heart: '<path d="M8 13.5S2.4 10.2 2.4 6.2A2.9 2.9 0 0 1 8 4.8a2.9 2.9 0 0 1 5.6 1.4c0 4-5.6 7.3-5.6 7.3z"/>',
     clock: '<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/>',
     pause: '<circle cx="8" cy="8" r="5.8"/><path d="M6.6 5.8v4.4M9.4 5.8v4.4"/>',
+    edit: '<path d="M10.8 2.8l2.4 2.4-7.6 7.6-3.1.7.7-3.1z"/><path d="M9.4 4.2l2.4 2.4"/>',
+    layers: '<path d="M8 2.2l5.8 3L8 8.2 2.2 5.2z"/><path d="M2.2 8.1L8 11.1l5.8-3M2.2 10.9L8 13.9l5.8-3"/>',
   };
 
   function glyph(name) {
@@ -363,15 +370,6 @@
     { key: 'debt', label: 'Mortgage & loans', color: '--s8' },
   ];
 
-  function sourceChip(est, a) {
-    const src = est.source[a.id];
-    const r = est.reading[a.id];
-    if (src === 'updated') return h('span', { class: 'src updated' }, glyph('good'), 'Updated today');
-    if (src === 'updatedEstimate') return h('span', { class: 'src updated', title: `You entered ${money(r.value)} on ${fmtDate(r.date)}; moved on since as the plan expects.` }, glyph('good'), `Updated ${fmtDate(r.date)}`);
-    if (src === 'figures') return h('span', { class: 'src' }, `As at ${fmtDate(est.asOf)}`);
-    return h('span', { class: 'src est', title: `Your figure on ${fmtDate(est.asOf)} was ${money(a.balance)}; moved on the way the plan expects, on average returns.` }, glyph('clock'), 'Estimated');
-  }
-
   function renderPortfolio() {
     const p = plan();
     const est = estimateToday();
@@ -386,30 +384,50 @@
     const bar = h('div', { class: 'pf-bar', role: 'img', 'aria-label': `Assets ${money(totalAssets)}, owed ${money(debt)}` },
       h('div', { class: 'pf-track' }, assets.map(g => h('span', { style: `width:${(est.byType[g.key] / scale) * 100}%;--key:${cssVar(g.color)}`, title: `${g.label}: ${money(est.byType[g.key])}` }))),
       debt > 0.5 ? h('div', { class: 'pf-track owed' }, h('span', { style: `width:${Math.min(100, (debt / scale) * 100)}%;--key:${cssVar('--s8')}`, title: `Mortgage & loans: ${money(debt)}` })) : null);
-    const keyList = h('ul', { class: 'pf-keys' }, PF_GROUPS.filter(g => est.byType[g.key] > 0.5).map(g => h('li', {},
-      h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }), h('span', {}, g.label), h('strong', {}, `${g.key === 'debt' ? '−' : ''}${money(est.byType[g.key])}`))));
-
-    // Accounts, grouped by type.
-    const order = PF_GROUPS.map(g => g.key);
+    // Accounts under a header for each type (its colour matches the bar above, with its subtotal).
     const typeOf = a => (a.type === 'lisa' ? 'isa' : a.type);
-    const accounts = p.accounts.slice().sort((a, b) => order.indexOf(typeOf(a)) - order.indexOf(typeOf(b)));
     const owner = a => (a.owner === 'joint' ? 'Joint' : (people()[E.personIndex(p, a.owner)] || {}).name || '');
+    const signed = (v, debtish) => `${debtish ? '−' : ''}${money(v)}`;
+    const changeTag = (change, debtish) => (Math.abs(change) >= 1 ? h('small', { class: (change > 0) !== debtish ? 'pos' : 'neg' }, `${change > 0 ? '+' : '−'}${money(Math.abs(change))}`) : null);
+    const groups = PF_GROUPS.map(g => ({ ...g, accounts: p.accounts.filter(a => typeOf(a) === g.key) })).filter(g => g.accounts.length);
     const list = h('div', { class: 'pf-list', role: 'table', 'aria-label': 'Accounts, estimated today' },
-      h('div', { class: 'pf-row head', role: 'row' }, h('span', { role: 'columnheader' }, 'Account'), h('span', { role: 'columnheader' }, `On ${fmtDate(est.asOf)}`), h('span', { role: 'columnheader' }, 'Today'), h('span', { role: 'columnheader' }, '')),
-      accounts.map(a => {
-        const v = est.byId[a.id];
-        const debtish = a.type === 'debt';
-        const change = v - a.balance;
-        return h('div', { class: `pf-row${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, style: `--item-color:${cssVar(TYPE_COLOR[a.type])}` },
-          h('span', { class: 'pf-name', role: 'cell' }, h('strong', {}, a.name), h('small', {}, [ACCOUNT_LABELS[a.type], owner(a), a.excluded ? 'not counted' : ''].filter(Boolean).join(' · '))),
-          h('span', { class: 'pf-was', role: 'cell' }, `${debtish ? '−' : ''}${money(a.balance)}`),
-          h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, `${debtish ? '−' : ''}${money(v)}`),
-            Math.abs(change) >= 1 ? h('small', { class: (change > 0) !== debtish ? 'pos' : 'neg' }, `${change > 0 ? '+' : '−'}${money(Math.abs(change))}`) : null),
-          h('span', { class: 'pf-src', role: 'cell' }, sourceChip(est, a)));
+      h('div', { class: 'pf-row head', role: 'row' }, h('span', { role: 'columnheader' }, 'Account'), h('span', { role: 'columnheader' }, `On ${fmtDate(est.asOf)}`),
+        h('span', { role: 'columnheader' }, daysSince(est.asOf) <= 0 ? 'Today' : 'Today (estimated)')),
+      groups.map(g => {
+        const debtish = g.key === 'debt';
+        const counted = g.accounts.filter(a => !a.excluded);
+        const was = counted.reduce((acc, a) => acc + a.balance, 0);
+        const now = counted.reduce((acc, a) => acc + est.byId[a.id], 0);
+        const updated = r => (r ? h('span', { class: 'src updated', title: `You entered ${money(r.value)} on ${fmtDate(r.date)}${r.date < today() ? '; moved on since as the plan expects' : ''}.` }, glyph('good'), r.date === today() ? 'Updated today' : `Updated ${fmtDate(r.date)}`) : null);
+        // A type with one account is a single row: the type, with the account named under it.
+        if (g.accounts.length === 1) {
+          const a = g.accounts[0];
+          return h('div', { class: `pf-row group single${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, style: `--item-color:${cssVar(g.color)}` },
+            h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }),
+              h('span', { class: 'pf-two' }, h('span', {}, h('strong', {}, g.label), updated(est.reading[a.id])),
+                h('small', {}, [a.name, owner(a), a.type === 'lisa' ? 'Lifetime ISA' : '', a.excluded ? 'not counted' : ''].filter(Boolean).join(' · ')))),
+            h('span', { class: 'pf-was', role: 'cell' }, signed(a.balance, debtish)),
+            h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(est.byId[a.id], debtish)), changeTag(est.byId[a.id] - a.balance, debtish)));
+        }
+        return [
+          h('div', { class: 'pf-row group', role: 'row', style: `--item-color:${cssVar(g.color)}` },
+            h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }), h('strong', {}, g.label)),
+            h('span', { class: 'pf-was', role: 'cell' }, signed(was, debtish)),
+            h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(now, debtish)), changeTag(now - was, debtish))),
+          g.accounts.map(a => {
+            const v = est.byId[a.id];
+            const r = est.reading[a.id];
+            return h('div', { class: `pf-row acct${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id },
+              h('span', { class: 'pf-name', role: 'cell' }, h('span', {}, a.name, updated(r)),
+                h('small', {}, [owner(a), a.type === 'lisa' ? 'Lifetime ISA' : '', a.excluded ? 'not counted' : ''].filter(Boolean).join(' · '))),
+              h('span', { class: 'pf-was', role: 'cell' }, signed(a.balance, debtish)),
+              h('span', { class: 'pf-now', role: 'cell' }, signed(v, debtish), changeTag(v - a.balance, debtish)));
+          }),
+        ];
       }));
     const readings = Object.keys(est.reading).length;
     const days = daysSince(est.asOf);
-    box.replaceChildren(...[
+    setKids(box, ...[
       h('div', { class: 'card-head' },
         h('div', {}, h('p', { class: 'eyebrow' }, `Today · ${agesAt(0)}`), h('h2', { id: 'pfTitle' }, 'Your portfolio'),
           h('p', { class: 'sub' }, days > 0
@@ -425,7 +443,7 @@
           delta == null
             ? h('div', { class: 'delta flat' }, glyph('good'), 'Updated today')
             : h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your last update (${fmtDate(lastUpdate)})`)),
-        h('div', { class: 'pf-mix' }, bar, keyList)),
+        h('div', { class: 'pf-mix' }, bar)),
       list,
       readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null,
     ].filter(Boolean));
@@ -440,8 +458,7 @@
     const upcoming = allMilestones().filter(m => m.year >= p.startYear).slice(0, 4);
     const breakdown = items => h('ul', { class: 'breakdown' }, items.filter(Boolean).map(([k, v]) => h('li', {}, h('span', {}, k), h('span', {}, v))));
     const nextReview = due.due ? `now (${due.year})` : `October ${due.next}`;
-    const saved = ws.settings.lastSaved;
-    $('#homeYear').replaceChildren(
+    setKids($('#homeYear'), 
       h('h2', {}, 'This year'),
       monthly.shortfall > 0
         ? h('div', { class: 'year-figure neg' }, h('span', { class: 'hero-label' }, 'Drawing from savings'), h('strong', {}, `${money(monthly.shortfall)} a month`), h('p', { class: 'note' }, 'Spending is higher than income, so this comes out of savings.'))
@@ -461,9 +478,7 @@
         h('strong', {}, m.year === p.startYear ? 'this year' : `in ${m.year - p.startYear} yr${m.year - p.startYear === 1 ? '' : 's'}`)))),
       h('div', { class: 'year-actions' },
         h('div', {}, h('span', { class: 'rv-k' }, 'Next yearly review'), h('strong', {}, nextReview),
-          due.due ? h('button', { type: 'button', class: 'btn small primary', onclick: () => openReview() }, 'Start review') : h('button', { type: 'button', class: 'btn small ghost', onclick: () => navigate('finances/history') }, 'Past reviews')),
-        h('div', {}, h('span', { class: 'rv-k' }, 'Saved to a file'), h('strong', {}, saved ? fmtDate(saved) : 'Not yet'),
-          h('button', { type: 'button', class: 'btn small ghost', onclick: exportFile, title: 'Keep a copy, or move your plan to another computer' }, 'Save to a file'))));
+          due.due ? h('button', { type: 'button', class: 'btn small primary', onclick: () => openReview() }, 'Start review') : h('button', { type: 'button', class: 'btn small ghost', onclick: () => navigate('finances/history') }, 'Past reviews'))));
   }
 
   function renderTimeline() {
@@ -473,7 +488,7 @@
     const nextReview = due.due ? new Date().getFullYear() : due.next;
     list.push({ year: nextReview, label: `Yearly review (October ${nextReview})`, kind: 'review', sortFirst: true });
     list.sort((a, b) => a.year - b.year || (b.sortFirst ? 1 : 0) - (a.sortFirst ? 1 : 0));
-    $('#ovMilestones').replaceChildren(...list.map(m => {
+    setKids($('#ovMilestones'), ...list.map(m => {
       const t = tIndexOfYear(m.year);
       const yrs = m.year - p.startYear;
       return h('li', { class: `tl-item ${m.kind}`, style: `--mc:${cssVar(m.goal ? goalColor(m.goal) : MILESTONE_COLOR[m.kind] || '--muted')}` },
@@ -485,7 +500,7 @@
     }));
   }
 
-  const ACTION_LABEL = { life: 'Life check-up', strategy: 'Saving strategy', explorer: 'Try changes', accounts: 'Accounts', spending: 'Spending check-up', review: 'Start review', emergency: 'Add a goal' };
+  const ACTION_LABEL = { life: 'Future costs', strategy: 'Saving strategy', explorer: 'Try changes', accounts: 'Accounts', spending: 'Spending check-up', review: 'Start review', emergency: 'Add a goal' };
   let insightsAll = false;
   let insightsHidden = false;
 
@@ -511,7 +526,7 @@
       save();
       renderInsights();
     };
-    $('#ovInsights').replaceChildren(...[
+    setKids($('#ovInsights'), ...[
       h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Worth a look'),
         h('p', { class: 'sub' }, `A quick check against common UK rules of thumb and ${R.TAX_YEAR} rules. A starting point for your own research, not financial advice.`))),
       h('ul', { class: 'insights' }, shown.map(i => h('li', { class: `insight ${i.tone}`, 'data-insight': i.id },
@@ -606,8 +621,8 @@
 
   function renderGoalStrip() {
     const box = $('#ovGoalStrip');
-    if (!model.goals.length) { box.replaceChildren(goalEmpty()); return; }
-    box.replaceChildren(...model.goals.map(res => {
+    if (!model.goals.length) { setKids(box, goalEmpty()); return; }
+    setKids(box, ...model.goals.map(res => {
       const g = res.goal;
       const st = goalStatus(res.probability);
       const prog = goalProgress(res);
@@ -637,7 +652,7 @@
 
   function scheduleDrivers() {
     clearTimeout(driverTimer);
-    if (!['home', 'goal', 'scenarios'].includes(route.tab)) return;
+    if (!['home', 'goal'].includes(route.tab)) return;
     if (drivers.done && drivers.key === driversKey()) return;
     driverTimer = setTimeout(computeDrivers, 600);
   }
@@ -659,7 +674,6 @@
       else {
         drivers.done = true;
         if (route.tab === 'home') renderGoalStrip();
-        if (route.tab === 'scenarios') renderDriversCard();
         if (route.tab === 'goal') { const res = model.goals.find(x => x.goal.id === route.sub); if (res) renderGoalMoves(res); }
       }
     };
@@ -675,43 +689,14 @@
   function driverSummary(goalId) {
     if (!drivers.done || drivers.key !== driversKey()) return null;
     let help = null, risk = null;
+    const g = plan().goals.find(x => x.id === goalId);
     for (const r of drivers.rows) {
+      if (g && !L.driverFits(r.driver.key, g, plan())) continue;
       const d = driverDelta(r, goalId);
       if (r.driver.kind === 'choice' && d >= 0.01 && (!help || d > help.d)) help = { label: r.driver.label, d };
       if (d <= -0.01 && (!risk || d < risk.d)) risk = { label: r.driver.label, d };
     }
     return { help, risk };
-  }
-
-  function renderDriversCard() {
-    const box = $('#driversBody');
-    if (!box) return;
-    if (!model.goals.length) { box.replaceChildren(h('p', { class: 'sub' }, 'Add a goal to see what moves it.')); return; }
-    if (!drivers.done || drivers.key !== driversKey()) {
-      box.replaceChildren(h('p', { class: 'sub working' }, `Working it out: each change is simulated across ${DRIVER_RUNS} futures…`));
-      scheduleDrivers();
-      return;
-    }
-    const goals = drivers.base;
-    const cell = (row, b) => {
-      const d = driverDelta(row, b.goal.id);
-      const pts = Math.round(d * 100);
-      const mix = Math.round(12 + Math.min(1, Math.abs(pts) / 30) * 50);
-      const bg = pts > 0 ? `color-mix(in srgb, var(--s1) ${mix}%, var(--surface))` : pts < 0 ? `color-mix(in srgb, var(--s2) ${mix}%, var(--surface))` : 'transparent';
-      const a = row.after.find(x => x.goal.id === b.goal.id);
-      return h('td', { class: `heat-cell${pts === 0 ? ' zero' : ''}`, style: `background:${bg}`, title: `${b.title}: ${pct(b.probability)} → ${pct(a ? a.probability : 0)}` },
-        pts === 0 ? '—' : `${pts > 0 ? '+' : '−'}${Math.abs(pts)}`);
-    };
-    const heat = h('div', { class: 'heat-wrap' }, h('table', { class: 'heat' },
-      h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'If…'), goals.map(b => h('th', { scope: 'col', style: `--gc:${cssVar(goalColor(b.goal))}` }, h('span', { class: 'heat-goal' }, goalBadge(b.goal, 'small'), h('span', {}, b.title)))))),
-      h('tbody', {},
-        h('tr', { class: 'now' }, h('th', { scope: 'row' }, 'Chance now'), goals.map(b => h('td', {}, pct(b.probability)))),
-        drivers.rows.map(r => h('tr', { class: r.driver.kind }, h('th', { scope: 'row' }, h('span', { class: `kind ${r.driver.kind}` }, r.driver.kind === 'risk' ? 'Risk' : 'Choice'), r.driver.label), goals.map(b => cell(r, b)))))));
-    const raw = h('div', { class: 'table-wrap' }, table(['Change', ...goals.map(b => b.title)],
-      [{ cells: ['Chance now', ...goals.map(b => pct(b.probability))] }].concat(drivers.rows.map(r => ({ cells: [r.driver.label, ...goals.map(b => { const a = r.after.find(x => x.goal.id === b.goal.id); return `${pct(a ? a.probability : 0)} (${Math.round(driverDelta(r, b.goal.id) * 100) >= 0 ? '+' : ''}${Math.round(driverDelta(r, b.goal.id) * 100)})`; })] })))));
-    box.replaceChildren(viewToggle(heat, raw),
-      h('p', { class: 'hint' }, `Blue raises a goal’s chance and orange lowers it, in percentage points; darker means a bigger effect. ${DRIVER_RUNS} simulated futures per change, the same markets for each, so the differences come from the change itself. Open a goal to try any of them for real.`));
-
   }
 
   // ------------------------------------------------------------------ goals tab
@@ -754,7 +739,7 @@
     const box = $('#goalPage');
     const res = model.goals.find(x => x.goal.id === id);
     if (!res) {
-      box.replaceChildren(h('section', { class: 'card' }, h('p', {}, 'This goal is not in the current scenario.'),
+      setKids(box, h('section', { class: 'card' }, h('p', {}, 'This goal is not in the current scenario.'),
         h('button', { type: 'button', class: 'btn', onclick: () => navigate('home') }, 'Home')));
       return;
     }
@@ -794,7 +779,7 @@
     const take = h('section', { class: 'card', id: 'gpTake' });
     const levers = h('section', { class: 'card', id: 'gpLevers' });
     const fullHistory = g.type === 'retire' ? h('div') : null;
-    box.replaceChildren(...[hero, track, h('div', { class: 'grid-2' }, chance, hist), g.type === 'retire' ? retireSummary(res) : null, moves, take, levers, fullHistory].filter(Boolean));
+    setKids(box, ...[hero, track, h('div', { class: 'grid-2' }, chance, hist), g.type === 'retire' ? retireSummary(res) : null, moves, take, levers, fullHistory].filter(Boolean));
     goalTrackChart(track, res);
     goalChanceChart(chance, res);
     renderGoalMoves(res);
@@ -851,7 +836,7 @@
     }
     const host = h('div', { class: 'chart' });
     const lg = h('div', { class: 'legend' });
-    card.replaceChildren(h('h2', {}, 'How it’s tracking'), h('p', { class: 'sub' }, `${title}. ${sub}`), host, lg);
+    setKids(card, h('h2', {}, 'How it’s tracking'), h('p', { class: 'sub' }, `${title}. ${sub}`), host, lg);
     const c = new Chart(host, { height: 300, label: `${res.title}: range over time`, name: `goal-${g.id}` });
     c.set(cfg);
     legend(lg, [
@@ -870,7 +855,7 @@
     const xs = model.mc.years;
     const ys = chanceByYear(res);
     const host = h('div', { class: 'chart' });
-    card.replaceChildren(h('h2', {}, g.type === 'retire' ? 'Chance the money lasts, year by year' : g.type === 'emergency' ? 'Chance it is covered, year by year' : 'Chance of reaching it, by year'),
+    setKids(card, h('h2', {}, g.type === 'retire' ? 'Chance the money lasts, year by year' : g.type === 'emergency' ? 'Chance it is covered, year by year' : 'Chance of reaching it, by year'),
       h('p', { class: 'sub' }, g.type === 'retire' ? 'Share of simulations with money left in each year.' : g.type === 'emergency' ? 'Share of simulations where what counts covers the need that year.' : 'Share of simulations that have reached it by each year.'), host);
     new Chart(host, { height: 200, label: `Chance of ${res.title} by year`, name: `goal-chance-${g.id}` }).set({
       xs, yDomain: [0, 1], yFormat: v => `${Math.round(v * 100)}%`,
@@ -885,7 +870,7 @@
     const r = historyRuns();
     if (!card || !r) { if (card) card.hidden = true; return; }
     const rate = r.goalRates[res.goal.id] || 0;
-    card.replaceChildren(h('h2', {}, 'If history repeated'),
+    setKids(card, h('h2', {}, 'If history repeated'),
       h('div', { class: 'goal-figure' }, h('span', { class: 'goal-pct big' }, pct(rate)), badge(goalStatus(rate))),
       h('p', { class: 'note' }, `Reached in ${Math.round(rate * r.starts.length)} of ${r.starts.length} starting years since ${r.first}, replaying that period’s real markets with UK inflation. The random simulations give ${pct(res.probability)}.`),
       h('button', { type: 'button', class: 'btn small ghost', onclick: () => { const c = $('#histCard'); if (c && !c.closest('[hidden]')) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); else { navigate('finances/assumptions'); requestAnimationFrame(() => { const x = $('#histCard'); if (x) x.scrollIntoView({ behavior: 'smooth', block: 'start' }); }); } } }, 'See every starting year'));
@@ -895,14 +880,14 @@
   function renderGoalMoves(res) {
     const card = $('#gpMoves');
     if (!card) return;
-    const head = [h('h2', {}, 'What moves it'), h('p', { class: 'sub' }, 'How much each change would raise or lower this goal’s chance, in percentage points. Choices you control, then risks.')];
+    const head = [h('h2', {}, 'What moves it'), h('p', { class: 'sub' }, 'How much each change that can affect this goal would raise or lower its chance, in percentage points. Choices you control, then risks.')];
     if (!drivers.done || drivers.key !== driversKey()) {
-      card.replaceChildren(...head, h('p', { class: 'sub working' }, `Working it out: each change is simulated across ${DRIVER_RUNS} futures…`));
+      setKids(card, ...head, h('p', { class: 'sub working' }, `Working it out: each change is simulated across ${DRIVER_RUNS} futures…`));
       scheduleDrivers();
       return;
     }
     const b = drivers.base.find(x => x.goal.id === res.goal.id);
-    const rows = drivers.rows.map(r => {
+    const rows = drivers.rows.filter(r => L.driverFits(r.driver.key, res.goal, plan())).map(r => {
       const a = r.after.find(x => x.goal.id === res.goal.id);
       return { label: r.driver.label, kind: r.driver.kind, before: b ? b.probability : 0, after: a ? a.probability : 0, pts: Math.round(driverDelta(r, res.goal.id) * 100) };
     });
@@ -915,14 +900,14 @@
         h('span', { class: `db-val${r.pts === 0 ? ' flat' : ''}` }, r.pts === 0 ? 'No change' : `${r.pts > 0 ? '+' : '−'}${Math.abs(r.pts)} pts`));
     }));
     const tbl = h('div', { class: 'table-wrap' }, table(['Change', 'Chance now', 'With the change', 'Points'], rows.map(r => ({ cells: [r.label, pct(r.before), pct(r.after), { text: `${r.pts > 0 ? '+' : ''}${r.pts}`, cls: r.pts > 0 ? 'pos' : r.pts < 0 ? 'neg' : '' }] }))));
-    card.replaceChildren(...head, viewToggle(bars, tbl),
+    setKids(card, ...head, viewToggle(bars, tbl),
       h('p', { class: 'hint' }, `${DRIVER_RUNS} simulated futures per change, the same markets for each. Try them for real below.`));
   }
 
   function renderGoalTake(res) {
     const card = $('#gpTake');
     if (!card) return;
-    card.replaceChildren(h('div', { class: 'card-head' },
+    setKids(card, h('div', { class: 'card-head' },
       h('div', {}, h('h2', {}, 'What would it take?'), h('p', { class: 'sub' }, { debtFree: 'The share of your surplus to overpay to clear it by the target year.', emergency: 'The cash buffer that covers it.', netWorth: 'How much less to spend each month before retirement.', passiveIncome: 'How much less to spend each month before retirement.', retire: 'The earliest you could retire, and what you could spend, at your chosen confidence.' }[res.goal.type])),
       h('button', { type: 'button', class: 'btn small primary', onclick: e => solveGoal(e.currentTarget, res) }, 'Work it out')),
     h('div', { class: 'goal-solve' }, goalSolve[res.goal.id] || null));
@@ -932,18 +917,18 @@
   function renderGoalLevers(res) {
     const card = $('#gpLevers');
     if (!card) return;
-    const groups = L.GOAL_GROUPS[res.goal.type] || [];
+    const groups = L.groupsForGoal(plan(), res.goal);
     groups.forEach((k, i) => { if (gp.open[k] === undefined) gp.open[k] = i === 0; });
     if (!gp.values) gp.values = L.currentValues(plan());
     const status = h('p', { class: 'sub', id: 'gpStatus', role: 'status' });
     const impact = h('div', { id: 'gpImpact' });
     const apply = h('button', { type: 'button', class: 'btn small primary', id: 'gpApply', onclick: () => applyExplorer(false, gp.values) }, 'Apply to plan');
     const asScen = h('button', { type: 'button', class: 'btn small', id: 'gpScenario', onclick: () => applyExplorer(true, gp.values) }, 'Save as new scenario');
-    card.replaceChildren(h('div', { class: 'card-head' },
-      h('div', {}, h('h2', {}, 'Try changes'), h('p', { class: 'sub' }, 'The levers that matter most for this goal. Each one moves your other goals too: the table shows the trade-offs. Nothing changes until you apply it.')),
+    setKids(card, h('div', { class: 'card-head' },
+      h('div', {}, h('h2', {}, 'Try changes'), h('p', { class: 'sub' }, 'Only the levers that can move this goal. Each one moves your other goals too: the table shows the trade-offs. Nothing changes until you apply it.')),
       h('div', { class: 'controls' }, h('button', { type: 'button', class: 'btn small', onclick: () => { gp.values = null; renderGoalLevers(res); } }, 'Reset'), asScen, apply)),
     h('div', { class: 'explorer in-wizard' },
-      h('div', { class: 'explorer-levers' }, leverGroups(groups.concat(['stress']), gp.values, scheduleGoalTry, gp.open)),
+      h('div', { class: 'explorer-levers' }, leverGroups(groups, gp.values, scheduleGoalTry, gp.open, plan(), d => L.leverFits(d, res.goal, plan()))),
       h('div', { class: 'explorer-results' }, status, impact)));
     updateGoalTry();
   }
@@ -960,7 +945,7 @@
     const changed = L.changed(plan(), gp.values);
     const before = baseComparison();
     const after = changed.length ? evaluatePlan(L.apply(plan(), gp.values)) : before;
-    $('#gpImpact').replaceChildren(impactTable({ before, after }));
+    setKids($('#gpImpact'), impactTable({ before, after }));
     $('#gpStatus').textContent = changed.length
       ? `${changed.length} change${changed.length === 1 ? '' : 's'}: ${changed.map(d => `${d.label} ${fmtLever(d, gp.values[d.key])}`).join(' · ')}.`
       : `Move a slider to compare. ${EXPLORE_RUNS} simulated futures each, same markets for both.`;
@@ -1034,7 +1019,6 @@
   let explorerValues = null;
   let explorerBase = null;
   let explorerTimer = null;
-  let explorerOpen = { retirement: true, saving: true, mortgage: true };
 
   function fmtLever(d, v) {
     if (d.zeroLabel && ((d.unit === 'money' && v === 0) || (d.unit === 'year' && v < d.min + 1))) return d.zeroLabel;
@@ -1068,8 +1052,8 @@
     return row;
   }
 
-  function leverGroups(groups, values, onChange, openState, basePlan = plan()) {
-    const defs = L.defs(basePlan);
+  function leverGroups(groups, values, onChange, openState, basePlan = plan(), fits = null) {
+    const defs = L.defs(basePlan).filter(d => !fits || fits(d));
     return groups.filter(gk => defs.some(d => d.group === gk)).map(gk => {
       const det = h('details', { class: 'lever-group', open: !!openState[gk] },
         h('summary', {}, h('span', {}, L.GROUPS[gk].title), h('span', { class: 'sub' }, L.GROUPS[gk].intro)),
@@ -1104,35 +1088,6 @@
     return h('div', { class: 'table-wrap impact' }, table(['', ...labels, 'Change'], rows));
   }
 
-  function explorerChart(host, cmp, legendBox) {
-    const xs = cmp.after.proj.pre.years;
-    const rowsB = cmp.before.proj.rows, rowsA = cmp.after.proj.rows;
-    const deflB = t => (real() ? rowsB[t].deflator : 1), deflA = t => (real() ? rowsA[t].deflator : 1);
-    const before = rowsB.map((r, t) => r.netWorth / deflB(t));
-    const after = rowsA.map((r, t) => r.netWorth / deflA(t));
-    const band = cmp.after.mc.series.netWorth[view()];
-    const cfg = {
-      xs,
-      bands: [{ label: 'Range with changes', lower: band.p10, upper: band.p90, color: '--band', alpha: 0.12 }],
-      lines: [
-        { label: 'Your plan', color: '--muted', values: before, dash: [6, 4] },
-        { label: 'With changes', color: '--s1', values: after },
-      ],
-      tooltip: i => ({ title: String(xs[i]), rows: [
-        { label: 'Your plan', color: '--muted', shape: 'dash', text: money(before[i]) },
-        { label: 'With changes', color: '--s1', shape: 'line', text: money(after[i]), strong: true },
-        { label: 'Range with changes (10th–90th)', series: 'Range with changes', color: '--band', shape: 'band', text: `${fmtCompact(band.p10[i])} – ${fmtCompact(band.p90[i])}` },
-      ] }),
-    };
-    if (!host.__chart) host.__chart = new Chart(host, { height: 280, label: 'Net worth with and without changes', name: 'explorer' });
-    host.__chart.set(cfg);
-    legend(legendBox, [
-      { label: 'Your plan (average returns)', series: 'Your plan', color: '--muted', shape: 'dash' },
-      { label: 'With changes', color: '--s1', shape: 'line' },
-      { label: 'With changes: 10th–90th percentile', series: 'Range with changes', color: '--band', shape: 'band' },
-    ], host.__chart);
-  }
-
   function baseComparison() {
     if (!explorerBase) {
       const p = plan();
@@ -1149,34 +1104,7 @@
     return { proj, mc, goals: E.evaluateGoals(p, proj, mc, { runs: EXPLORE_RUNS, seed: ws.settings.seed }), summary: L.summaryOf(p, proj, mc) };
   }
 
-  function renderExplorer() {
-    if (!explorerValues) explorerValues = L.currentValues(plan());
-    const groups = Object.keys(L.GROUPS);
-    $('#expLevers').replaceChildren(...leverGroups(groups, explorerValues, scheduleExplorer, explorerOpen));
-    updateExplorer();
-  }
-
-  function scheduleExplorer() {
-    $('#expStatus').textContent = 'Updating…';
-    clearTimeout(explorerTimer);
-    explorerTimer = setTimeout(updateExplorer, 250);
-  }
-
-  function updateExplorer() {
-    const changed = L.changed(plan(), explorerValues);
-    const before = baseComparison();
-    const after = changed.length ? evaluatePlan(L.apply(plan(), explorerValues)) : before;
-    const cmp = { before, after };
-    $('#expImpact').replaceChildren(impactTable(cmp));
-    explorerChart($('#expChart'), cmp, $('#expLegend'));
-    $('#expStatus').textContent = changed.length
-      ? `${changed.length} change${changed.length === 1 ? '' : 's'}: ${changed.map(d => `${d.label} ${fmtLever(d, explorerValues[d.key])}`).join(' · ')}. ${EXPLORE_RUNS} simulated futures each, same markets for both.`
-      : `Move a slider to compare. ${EXPLORE_RUNS} simulated futures each, same markets for both.`;
-    $('#expApply').disabled = !changed.length;
-    $('#expScenario').disabled = !changed.length;
-  }
-
-  function applyExplorer(asScenario, values = explorerValues) {
+  function applyExplorer(asScenario, values) {
     const next = L.apply(plan(), values);
     if (asScenario) {
       const name = prompt('Name for the new scenario', `${scenario().name} – adjusted`);
@@ -1195,7 +1123,7 @@
   // ---- goal wizard
 
   let gw = null;
-  const GW_STEPS = ['Choose a goal', 'Set the target', 'Levers you can pull', 'Save'];
+  const GW_STEPS = ['Choose a goal', 'Set the target', 'Try changes'];
 
   function openGoalWizard(existing, presetType) {
     const p = plan();
@@ -1254,8 +1182,8 @@
     $('#gwTitle').textContent = GW_STEPS[gw.step];
     $('#gwBar').style.width = `${((gw.step + 1) / total) * 100}%`;
     $('#gwBack').disabled = gw.step === 0 || (gw.editing && gw.step === 1);
-    $('#gwNext').hidden = gw.step === 0 || gw.step === total - 1;
-    $('#gwNext').textContent = 'Next';
+    $('#gwNext').hidden = gw.step === 0;
+    $('#gwNext').textContent = gw.step === total - 1 ? 'Save goal' : 'Next';
     $('#gwNote').textContent = '';
     const body = $('#gwBody');
     const p1 = people()[0];
@@ -1265,18 +1193,14 @@
       const ICON_OF = { retire: 'retire', emergency: 'shield', debtFree: 'debt', netWorth: 'goal', savings: 'piggy', passiveIncome: 'sp', fi: 'star', house: 'home', education: 'cap', purchase: 'gift', legacy: 'heart' };
       const opt = (type, title, text) => h('button', { type: 'button', class: 'goal-option', onclick: () => { gw.goal = { ...gw.defaults[type] }; if (type === 'retire') initRetire(); gw.step = 1; renderGoalWizard(); } },
         h('span', { class: 'goal-option-head' }, goalBadge({ icon: ICON_OF[type], color: gw.defaults[type].color }, 'small'), h('strong', {}, title)), h('span', {}, text));
-      body.replaceChildren(h('div', { class: 'goal-options' },
+      setKids(body, h('div', { class: 'goal-options' },
         opt('retire', 'Plan your retirement', 'When you stop, what you want to spend, and how likely the money is to last.'),
         opt('emergency', 'Emergency fund', 'Months of spending kept in cash, or in cash and investments.'),
         opt('debtFree', 'Mortgage-free by a year', 'Overpaying clears it sooner but leaves less to invest.'),
         opt('fi', 'Financial independence', 'Savings and pensions worth 25 years of spending: work becomes optional.'),
-        opt('netWorth', 'Reach an amount by a year', 'For example £1M of net worth by 2031.'),
         opt('passiveIncome', 'Passive income by a year', 'Enough investments and rent to pay £X a year without working.'),
-        opt('house', 'House deposit', 'Money set aside for a deposit or a move.'),
-        opt('education', 'University fund', 'Help with university costs for the children.'),
-        opt('purchase', 'Big purchase', 'A car, a wedding, a sabbatical or a dream trip.'),
-        opt('legacy', 'Leave an inheritance', 'What is left for family at the end of the plan, in today’s money.'),
-        opt('savings', 'Save for something else', 'Any amount by a year, not counting your home or pensions.')));
+        opt('savings', 'Save for something', 'A house deposit, university, a car or a wedding: an amount by a year, not counting your home or pensions.'),
+        opt('netWorth', 'Reach an amount by a year', 'For example £1M of net worth by 2031, or what you leave to family.')));
       return;
     }
 
@@ -1293,6 +1217,11 @@
         fields.push(field('Safe withdrawal rate', h('div', { class: 'adorn has-suf' }, h('input', { type: 'number', value: g.withdrawalRate, min: 1, max: 10, step: 0.5, oninput: e => { g.withdrawalRate = parseFloat(e.target.value) || 4; previewGoal(); } }), h('span', { class: 'suf' }, '%')), 'Share of investments you could take each year. 4% is a common rule of thumb.'));
         fields.push(h('div', { class: 'field' }, h('span', {}, 'Pensions'), h('label', { class: 'switch' }, h('input', { type: 'checkbox', role: 'switch', checked: g.includePensions, onchange: e => { g.includePensions = e.target.checked; previewGoal(); } }), 'Count pension pots'), h('span', { class: 'hint' }, 'Rent, gifts, pensions being paid and State Pension always count.')));
       } else if (g.type === 'netWorth' && g.measure === 'savings') {
+        const quick = [['House deposit', 'home'], ['University fund', 'cap'], ['Big purchase', 'gift'], ['Wedding', 'heart'], ['A year out', 'sp']];
+        fields.push(h('div', { class: 'field wide' }, h('span', {}, 'What for'), h('div', { class: 'idea-chips' }, quick.map(([name, iconName]) => h('button', {
+          type: 'button', class: `idea-chip${g.name === name ? ' picked' : ''}`, 'aria-pressed': String(g.name === name),
+          onclick: () => { g.name = name; g.icon = iconName; renderGoalWizard(); },
+        }, h('span', { class: 'idea-ico' }, glyph(ICON_GLYPH[iconName])), h('span', {}, name))))));
         fields.push(field('Amount', moneyInputPlain(() => g.amount, v => { g.amount = v; previewGoal(); }, 'Goal amount'), 'Cash, ISAs, general investments and bonds.'));
         fields.push(field('By the start of', h('input', { type: 'number', value: g.year, min: plan().startYear, max: plan().startYear + 60, oninput: e => { g.year = parseInt(e.target.value, 10) || g.year; previewGoal(); } })));
         fields.push(field('Measured in', h('select', { onchange: e => { g.basis = e.target.value; previewGoal(); } }, [['real', "Today's £ (after inflation)"], ['nominal', 'Future £']].map(([v, l]) => h('option', { value: v, selected: g.basis === v }, l)))));
@@ -1312,7 +1241,7 @@
         gw.bufferNeeded = sol.buffer;
         if (!gw.bufferTouched) gw.setBuffer = !sol.already;
         const r0 = model.proj.rows[0];
-        body.replaceChildren(ident, h('div', { class: 'fields' }, fields),
+        setKids(body, ident, h('div', { class: 'fields' }, fields),
           h('div', { class: 'ef-facts' },
             h('div', {}, h('span', { class: 'rv-k' }, `${g.months} months needs`), h('strong', {}, money(sol.need))),
             h('div', {}, h('span', { class: 'rv-k' }, g.counts === 'investments' ? 'Cash and investments today' : 'Cash today'), h('strong', {}, money(sol.have))),
@@ -1328,44 +1257,55 @@
         fields.push(field('Mortgage-free by the start of', h('input', { type: 'number', value: g.year, min: plan().startYear, max: plan().startYear + 40, oninput: e => { g.year = parseInt(e.target.value, 10) || g.year; previewGoal(); } })));
       } else {
         $('#gwIntro').textContent = 'A few questions about the retirement you want. Everything updates the preview on the right; nothing changes in your plan until you save.';
-        body.replaceChildren(ident, retireQuestions());
+        setKids(body, ident, retireQuestions());
         previewRetire();
         return;
       }
-      body.replaceChildren(ident, h('div', { class: 'fields' }, fields), h('div', { class: 'gw-preview', id: 'gwPreview' }));
+      setKids(body, ident, h('div', { class: 'fields' }, fields), h('div', { class: 'gw-preview', id: 'gwPreview' }));
       previewGoal();
       return;
     }
 
     if (gw.step === 2) {
-      $('#gwIntro').textContent = 'These are the levers that matter most for this goal. Each one also moves your other goals: the table shows the trade-offs.';
-      const groups = L.GOAL_GROUPS[g.type];
-      for (const k of groups) if (gw.open[k] === undefined) gw.open[k] = true;
+      $('#gwIntro').textContent = 'The levers that can move this goal. Each one also moves your other goals: the table shows the trade-offs.';
       const base = gwBase();
+      const draftGoal = E.normalizeGoal({ ...g, id: g.id || 'draft' }, base.startYear, base.household.people[0]);
+      const fits = d => L.leverFits(d, draftGoal, base);
+      const groups = L.groupsForGoal(base, draftGoal);
+      groups.forEach((k, i) => { if (gw.open[k] === undefined) gw.open[k] = i < 2 && k !== 'stress'; });
       if (!gw.valuesFresh) { gw.values = L.currentValues(base); gw.valuesFresh = true; }
-      body.replaceChildren(h('div', { class: 'explorer in-wizard' },
-        h('div', { class: 'explorer-levers' }, leverGroups(groups.concat(['stress']), gw.values, scheduleGoalImpact, gw.open, base)),
-        h('div', { class: 'explorer-results' }, h('p', { class: 'sub', id: 'gwStatus' }), h('div', { id: 'gwImpact' }))));
+      setKids(body, h('div', { class: 'explorer in-wizard' },
+        h('div', { class: 'explorer-levers' }, leverGroups(groups, gw.values, scheduleGoalImpact, gw.open, base, fits)),
+        h('div', { class: 'explorer-results' }, h('div', { class: 'gw-save', id: 'gwSave' }), h('p', { class: 'sub', id: 'gwStatus' }), h('div', { id: 'gwImpact' }))));
       updateGoalImpact();
-      return;
     }
+  }
 
-    // Save step
-    $('#gwIntro').textContent = 'Save the goal. You can also keep the lever changes you tried.';
+  // What saving does: the plan changes the wizard makes itself, and what to do with any levers tried.
+  function renderGoalSave() {
+    const box = $('#gwSave');
+    if (!box) return;
     const base = gwBase();
     const changed = L.changed(base, gw.values);
     const own = planChanges(plan(), base);
-    body.replaceChildren(
-      h('p', {}, h('strong', {}, E.goalTitle(E.normalizeGoal(g, plan().startYear, p1), plan()))),
+    if (!changed.length) gw.saveMode = 'goal';
+    const choice = (mode, label) => h('label', { class: 'gw-choice' },
+      h('input', { type: 'radio', name: 'gwSaveMode', value: mode, checked: gw.saveMode === mode, onchange: () => { gw.saveMode = mode; } }), label);
+    setKids(box,
       own.length ? h('div', {}, h('p', { class: 'sub' }, 'Saving also updates your plan:'), h('ul', { class: 'change-list' }, own.map(x => h('li', {}, x)))) : null,
-      changed.length
-        ? h('div', {}, h('p', { class: 'sub' }, 'Changes you tried:'), h('ul', { class: 'change-list' }, changed.map(d => h('li', {}, `${d.label}: ${fmtLever(d, d.get(plan()))} → ${fmtLever(d, gw.values[d.key])}`))))
-        : h('p', { class: 'sub' }, 'No lever changes. The goal will be tracked against your current plan.'),
-      h('div', { class: 'add-row' },
-        h('button', { type: 'button', class: 'btn primary', onclick: () => saveGoal('goal') }, 'Save goal'),
-        changed.length ? h('button', { type: 'button', class: 'btn', onclick: () => saveGoal('apply') }, 'Save goal and apply changes') : null,
-        changed.length ? h('button', { type: 'button', class: 'btn', onclick: () => saveGoal('scenario') }, 'Save goal and changes as a new scenario') : null));
+      changed.length ? h('div', { class: 'gw-choices' },
+        h('p', { class: 'sub' }, 'Changes you tried: ', changed.map(d => `${d.label}: ${fmtLever(d, d.get(plan()))} → ${fmtLever(d, gw.values[d.key])}`).join(' · ')),
+        h('div', { role: 'radiogroup', 'aria-label': 'When you save' },
+          choice('goal', 'Just save the goal (keep my plan as it is)'),
+          choice('apply', 'Save the goal and apply these changes'),
+          choice('scenario', 'Save the goal and these changes as a new scenario'))) : null);
   }
+
+  function goalWizardNext() {
+    if (gw.step < GW_STEPS.length - 1) { gw.step++; renderGoalWizard(); return; }
+    saveGoal(gw.saveMode || 'goal');
+  }
+
 
   // Name and colour for a goal (any type).
   function identityRow(g) {
@@ -1501,7 +1441,7 @@
           h('div', { class: 'fields' },
             h('label', { class: 'field' }, h('span', {}, 'Spend less from age (0 = never)'), num(() => r.slowDownAge, v => { r.slowDownAge = Math.round(v); }, { min: 0, max: 100, label: 'Slow down age' })),
             h('label', { class: 'field' }, h('span', {}, 'Spending from then'), num(() => r.slowDownPct, v => { r.slowDownPct = v; }, { min: 30, max: 150, step: 5, suffix: '%', label: 'Spending later' }))),
-          h('p', { class: 'hint' }, 'Spending often falls from the late 70s, though care costs can rise (see the life check-up).')),
+          h('p', { class: 'hint' }, 'Spending often falls from the late 70s, though care costs can rise (Finances → Spending → Future costs).')),
         sec(5, 'Pensions you will be paid',
           h('div', { class: 'fields' }, sps),
           h('p', { class: 'hint' }, `Full new State Pension: ${money(R.STATE_PENSION_FULL)} a year. Get your own forecast at gov.uk/check-state-pension.${dbs.length ? ` Also counted: ${dbs.map(i => i.name).join(', ')} (edit in Finances → Income).` : ''}`)),
@@ -1532,7 +1472,7 @@
       const answers = h('div', { class: 'rq-answers' });
       const showAnswers = () => {
         if (!r.answers) {
-          answers.replaceChildren(h('button', { type: 'button', class: 'btn small', onclick: e => {
+          setKids(answers, h('button', { type: 'button', class: 'btn small', onclick: e => {
             e.currentTarget.disabled = true; e.currentTarget.textContent = 'Working…';
             setTimeout(() => {
               const earliest = E.solveRetirement(p, conf, EXPLORE_RUNS, ws.settings.seed);
@@ -1544,13 +1484,13 @@
           return;
         }
         const { earliest, could } = r.answers;
-        answers.replaceChildren(
+        setKids(answers, 
           h('p', {}, earliest.delta === null ? `No retirement age reaches ${gw.goal.confidence}%.` : `Earliest at ${gw.goal.confidence}%: ${p.household.people.map(x => `${x.name} ${x.retireAge + earliest.delta}`).join(', ')}. `,
             earliest.delta !== null && earliest.delta !== 0 ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => { r.ages = r.ages.map(a => a + earliest.delta); renderGoalWizard(); } }, 'Use') : null),
           could.amount ? h('p', {}, `At these ages you could spend about ${money(could.amount)} a year (${money(could.amount / 12)} a month). `,
             h('button', { type: 'button', class: 'btn small ghost', onclick: () => { r.mode = 'custom'; r.custom = could.amount; renderGoalWizard(); } }, 'Use')) : null);
       };
-      box.replaceChildren(
+      setKids(box, 
         h('div', { class: 'hero-label' }, 'Chance the money lasts'),
         h('div', { class: 'goal-figure' }, h('span', { class: 'goal-pct big' }, pct(mc.successRate)), badge(st)),
         h('div', { class: 'meter' }, h('span', { style: `width:${mc.successRate * 100}%` })),
@@ -1580,7 +1520,7 @@
       const mc = E.monteCarlo(p, EXPLORE_RUNS, ws.settings.seed);
       const res = E.evaluateGoals(p, proj, mc, { runs: EXPLORE_RUNS, seed: ws.settings.seed }).find(x => x.goal.id === g.id);
       const st = goalStatus(res.probability);
-      box.replaceChildren(h('div', { class: 'goal-figure' }, h('span', { class: 'goal-pct big' }, pct(res.probability)), badge(st)),
+      setKids(box, h('div', { class: 'goal-figure' }, h('span', { class: 'goal-pct big' }, pct(res.probability)), badge(st)),
         h('p', {}, `${res.title}. ${res.summary}`));
     }, 250);
   }
@@ -1596,8 +1536,9 @@
     const before = (() => { const { p } = draftPlan(false); return evaluatePlan(p); })();
     const changed = L.changed(gwBase(), gw.values);
     const after = changed.length ? (() => { const { p } = draftPlan(true); return evaluatePlan(p); })() : before;
-    $('#gwImpact').replaceChildren(impactTable({ before, after }));
-    $('#gwStatus').textContent = changed.length ? `${changed.length} change${changed.length === 1 ? '' : 's'} tried.` : 'Move a slider to see the trade-offs.';
+    setKids($('#gwImpact'), impactTable({ before, after }));
+    $('#gwStatus').textContent = changed.length ? `${changed.length} change${changed.length === 1 ? '' : 's'} tried.` : 'Move a slider to see the trade-offs, or just save the goal.';
+    renderGoalSave();
   }
 
   function saveGoal(mode) {
@@ -1674,7 +1615,7 @@
   // A full "Replaying history" card in `host` (the retirement goal, or Assumptions).
   function renderHistory(host) {
     const r = historyRuns();
-    if (!r) { host.replaceChildren(); return; }
+    if (!r) { setKids(host, ); return; }
     const p = plan();
     const p1 = people()[0];
     const ageAt = y => p1.age + (y - p.startYear);
@@ -1684,7 +1625,7 @@
     const era = y => (ERAS[y] ? ` (${ERAS[y]})` : '');
     const barsBox = h('div', { class: 'chart' }), barsLegend = h('div', { class: 'legend' });
     const linesBox = h('div', { class: 'chart' }), linesLegend = h('div', { class: 'legend' });
-    host.replaceChildren(h('section', { class: 'card', id: 'histCard' },
+    setKids(host, h('section', { class: 'card', id: 'histCard' },
       h('h2', {}, 'Replaying history'),
       h('p', { class: 'sub' }, `What if the markets of the past happened again? Your plan is run from every starting year since ${r.first}, using that period’s real share and bond returns (the US market: the longest reliable record) with UK inflation from the same years. ${r.complete} starting years have a full ${r.years.length - 1}-year history; later ones carry on from ${r.first} again. The US did better than most markets over the last century, so this is a kinder test than the random simulations’ bad cases.`),
       h('div', { class: 'tiles', id: 'histTiles' },
@@ -1757,7 +1698,7 @@
     const grid = h('div', { class: 'fan-grid', id: 'mcFans' });
     const runs = h('select', { id: 'runsSelect', 'aria-label': 'Simulations', onchange: e => { ws.settings.runs = parseInt(e.target.value, 10); refresh(); } },
       [500, 1000, 2000, 5000, 10000].map(n => h('option', { value: n, selected: ws.settings.runs === n }, n.toLocaleString('en-GB'))));
-    host.replaceChildren(h('section', { class: 'card' },
+    setKids(host, h('section', { class: 'card' },
       h('div', { class: 'card-head' },
         h('div', {}, h('h2', {}, 'How things vary in the simulations'),
           h('p', { class: 'sub' }, `Every goal’s chance comes from ${ws.settings.runs.toLocaleString('en-GB')} simulated futures. Each draws its own share and bond returns and, as switched on above, its own inflation, pay rises, house prices and interest rates. These are the ranges.`)),
@@ -1792,10 +1733,44 @@
   let wkAccount = 'isa';
 
   function renderMoneyNav() {
-    $('#moneyNav').replaceChildren(...MONEY_PAGES.map(([k, l, count]) => h('a', {
-      href: `#finances/${k}`, 'aria-current': k === moneyPage ? 'page' : null,
+    setKids($('#moneyNav'), ...MONEY_PAGES.map(([k, l, count]) => h('a', {
+      href: `#finances/${k}`, class: 'chip', 'aria-current': k === moneyPage ? 'page' : null,
       onclick: e => { e.preventDefault(); navigate(`finances/${k}`); },
     }, h('span', {}, l), count ? h('span', { class: 'count' }, String(count())) : null)));
+  }
+
+  // ---- what your edits do: every goal's chance and the monthly investment, next to the
+  //      inputs, compared with when you opened the page.
+
+  let impactBase = null;
+  const impactNow = () => ({
+    goals: Object.fromEntries(model.goals.map(g => [g.goal.id, g.probability])),
+    invest: model.monthly.shortfall > 0 ? -model.monthly.shortfall : model.monthly.invest,
+  });
+
+  function renderImpact() {
+    const box = $(`#view-finances .money-page[data-page="${moneyPage}"] [data-impact]`);
+    if (!box) return;
+    if (!impactBase) impactBase = impactNow();
+    const now = impactNow();
+    const dPts = g => Math.round(((now.goals[g.goal.id] || 0) - (impactBase.goals[g.goal.id] ?? now.goals[g.goal.id])) * 100);
+    const dInv = Math.round(now.invest - impactBase.invest);
+    const moved = model.goals.some(g => dPts(g) !== 0) || Math.abs(dInv) >= 1;
+    setKids(box, 
+      h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'What your changes do'),
+        h('p', { class: 'sub' }, moved ? 'Compared with when you opened this page.' : 'Change anything on the left and watch your goals here.')),
+        moved ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => { impactBase = null; renderImpact(); } }, 'Start comparing from here') : null),
+      h('ul', { class: 'impact-list' },
+        model.goals.map(g => {
+          const d = dPts(g);
+          return h('li', { style: `--gc:${cssVar(goalColor(g.goal))}` }, goalBadge(g.goal, 'small'),
+            h('span', { class: 'im-name' }, g.title),
+            h('strong', {}, pct(g.probability)),
+            h('span', { class: `im-delta ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}` }, d ? `${d > 0 ? '▲' : '▼'} ${Math.abs(d)} pts` : ''));
+        }),
+        h('li', { class: 'im-invest' }, h('span', { class: 'im-name' }, now.invest < 0 ? 'Drawing from savings' : 'Invest each month'),
+          h('strong', {}, money(Math.abs(now.invest))),
+          h('span', { class: `im-delta ${dInv > 0 ? 'pos' : dInv < 0 ? 'neg' : ''}` }, Math.abs(dInv) >= 1 ? `${dInv > 0 ? '+' : '−'}${money(Math.abs(dInv))}` : ''))));
   }
 
   // "Your figures are as at …": the date every input describes.
@@ -1814,7 +1789,7 @@
         refresh();
       },
     });
-    $('#asOfBar').replaceChildren(...[
+    setKids($('#asOfBar'), ...[
       h('span', { class: 'banner-ico' }, glyph('review')),
       h('div', { class: 'asof-text' },
         h('label', { class: 'asof-label' }, h('strong', {}, 'Your figures are as at'), input),
@@ -1824,12 +1799,13 @@
     ]);
   }
 
-  // The predictions under each Finances page's inputs.
+  // The predictions beside each Inputs page's inputs.
   function renderMoneyPage() {
     for (const el of $$('#view-finances .money-page')) el.hidden = el.dataset.page !== moneyPage;
     renderMoneyNav();
     renderAsOfBar();
-    const fill = (id, fn) => { const body = $(id); body.replaceChildren(); fn(body); };
+    renderImpact();
+    const fill = (id, fn) => { const body = $(id); setKids(body, ); fn(body); };
     if (moneyPage === 'portfolio') fill('#mpPortfolio', wkAccounts);
     if (moneyPage === 'income') { fill('#mpIncome', wkIncome); requestAnimationFrame(updateIncomeTrends); }
     if (moneyPage === 'spending') fill('#mpSpending', wkSpending);
@@ -2014,113 +1990,96 @@
       [String, money, money, money, money, money, ...(isDebt ? [pct1] : []), String]);
   }
 
-  // ------------------------------------------------------------------ scenarios
+  // ------------------------------------------------------------------ scenarios: every goal, side by side
 
-  function summaryRow(name, s, extra) {
-    return [
-      name,
-      { text: pct(s.success) },
-      money(s.netWorthAtRetire),
-      money(s.liquidAtRetire),
-      s.debtFree ? String(s.debtFree) : '—',
-      s.goalYear ? String(s.goalYear) : '—',
-      money(s.lifetimeTax),
-      s.monthly.shortfall > 0 ? `−${money(s.monthly.shortfall)}` : money(s.monthly.invest),
-      ...(extra || []),
-    ];
-  }
-  const SUMMARY_HEAD = ['Variant', 'Success', 'Net worth at retirement', 'Liquid at retirement', 'Mortgage-free', 'Amount goal year', 'Lifetime tax', 'Invest/month now'];
+  let cmpCache = { key: null, items: null };
 
-  function lineChartFor(host, items, title) {
-    host.replaceChildren();
-    const div = h('div', { class: 'chart' });
-    const leg = h('div', { class: 'legend' });
-    host.append(h('h3', { class: 'chart-title' }, title), div, leg);
-    const c = new Chart(div, { height: 300, label: title });
-    const xs = items[0].summary.proj.pre.years;
-    const lines = items.map((it, k) => ({
-      label: it.label, color: SERIES_COLORS[k % 8],
-      values: it.summary.proj.rows.map(r => (real() ? r.netWorth / r.deflator : r.netWorth)),
-    }));
-    c.set({
-      xs, lines,
-      tooltip: i => ({ title: String(xs[i]), rows: lines.map(l => ({ label: l.label, color: l.color, shape: 'line', text: money(l.values[i]) })) }),
-    });
-    legend(leg, lines.map(l => ({ label: l.label, color: l.color, shape: 'line' })), c);
+  // Each scenario's goals (chance and expected year) and what it invests each month. The open
+  // scenario uses the same numbers as everywhere else; the others are simulated alike.
+  function compareScenarios() {
+    const runs = ws.settings.runs, seed = ws.settings.seed;
+    const key = `${JSON.stringify(ws.scenarios.map(s => [s.id, s.plan]))}|${runs}|${seed}`;
+    if (cmpCache.key !== key) {
+      cmpCache = { key, items: ws.scenarios.map(s => {
+        if (s.id === ws.activeId) return { s, goals: model.goals, monthly: model.monthly };
+        const proj = E.project(s.plan);
+        const mc = E.monteCarlo(s.plan, runs, seed);
+        return { s, goals: E.evaluateGoals(s.plan, proj, mc, { runs: 500, seed }), monthly: E.monthlyPlan(proj) };
+      }) };
+    }
+    return cmpCache.items;
   }
 
+  function renderScenarios() {
+    renderScenarioList();
+    renderIdeas();
+    const box = $('#compareResults');
+    setKids(box, h('p', { class: 'sub working' }, `Working out ${ws.scenarios.length} scenario${ws.scenarios.length === 1 ? '' : 's'}…`));
+    setTimeout(() => {
+      if (route.tab !== 'scenarios') return;
+      const items = compareScenarios();
+      const base = items.find(x => x.s.id === ws.activeId);
+      // One column per goal: the open scenario's goals first, then any only others have.
+      const cols = [];
+      const same = (a, b) => a.goal.id === b.goal.id || a.title === b.title;
+      for (const it of [base, ...items.filter(x => x !== base)]) for (const g of it.goals) if (!cols.some(c => same(c, g))) cols.push(g);
+      const find = (it, c) => it.goals.find(g => same(g, c));
+      const cell = (it, c) => {
+        const r = find(it, c);
+        if (!r) return h('td', { class: 'sc-cell none' }, h('span', { class: 'muted' }, 'Not a goal here'));
+        const b = it === base ? null : find(base, c);
+        const pts = b ? Math.round((r.probability - b.probability) * 100) : 0;
+        return h('td', { class: 'sc-cell', style: `--gc:${cssVar(goalColor(c.goal))}` },
+          h('div', { class: 'sc-top' }, h('strong', {}, pct(r.probability)),
+            b && pts ? h('span', { class: `sc-delta ${pts > 0 ? 'pos' : 'neg'}` }, `${pts > 0 ? '▲' : '▼'} ${Math.abs(pts)} pts`) : null),
+          h('div', { class: 'sc-bar', role: 'img', 'aria-label': `${pct(r.probability)} chance` }, h('span', { style: `width:${r.probability * 100}%` })),
+          h('small', {}, goalWhen(r)));
+      };
+      const invest = it => (it.monthly.shortfall > 0 ? `−${money(it.monthly.shortfall)}` : money(it.monthly.invest));
+      const rows = items.map(it => h('tr', { class: it === base ? 'open' : '', 'data-scenario': it.s.id },
+        h('th', { scope: 'row' }, h('strong', {}, it.s.name), it === base ? h('span', { class: 'sc-open' }, 'Open now') : null),
+        cols.map(c => cell(it, c)),
+        h('td', { class: 'sc-invest' }, invest(it), h('small', {}, 'a month now')),
+        h('td', { class: 'sc-actions' }, it === base ? null : [
+          h('button', { type: 'button', class: 'btn small', onclick: () => { ws.activeId = it.s.id; afterScenarioChange(); } }, 'Open'),
+          h('button', { type: 'button', class: 'btn small ghost danger', 'aria-label': `Delete scenario ${it.s.name}`, onclick: () => {
+            if (!confirm(`Delete scenario “${it.s.name}”?`)) return;
+            ws.scenarios = ws.scenarios.filter(x => x.id !== it.s.id);
+            save();
+            renderScenarioPicker();
+            renderScenarios();
+          } }, 'Delete')])));
+      setKids(box, h('div', { class: 'table-wrap sc-wrap' }, h('table', { class: 'data sc-table' },
+        h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'Scenario'),
+          cols.map(c => h('th', { scope: 'col', style: `--gc:${cssVar(goalColor(c.goal))}` }, h('span', { class: 'heat-goal' }, goalBadge(c.goal, 'small'), h('span', {}, c.title)))),
+          h('th', { scope: 'col' }, 'Invest'), h('th', { scope: 'col' }, h('span', { class: 'sr-only' }, 'Actions')))),
+        h('tbody', {}, rows))),
+      ws.scenarios.length < 2 ? h('p', { class: 'hint' }, 'Only one scenario so far: add a what-if below, or duplicate this one and change anything in it.') : h('p', { class: 'hint' }, 'Chance of each goal across simulated futures, and when it is reached on average returns. ▲▼ compare with the scenario you have open.'));
+    }, 30);
+  }
+
+  // A what-if counts as added when a scenario made from the open one already has its name.
+  const ideaName = idea => `${scenario().name}: ${idea.title}`;
   function renderIdeas() {
     const p = plan();
-    $('#ideaGrid').replaceChildren(...SI.ideasFor(p).map(idea => h('div', { class: 'idea', 'data-idea': idea.id },
-      h('span', { class: 'idea-ico' }, glyph(idea.icon)),
-      h('div', { class: 'idea-text' }, h('strong', {}, idea.title), h('p', {}, SI.textOf(idea, p))),
-      h('button', { type: 'button', class: 'btn small', onclick: e => addIdea(idea, e.currentTarget) }, 'Add scenario'))));
+    setKids($('#ideaGrid'), SI.ideasFor(p).map(idea => {
+      const added = ws.scenarios.some(x => x.name === ideaName(idea));
+      return h('button', {
+        type: 'button', class: `idea-chip${added ? ' added' : ''}`, 'data-idea': idea.id, disabled: added,
+        title: added ? `Already added as “${ideaName(idea)}”` : SI.textOf(idea, p), onclick: e => addIdea(idea, e.currentTarget),
+      }, h('span', { class: 'idea-ico' }, glyph(idea.icon)), h('span', {}, idea.title));
+    }));
   }
 
   function addIdea(idea, btn) {
-    const name = `${scenario().name}: ${idea.title}`;
+    const name = ideaName(idea);
     ws.scenarios.push({ id: E.uid(), name, plan: SI.variantOf(idea, plan()) });
     save();
     renderScenarioPicker();
-    runCompare();
-    btn.textContent = 'Added';
     btn.disabled = true;
-    toast(`Added “${name}”. Compare it below, or pick it at the top to open and edit it.`);
-  }
-
-  function renderSweepLevers() {
-    const sel = $('#sweepLever');
-    if (sel.options.length) return;
-    for (const [k, v] of Object.entries(E.LEVERS)) sel.append(h('option', { value: k }, v.label));
-  }
-
-  function runSweep() {
-    const lever = $('#sweepLever').value;
-    const btn = $('#sweepRun');
-    btn.disabled = true;
-    $('#sweepStatus').textContent = 'Running simulations…';
-    setTimeout(() => {
-      const runs = Math.min(ws.settings.runs, 500);
-      const items = E.sweep(plan(), lever, runs, ws.settings.seed);
-      const box = $('#sweepResults');
-      box.replaceChildren(h('div', { class: 'table-wrap' }, table(
-        [...SUMMARY_HEAD, ''],
-        items.map(it => ({
-          cls: it.value === (lever === 'spending' ? 100 : lever === 'overpay' ? plan().strategy.overpayPct : 0) ? 'hl' : '',
-          cells: summaryRow(it.label, it.summary, [h('button', { type: 'button', class: 'btn small', onclick: () => saveVariant(it) }, 'Save as scenario')]),
-        })))));
-      const chartBox = h('div');
-      box.append(chartBox);
-      lineChartFor(chartBox, items, `Net worth on average returns (${unitLabel()})`);
-      $('#sweepStatus').textContent = `${runs.toLocaleString('en-GB')} simulations per variant · values in today's money.`;
-      btn.disabled = false;
-    }, 30);
-  }
-
-  function saveVariant(it) {
-    const id = E.uid();
-    ws.scenarios.push({ id, name: `${scenario().name} – ${it.label}`, plan: E.normalizePlan(it.plan) });
-    ws.activeId = id;
-    afterScenarioChange();
-  }
-
-  function runCompare() {
-    const box = $('#compareResults');
-    box.replaceChildren(h('p', { class: 'sub' }, 'Running simulations…'));
-    setTimeout(() => {
-      const runs = Math.min(ws.settings.runs, 500);
-      const items = ws.scenarios.map(s => ({ id: s.id, label: s.name, summary: E.summarize(s.plan, runs, ws.settings.seed) }));
-      box.replaceChildren(h('div', { class: 'table-wrap' }, table(
-        [...SUMMARY_HEAD.map((x, i) => (i === 0 ? 'Scenario' : x)), ''],
-        items.map(it => ({
-          cls: it.id === ws.activeId ? 'hl active' : '',
-          cells: summaryRow(it.label, it.summary, [it.id === ws.activeId ? h('span', { class: 'muted' }, 'Open') : h('button', { type: 'button', class: 'btn small', onclick: () => { ws.activeId = it.id; afterScenarioChange(); } }, 'Open')]),
-        })))));
-      const chartBox = h('div');
-      box.append(chartBox);
-      if (items.length) lineChartFor(chartBox, items, `Net worth by scenario on average returns (${unitLabel()})`);
-      compareDirty = false;
-    }, 30);
+    btn.classList.add('added');
+    renderScenarios();
+    toast(`Added “${name}”. It is in the table above; open it to change anything in it.`);
   }
 
   // ------------------------------------------------------------------ progress (check-ins)
@@ -2132,13 +2091,13 @@
     const chartBox = $('#progChart');
     renderProgressReview();
     if (!list.length) {
-      chartBox.replaceChildren(h('p', { class: 'sub' }, 'No check-ins yet. Record one now to start tracking: next year you will see how close this year’s projection was.'));
-      $('#progLegend').replaceChildren();
-      tableBox.replaceChildren();
+      setKids(chartBox, h('p', { class: 'sub' }, 'No check-ins yet. Record one now to start tracking: next year you will see how close this year’s projection was.'));
+      setKids($('#progLegend'), );
+      setKids(tableBox, );
       delete charts.progChart;
       return;
     }
-    if (!charts.progChart) chartBox.replaceChildren();
+    if (!charts.progChart) setKids(chartBox, );
     const minY = Math.min(...list.map(c => c.year));
     const maxY = Math.max(...list.map(c => c.year)) + 8;
     const xs = [];
@@ -2157,7 +2116,7 @@
     });
     legend($('#progLegend'), lines.map(l => ({ label: l.label, color: l.color, shape: l.points ? 'dot' : 'dash' })), charts.progChart);
 
-    tableBox.replaceChildren(table(
+    setKids(tableBox, table(
       ['Date', 'Year', 'Net worth', 'Projected a year earlier', 'Difference', 'Spending', 'Planned investing', ''],
       review.slice().reverse().map(rv => {
         const c = rv.checkin;
@@ -2215,7 +2174,7 @@
     $('#rvNext').textContent = rv.step === total - 2 ? 'Next: update scenarios' : 'Next';
     const body = $('#rvBody');
     const fn = [rvStart, rvBalances, rvIncome, rvSpending, rvMarkets, rvResults, rvSave][rv.step];
-    body.replaceChildren(...[].concat(fn()).filter(Boolean));
+    setKids(body, ...[].concat(fn()).filter(Boolean));
     body.scrollTop = 0;
     updateReviewNote();
   }
@@ -2249,7 +2208,7 @@
     const prog = h('p', { class: 'rv-progress' });
     const updateProg = () => {
       const pg = RV.progress(d, kind);
-      prog.replaceChildren(glyph(pg.done === pg.total ? 'good' : 'review'), `${pg.done} of ${pg.total} updated`);
+      setKids(prog, glyph(pg.done === pg.total ? 'good' : 'review'), `${pg.done} of ${pg.total} updated`);
       prog.classList.toggle('done', pg.done === pg.total);
     };
     const rows = items.map(it => {
@@ -2453,7 +2412,7 @@
     setTimeout(() => {
       if (!rv || rv.draft !== d) return;
       if (!rv.evals) rv.evals = { before: evaluatePlan(d.expectedPlan), after: evaluatePlan(applyMarketTo(d.plan)) };
-      goalsBox.replaceChildren(impactTable(rv.evals, ['If all went to plan', 'Now']),
+      setKids(goalsBox, impactTable(rv.evals, ['If all went to plan', 'Now']),
         h('p', { class: 'hint' }, `${EXPLORE_RUNS} simulated futures each, same markets for both. “Invest each month now” is the figure to set up for the year ahead.`));
     }, 40);
     return out;
@@ -2490,14 +2449,14 @@
     if (rv.step === 1) {
       const nw = RV.byType(d.plan).netWorth;
       const dv = nw - rv.expNW;
-      note.replaceChildren('Net worth ', h('strong', {}, money(nw)), ` · plan expected ${money(rv.expNW)}`, Math.abs(dv) >= 0.5 ? h('span', { class: dv > 0 ? 'pos' : 'neg' }, ` (${dv > 0 ? '+' : '−'}${money(Math.abs(dv))})`) : '');
+      setKids(note, 'Net worth ', h('strong', {}, money(nw)), ` · plan expected ${money(rv.expNW)}`, Math.abs(dv) >= 0.5 ? h('span', { class: dv > 0 ? 'pos' : 'neg' }, ` (${dv > 0 ? '+' : '−'}${money(Math.abs(dv))})`) : '');
     } else if (rv.step === 2) {
       const now = sum(d.plan, 'income'), exp = sum(d.expectedPlan, 'income');
-      note.replaceChildren('Income ', h('strong', {}, `${money(now / 12)} a month`), ` · plan expected ${money(exp / 12)}`);
+      setKids(note, 'Income ', h('strong', {}, `${money(now / 12)} a month`), ` · plan expected ${money(exp / 12)}`);
     } else if (rv.step === 3) {
       const now = sum(d.plan, 'expenses'), exp = sum(d.expectedPlan, 'expenses');
-      note.replaceChildren('Spending ', h('strong', {}, `${money(now / 12)} a month`), ` · plan expected ${money(exp / 12)}`);
-    } else note.replaceChildren();
+      setKids(note, 'Spending ', h('strong', {}, `${money(now / 12)} a month`), ` · plan expected ${money(exp / 12)}`);
+    } else setKids(note, );
   }
 
   function saveReview() {
@@ -2513,7 +2472,7 @@
       renderPlan();
       refresh();
       navigate('finances/history');
-      toast(`${d.year} review saved: figures as at ${fmtDate(d.date)}, and every scenario now starts in ${d.year}. Invest ${money(model.monthly.invest)} a month this year. Save a copy to a file to keep it safe.`, { label: 'Save to a file', run: exportFile });
+      toast(`${d.year} review saved: figures as at ${fmtDate(d.date)}, and every scenario now starts in ${d.year}. Invest ${money(model.monthly.invest)} a month this year.`);
     };
     const btn = $('#rvSave');
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
@@ -2526,7 +2485,7 @@
   let toastTimer = null;
   function toast(text, action) {
     const t = $('#toast');
-    t.replaceChildren(h('span', {}, text), action ? h('button', { type: 'button', class: 'btn small', onclick: () => { t.hidden = true; action.run(); } }, action.label) : null);
+    setKids(t, h('span', {}, text), action ? h('button', { type: 'button', class: 'btn small', onclick: () => { t.hidden = true; action.run(); } }, action.label) : null);
     t.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.hidden = true; }, action ? 14000 : 7000);
@@ -2562,15 +2521,14 @@
           return { cells: [g.title, was ? pct(was.probability) : '—', pct(g.probability), was ? deltaCell(Math.round(was.probability * 100), Math.round(g.probability * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} pts`) : '—'] };
         }))));
     }
-    box.replaceChildren(...kids);
+    setKids(box, ...kids);
   }
 
   // Review tab: what the yearly review does, and when.
   function renderReviewIntro() {
     const due = RV.due(ws);
     const last = ws.checkins.filter(c => c.scenarioName !== 'Manual').sort((a, b) => a.date.localeCompare(b.date)).pop();
-    const saved = ws.settings.lastSaved;
-    $('#reviewIntro').replaceChildren(
+    setKids($('#reviewIntro'), 
       h('div', { class: 'card-head' },
         h('div', {}, h('h2', {}, due.due ? `Time for your ${due.year} yearly review` : 'Yearly review'),
           h('p', { class: 'sub' }, 'Once a year, swap Horizon’s estimates for the real numbers. Every balance, income and spending item is already filled in with what the plan expected by the review date, so you only correct what is different. Horizon then shows how close last year’s plan was, moves every scenario on a year and saves the check-in for next time.')),
@@ -2581,9 +2539,7 @@
       h('div', { class: 'gh-facts' },
         h('div', {}, h('span', { class: 'rv-k' }, 'Your figures are as at'), h('strong', {}, fmtDate(asOf()))),
         h('div', {}, h('span', { class: 'rv-k' }, 'Last review'), h('strong', {}, last ? fmtDate(last.date) : 'None yet')),
-        h('div', {}, h('span', { class: 'rv-k' }, 'Next review'), h('strong', {}, due.due ? 'Due now' : `October ${due.next}`)),
-        h('div', {}, h('span', { class: 'rv-k' }, 'Saved to a file'), h('strong', {}, saved ? fmtDate(saved) : 'Not yet'),
-          h('button', { type: 'button', class: 'btn small ghost', onclick: exportFile }, 'Save to a file'))));
+        h('div', {}, h('span', { class: 'rv-k' }, 'Next review'), h('strong', {}, due.due ? 'Due now' : `October ${due.next}`))));
   }
 
   // ------------------------------------------------------------------ update balances (between reviews)
@@ -2625,7 +2581,7 @@
         diff);
       return row;
     });
-    $('#udBody').replaceChildren(
+    setKids($('#udBody'), 
       h('label', { class: 'asof-label' }, h('strong', {}, 'Balances as at'), dateIn),
       p.accounts.length ? h('div', { class: 'rv-rows' }, rows) : h('p', { class: 'sub' }, 'No accounts yet: add them in Finances → Portfolio.'));
     updateUpdateNote();
@@ -2771,7 +2727,7 @@
     const s = SECTIONS.find(x => x.id === id);
     const el = $(`#sec-${id}`);
     if (!s || !el) return;
-    el.replaceChildren(...[].concat(s.render()));
+    setKids(el, ...[].concat(s.render()));
     if (s.count) renderMoneyNav();
     if (id === 'income') requestAnimationFrame(updateIncomeTrends);
     if (id === 'accounts') updateAccountFigures();
@@ -3011,7 +2967,7 @@
           deleteButton(`Remove ${item.name}`, () => removeFrom(p.income, item, 'income'))),
         h('div', { class: 'fields' },
           field('Whose', selectInput(ownerOptions(!isSalary), ...bind(item, 'owner'), { rerender: 'income' })),
-            field('Amount (today)', amountWithFreq(item, 'income')),
+            field('Amount', amountWithFreq(item, 'income')),
           field('Tax', selectInput(taxOptions(item.kind), ...bind(item, 'tax'), { rerender: 'income' }), ignore && item.tax === 'uk' ? 'Tax is switched off for the household.' : null),
           item.tax === 'flat' ? field('Tax rate', numInput(...bind(item, 'taxRate'), { step: 1, min: 0, max: 100, suffix: '%' }), 'E.g. tax withheld abroad.') : null,
           item.kind === 'rental' ? costFields : null),
@@ -3109,7 +3065,7 @@
     return [
       sectionHead('expenses', 'Spending', null,
         h('button', { type: 'button', class: 'btn small primary', onclick: openWizard }, 'Spending check-up'),
-        h('button', { type: 'button', class: 'btn small', onclick: openLifeWizard }, 'Life check-up'),
+        h('button', { type: 'button', class: 'btn small', id: 'lifeBtn', onclick: openLifeWizard, title: 'Children, cars, home repairs, retirement travel and care: big costs that come later, added as dated spending items' }, 'Future costs'),
         h('button', { type: 'button', class: 'btn small', onclick: () => { p.expenses.push(E.normalizePlan({ ...p, expenses: [{ name: 'New expense', amount: 0, freq: 'month', inflationLinked: true }] }).expenses[0]); renderSection('expenses'); refresh(); } }, '+ Add expense')),
       h('p', { class: 'total sub', style: 'margin:-6px 0 12px' }, 'This year: ', h('strong', {}, `${money(now / 12)} a month`), ` · ${money(now)} a year. Amounts are today's prices and rise with inflation unless you change it under More. Mortgage payments are under Accounts.${adjust.length ? ` Your saving strategy has this list ${adjust.join(' and ')}.` : ''}`),
       rows.length
@@ -3221,7 +3177,7 @@
         h('div', { class: 'field' }, h('span', {}, 'Spare cash'), switchInput('Invest cash above the buffer', ...bind(s, 'sweepCash')), h('span', { class: 'hint' }, 'E.g. gilts that mature or a windfall are invested each year instead of sitting in cash.'))),
       more('strategy-later', 'Spending later in life',
         h('div', { class: 'fields' },
-          field('Spend less from age', numInput(...bind(s, 'slowDownAge'), { min: 0, max: 110 }), '0 = never. The life check-up can set this.'),
+          field('Spend less from age', numInput(...bind(s, 'slowDownAge'), { min: 0, max: 110 }), '0 = never. Future costs (in Spending) can set this.'),
           field('Spending from then', numInput(...bind(s, 'slowDownPct'), { min: 0, max: 200, step: 5, suffix: '%' }), 'Of normal spending.'))),
       h('p', { class: 'sub', style: 'margin-top:12px' }, 'In retirement, money comes from: cash above the buffer → pensions up to each person’s tax-free allowance → general investment account → ISAs → more pension (taxed) → the cash buffer.'),
     ];
@@ -3344,7 +3300,7 @@
       }
       const extra = guide.tip || guide.note;
       if (extra) kids.push(h('p', { class: 'guide-note' }, extra));
-      el.replaceChildren(...kids);
+      setKids(el, ...kids);
       el.hidden = !kids.length;
     };
     update();
@@ -3382,7 +3338,7 @@
       h('div', { class: 'legend' }, segs.map(([l, v, c, g]) => h('span', {}, h('i', { class: 'key square', style: `--key:${cssVar(c)}` }), `${l} ${total ? Math.round(v / total * 100) : 0}% (guide ${g}%) · ${money(v / 12)}/month`))));
     const tbl = h('div', { class: 'table-wrap' }, table(['', 'A month', 'Share of take-home', 'Guide'], segs.map(([l, v, , g]) => ({ cells: [l, money(v / 12), total ? pct(v / total) : '—', `${g}%`] }))));
     const month = t.month + (wiz.keepOthers ? W.uncovered(p, wiz.answers).reduce((acc, e) => acc + E.streamAt(e, p, 0), 0) / 12 : 0);
-    box.replaceChildren(
+    setKids(box, 
       h('h3', { class: 'chart-title' }, 'How it compares'),
       h('p', { class: 'sub' }, `Take-home this year about ${money(take / 12)} a month. Needs include your mortgage (${money(debt / 12)} a month), bills, food, transport and childcare; wants are the rest. The 50/30/20 split is a popular rule of thumb, not a rule.`),
       viewToggle(visual, tbl),
@@ -3402,7 +3358,7 @@
 
     if (!isReview) {
       const hh = B.household(plan());
-      body.replaceChildren(...step.questions.map(q => {
+      setKids(body, ...step.questions.map(q => {
         const a = wiz.answers[q.key];
         const guide = guideView(B.forQuestion(q.key, hh), a);
         return h('div', { class: 'wiz-q' },
@@ -3418,7 +3374,7 @@
       const others = W.uncovered(plan(), wiz.answers);
       const othersTotal = others.reduce((acc, e) => acc + E.streamAt(e, plan(), 0), 0);
       if (wiz.keepOthers === null) wiz.keepOthers = true;
-      body.replaceChildren(...[
+      setKids(body, ...[
         h('div', { class: 'table-wrap wiz-summary' }, table(['Category', 'A month', 'A year'],
           steps.map(s => ({ cells: [s.title, money((t.byStep[s.id] || 0) / 12), money(t.byStep[s.id] || 0)] })).concat([{ cls: 'hl', cells: ['Total', money(t.month), money(t.year)] }]))),
         others.length ? h('div', { class: 'field' },
@@ -3438,7 +3394,7 @@
     const t = W.totals(wiz.answers);
     let month = t.month;
     if (wiz.step === W.STEPS.length && wiz.keepOthers) month += W.uncovered(plan(), wiz.answers).reduce((acc, e) => acc + E.streamAt(e, plan(), 0), 0) / 12;
-    $('#wizTotal').replaceChildren('Total ', h('strong', {}, `${money(month)} a month`), ` · ${money(month * 12)} a year`);
+    setKids($('#wizTotal'), 'Total ', h('strong', {}, `${money(month)} a month`), ` · ${money(month * 12)} a year`);
   }
 
   function wizardNext() {
@@ -3538,7 +3494,7 @@
         lwNum('familyFrom', `From ${p1.name}'s age`, { min: 18, max: 110 }),
         lwNum('familyTo', 'Until age', { min: 18, max: 110 }))];
     }
-    body.replaceChildren(...[].concat(content).filter(Boolean));
+    setKids(body, ...[].concat(content).filter(Boolean));
     $('#lwBack').disabled = lw.step === 0;
     $('#lwNext').textContent = review ? 'Apply to plan' : 'Next';
     updateLifeTotal();
@@ -3546,7 +3502,7 @@
 
   function updateLifeTotal() {
     const s = LW.summary(plan(), lw.a);
-    $('#lifeWiz .wiz-total').replaceChildren('Adds ', h('strong', {}, money(s.total)), ' over your lifetime (today’s money)');
+    setKids($('#lifeWiz .wiz-total'), 'Adds ', h('strong', {}, money(s.total)), ' over your lifetime (today’s money)');
   }
 
   function lifeNext() {
@@ -3590,18 +3546,23 @@
   // A short name for a goal's tab.
   const goalTabName = g => g.name || ({ debtFree: 'Mortgage-free', retire: 'Retirement', emergency: 'Emergency fund', passiveIncome: 'Passive income' }[g.type]) || E.autoTitle(g, plan());
 
+  // Home, the goals (each in its colour, + to add), then Finances and Scenarios at the right.
+  // On a phone the right-hand pair stays pinned while the goals scroll under it.
   function renderTabs() {
     const goals = plan().goals;
     const tab = (key, label, extra = {}) => h('button', {
       role: 'tab', type: 'button', 'data-tab': key, 'aria-selected': String(tabKey(route) === key), class: extra.cls || null, style: extra.style || null,
       onclick: () => navigate(key),
     }, extra.icon || null, label);
-    $('#tabList').replaceChildren(
+    setKids($('#tabList'),
       tab('home', 'Home'),
-      ...goals.map(g => tab(`goal/${g.id}`, goalTabName(g), { cls: 'goal-tab', style: `--gc:${cssVar(goalColor(g))}`, icon: h('i', { class: 'tab-dot', 'aria-hidden': 'true' }) })),
-      h('button', { type: 'button', class: 'tab-add', title: 'Add a goal', 'aria-label': 'Add a goal', onclick: () => openGoalWizard() }, '+'),
-      tab(`finances/${moneyPage}`, 'Finances', { cls: 'tab-right' }),
-      tab('scenarios', 'Scenarios'));
+      h('div', { class: 'goal-tabs', role: 'presentation' },
+        h('span', { class: 'tab-group-label', 'aria-hidden': 'true' }, 'Goals'),
+        goals.map(g => tab(`goal/${g.id}`, goalTabName(g), { cls: 'goal-tab', style: `--gc:${cssVar(goalColor(g))}`, icon: glyph(ICON_GLYPH[g.icon] || 'goal') })),
+        h('button', { type: 'button', class: 'tab-add', title: 'Add a goal', 'aria-label': 'Add a goal', onclick: () => openGoalWizard() }, '+')),
+      h('div', { class: 'side-tabs', role: 'presentation' },
+        tab(`finances/${moneyPage}`, 'Finances'),
+        tab('scenarios', 'Scenarios')));
   }
   const tabKey = r => (r.tab === 'goal' ? `goal/${r.sub}` : r.tab === 'finances' ? `finances/${moneyPage}` : r.tab);
 
@@ -3610,10 +3571,12 @@
     if (r.tab === 'finances') moneyPage = r.sub;
     for (const v of $$('main > .view')) v.hidden = v.id !== `view-${r.tab}`;
     renderTabs();
+    if (model) renderScenarioPicker();
   }
 
   function applyRoute(r) {
     const moved = route.tab !== r.tab || route.sub !== r.sub;
+    if (moved) impactBase = null;
     routeChrome(r);
     renderView();
     scheduleDrivers();
@@ -3631,7 +3594,7 @@
     if (r.tab === 'home') renderHome();
     if (r.tab === 'goal') renderGoalPage(r.sub);
     if (r.tab === 'finances') renderMoneyPage();
-    if (r.tab === 'scenarios') { renderScenarioList(); renderDriversCard(); renderIdeas(); renderExplorer(); if (compareDirty) runCompare(); }
+    if (r.tab === 'scenarios') renderScenarios();
     renderInflationSwitches();
   }
 
@@ -3641,7 +3604,7 @@
   function renderInflationSwitches() {
     for (const box of $$('[data-inflation]')) {
       if (box.closest('[hidden]')) continue;
-      box.replaceChildren(h('label', { class: 'switch small', title: 'On: amounts in later years are shown in today’s money, so £1 buys what £1 buys today. Off: the actual pounds of each year, which grow with prices.' },
+      setKids(box, h('label', { class: 'switch small', title: 'On: amounts in later years are shown in today’s money, so £1 buys what £1 buys today. Off: the actual pounds of each year, which grow with prices.' },
         h('input', { type: 'checkbox', role: 'switch', checked: real(), 'aria-label': 'Adjust for inflation', onchange: e => { ws.settings.realDollars = e.target.checked; save(); compareDirty = true; renderResults(); } }),
         'Adjust for inflation'));
     }
@@ -3663,11 +3626,6 @@
         text: `Last updated ${fmtDate(lastUpdate)}. Update a few balances from your banking apps, or do a full review.`,
         actions: [['Update balances', openUpdate], ['Full review', () => openReview()]] });
     }
-    const saved = ws.settings.lastSaved;
-    if (!saved || daysSince(saved) >= 30) {
-      out.push({ id: 'save', icon: 'tip', tone: 'soft', title: saved ? `Last saved to a file ${sinceText(daysSince(saved))}` : 'Keep a copy of your plan',
-        text: 'Your plan lives in this browser. Save it to a file to keep it safe or to carry on on another computer.', actions: [['Save to a file', exportFile]] });
-    }
     for (const w of model.warnings) out.push({ id: `w:${w}`, icon: 'warn', tone: 'warn', title: 'Check your plan', text: w, actions: [] });
     return out;
   }
@@ -3680,7 +3638,7 @@
     count.textContent = String(urgent);
     $('#notifyBtn').setAttribute('aria-label', urgent ? `Notifications: ${urgent}` : 'Notifications');
     $('#notifyBtn').classList.toggle('has-news', urgent > 0);
-    $('#notifyPop').replaceChildren(
+    setKids($('#notifyPop'), 
       h('p', { class: 'notify-head' }, 'Notifications'),
       list.length ? h('ul', { class: 'notify-list' }, list.map(n => h('li', { class: `notify-item ${n.tone}`, 'data-notify': n.id },
         h('span', { class: 'ins-ico' }, glyph(n.icon)),
@@ -3691,10 +3649,10 @@
 
   function renderScenarioPicker() {
     const sel = $('#scenarioSelect');
-    sel.replaceChildren(...ws.scenarios.map(s => h('option', { value: s.id, selected: s.id === ws.activeId }, s.name)));
+    setKids(sel, ws.scenarios.map(s => h('option', { value: s.id, selected: s.id === ws.activeId }, s.name)));
     const pill = $('#scenarioPill');
     pill.hidden = ws.scenarios.length < 2;
-    pill.replaceChildren(h('span', { class: 'rv-k' }, 'Scenario'), h('strong', {}, scenario().name));
+    setKids(pill, h('span', { class: 'rv-k' }, 'Scenario'), h('strong', {}, scenario().name));
     pill.title = 'Showing this scenario. Switch or compare in Scenarios.';
   }
 
@@ -3750,9 +3708,6 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     renderSavedNote();
-    if (route.tab === 'home') renderHomeYear();
-    if (route.tab === 'finances' && moneyPage === 'history') renderReviewIntro();
-    renderNotifications();
     toast('Saved to your downloads. To carry on on another computer, open Horizon there and use Data → Open a saved file.');
   }
 
@@ -3837,9 +3792,6 @@
     document.addEventListener('click', e => { for (const m of [$('#dataMenu'), $('#notifyMenu')]) if (m.open && !m.contains(e.target)) m.open = false; });
 
 
-    renderSweepLevers();
-    $('#sweepRun').addEventListener('click', runSweep);
-    $('#compareRun').addEventListener('click', runCompare);
 
     $('#checkinBtn').addEventListener('click', recordCheckin);
     $('#rvNext').addEventListener('click', () => { if (rv.step < RV_STEPS.length - 1) { rv.step++; renderReview(); } });
@@ -3858,19 +3810,15 @@
     $('#wizClose').addEventListener('click', () => $('#wizard').close());
     $('#wizForm').addEventListener('submit', e => e.preventDefault());
 
-    $('#lifeBtn').addEventListener('click', openLifeWizard);
     $('#lwNext').addEventListener('click', lifeNext);
     $('#lwBack').addEventListener('click', () => { if (lw.step > 0) { lw.step--; renderLifeWizard(); } });
     $('#lwClose').addEventListener('click', () => $('#lifeWiz').close());
     $('#lwForm').addEventListener('submit', e => e.preventDefault());
-    $('#gwNext').addEventListener('click', () => { gw.step++; renderGoalWizard(); });
+    $('#gwNext').addEventListener('click', goalWizardNext);
     $('#gwBack').addEventListener('click', () => { if (gw.step > 0) { gw.step--; renderGoalWizard(); } });
     $('#gwClose').addEventListener('click', () => $('#goalWiz').close());
     $('#gwForm').addEventListener('submit', e => e.preventDefault());
 
-    $('#expReset').addEventListener('click', () => { explorerValues = null; renderExplorer(); });
-    $('#expApply').addEventListener('click', () => applyExplorer(false));
-    $('#expScenario').addEventListener('click', () => applyExplorer(true));
 
     $('#taxYear').textContent = R.TAX_YEAR;
   }

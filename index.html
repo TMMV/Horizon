@@ -52,7 +52,6 @@
             <p class="sub" id="ovGoalsSub">Everything in the plan works towards these. Each goal has its own tab: open one to see how it is tracking and what moves it.</p>
           </div>
           <div class="controls">
-            <button type="button" class="btn small" id="lifeBtn">Life check-up</button>
             <button type="button" class="btn small primary" id="ovAddGoal">+ Add a goal</button>
           </div>
         </div>
@@ -80,153 +79,102 @@
       <div class="stack" id="goalPage"></div>
     </section>
 
-    <!-- Finances: every input, each with its own prediction -->
-    <section class="view" id="view-finances" role="tabpanel" hidden>
-      <div class="asof-bar card" id="asOfBar"></div>
-      <div class="plan-layout">
-        <nav class="plan-nav" id="moneyNav" aria-label="Finances sections"></nav>
-        <div class="plan-body">
-          <div class="money-page stack" data-page="portfolio">
-            <section class="card" id="sec-accounts" aria-labelledby="h-accounts"></section>
-            <div class="stack" id="mpPortfolio"></div>
-          </div>
-          <div class="money-page stack" data-page="income" hidden>
-            <section class="card" id="sec-income" aria-labelledby="h-income"></section>
-            <div class="stack" id="mpIncome"></div>
-          </div>
-          <div class="money-page stack" data-page="spending" hidden>
-            <section class="card" id="sec-expenses" aria-labelledby="h-expenses"></section>
-            <section class="card" id="sec-events" aria-labelledby="h-events"></section>
-            <div class="stack" id="mpSpending"></div>
-          </div>
-          <div class="money-page stack" data-page="cashflow" hidden>
-            <section class="card">
-              <div class="card-head">
-                <div>
-                  <h2>Money in and out each year</h2>
-                  <p class="sub">Above the line: where money comes from. Below: where it goes. Saving includes ISA, GIA, cash buffer and your own pension contributions.</p>
-                </div>
-                <div class="controls" data-inflation></div>
-              </div>
-              <div class="chart" id="cfChart"></div>
-              <div class="legend" id="cfLegend"></div>
-            </section>
-            <div class="stack" id="mpTax"></div>
-          </div>
-          <div class="money-page stack" data-page="assumptions" hidden>
-            <section class="card" id="sec-household" aria-labelledby="h-household"></section>
-            <section class="card" id="sec-strategy" aria-labelledby="h-strategy"></section>
-            <section class="card" id="sec-market" aria-labelledby="h-market"></section>
-            <div class="stack" id="mpAssumptions"></div>
-            <section class="card" id="sec-tax" aria-labelledby="h-tax"></section>
-          </div>
-          <div class="money-page stack" data-page="history" hidden>
-            <section class="card review-intro" id="reviewIntro"></section>
-            <div class="card">
-              <div class="card-head">
-                <div>
-                  <h2>How your plans have turned out</h2>
-                  <p class="sub">Each review saves your actual numbers and the projection you made, so the next one can show how close it was.</p>
-                </div>
-                <div class="controls">
-                  <button type="button" class="btn small" id="checkinBtn" title="Save today's figures and projection without the guided review">Save a snapshot</button>
-                </div>
-              </div>
-              <div class="chart" id="progChart"></div>
-              <div class="legend" id="progLegend"></div>
-              <details class="more" id="progList"><summary>Every check-in</summary><div class="table-wrap" id="progTable"></div></details>
-            </div>
-            <div class="card" id="progReview" hidden></div>
-            <details class="card">
-              <summary><h2 class="inline-h">Add a past year by hand</h2></summary>
-              <p class="sub">Backfill earlier years from old spreadsheets. Only net worth and spending are needed.</p>
-              <form class="inline-form" id="manualCheckin">
-                <label class="field">Year<input type="number" name="year" required min="1990" max="2100"></label>
-                <label class="field">Net worth (£)<input type="text" inputmode="decimal" name="netWorth" required></label>
-                <label class="field">Annual spending (£)<input type="text" inputmode="decimal" name="spending"></label>
-                <label class="field">Projected net worth one year later (£, optional)<input type="text" inputmode="decimal" name="predicted"></label>
-                <button type="submit" class="btn">Add</button>
-              </form>
-            </details>
-          </div>
+    <!-- Finances: every input, with its prediction alongside -->
+    <section class="view inputs-view" id="view-finances" role="tabpanel" hidden>
+      <div class="inputs-head">
+        <div class="asof-bar card" id="asOfBar"></div>
+        <nav class="chips money-nav" id="moneyNav" aria-label="Finances sections"></nav>
+      </div>
+      <div class="money-page io" data-page="portfolio">
+        <div class="io-inputs stack"><section class="card" id="sec-accounts" aria-labelledby="h-accounts"></section></div>
+        <aside class="io-preview stack"><div class="io-impact card" data-impact></div><div class="stack" id="mpPortfolio"></div></aside>
+      </div>
+      <div class="money-page io" data-page="income" hidden>
+        <div class="io-inputs stack"><section class="card" id="sec-income" aria-labelledby="h-income"></section></div>
+        <aside class="io-preview stack"><div class="io-impact card" data-impact></div><div class="stack" id="mpIncome"></div></aside>
+      </div>
+      <div class="money-page io" data-page="spending" hidden>
+        <div class="io-inputs stack">
+          <section class="card" id="sec-expenses" aria-labelledby="h-expenses"></section>
+          <section class="card" id="sec-events" aria-labelledby="h-events"></section>
         </div>
+        <aside class="io-preview stack"><div class="io-impact card" data-impact></div><div class="stack" id="mpSpending"></div></aside>
+      </div>
+      <div class="money-page stack" data-page="cashflow" hidden>
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Money in and out each year</h2>
+              <p class="sub">Above the line: where money comes from. Below: where it goes. Saving includes ISA, GIA, cash buffer and your own pension contributions.</p>
+            </div>
+            <div class="controls" data-inflation></div>
+          </div>
+          <div class="chart" id="cfChart"></div>
+          <div class="legend" id="cfLegend"></div>
+        </section>
+        <div class="stack" id="mpTax"></div>
+      </div>
+      <div class="money-page io" data-page="assumptions" hidden>
+        <div class="io-inputs stack">
+          <section class="card" id="sec-household" aria-labelledby="h-household"></section>
+          <section class="card" id="sec-strategy" aria-labelledby="h-strategy"></section>
+          <section class="card" id="sec-market" aria-labelledby="h-market"></section>
+          <section class="card" id="sec-tax" aria-labelledby="h-tax"></section>
+        </div>
+        <aside class="io-preview stack"><div class="io-impact card" data-impact></div><div class="stack" id="mpAssumptions"></div></aside>
+      </div>
+      <div class="money-page stack" data-page="history" hidden>
+        <section class="card review-intro" id="reviewIntro"></section>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>How your plans have turned out</h2>
+              <p class="sub">Each review saves your actual numbers and the projection you made, so the next one can show how close it was.</p>
+            </div>
+            <div class="controls">
+              <button type="button" class="btn small" id="checkinBtn" title="Save today's figures and projection without the guided review">Save a snapshot</button>
+            </div>
+          </div>
+          <div class="chart" id="progChart"></div>
+          <div class="legend" id="progLegend"></div>
+          <details class="more" id="progList"><summary>Every check-in</summary><div class="table-wrap" id="progTable"></div></details>
+        </div>
+        <div class="card" id="progReview" hidden></div>
+        <details class="card">
+          <summary><h2 class="inline-h">Add a past year by hand</h2></summary>
+          <p class="sub">Backfill earlier years from old spreadsheets. Only net worth and spending are needed.</p>
+          <form class="inline-form" id="manualCheckin">
+            <label class="field">Year<input type="number" name="year" required min="1990" max="2100"></label>
+            <label class="field">Net worth (£)<input type="text" inputmode="decimal" name="netWorth" required></label>
+            <label class="field">Annual spending (£)<input type="text" inputmode="decimal" name="spending"></label>
+            <label class="field">Projected net worth one year later (£, optional)<input type="text" inputmode="decimal" name="predicted"></label>
+            <button type="submit" class="btn">Add</button>
+          </form>
+        </details>
       </div>
     </section>
 
-    <!-- Scenarios -->
+    <!-- Scenarios: every scenario against every goal -->
     <section class="view" id="view-scenarios" role="tabpanel" hidden>
       <div class="card" id="savedScenarios">
         <div class="card-head">
           <div>
-            <h2>Your scenarios</h2>
-            <p class="sub">Each scenario is a full copy of the plan. Everything in Horizon shows the one you have open; duplicate it to try something without touching the original.</p>
+            <h2>Scenarios</h2>
+            <p class="sub">Each scenario is a full copy of your plan with something changed. Here is how each one does on every goal. Open one to look at it everywhere else in Horizon.</p>
           </div>
           <div class="controls">
             <label class="sr-only" for="scenarioSelect">Open scenario</label>
             <select id="scenarioSelect" aria-label="Open scenario"></select>
             <button type="button" class="btn small" id="dupScenario">Duplicate</button>
-            <button type="button" class="btn small" id="compareRun">Refresh comparison</button>
           </div>
         </div>
-        <div class="scenario-edit" id="sec-scenario"></div>
         <div id="compareResults"></div>
-      </div>
-      <div class="card" id="driversCard">
-        <div class="card-head">
-          <div>
-            <h2>What moves your goals</h2>
-            <p class="sub" id="driversSub">How much each change would raise or lower the chance of every goal, in percentage points. Choices you control first, then risks.</p>
-          </div>
-        </div>
-        <div id="driversBody"></div>
+        <div class="scenario-edit" id="sec-scenario"></div>
       </div>
       <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Scenario ideas</h2>
-            <p class="sub">Common “what ifs”. Each one adds a scenario: a copy of this plan with that change, ready to compare above and to edit.</p>
-          </div>
-        </div>
-        <div class="idea-grid" id="ideaGrid"></div>
-      </div>
-      <div class="card" id="explorer">
-        <div class="card-head">
-          <div>
-            <h2>Try changes</h2>
-            <p class="sub">Move the sliders to see how each choice affects every goal at once. Your plan does not change until you apply it.</p>
-          </div>
-          <div class="controls">
-            <button type="button" class="btn small" id="expReset">Reset</button>
-            <button type="button" class="btn small" id="expScenario">Save as new scenario</button>
-            <button type="button" class="btn small primary" id="expApply">Apply to plan</button>
-          </div>
-        </div>
-        <div class="explorer">
-          <div class="explorer-levers" id="expLevers"></div>
-          <div class="explorer-results">
-            <p class="sub" id="expStatus" role="status"></p>
-            <div id="expImpact"></div>
-            <h3 class="chart-title">Net worth: your plan and with these changes</h3>
-            <div class="chart" id="expChart"></div>
-            <div class="legend" id="expLegend"></div>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2>Try a range</h2>
-            <p class="sub">Run one change at several levels and compare. Every variant uses the same simulated markets, so differences come from the change itself.</p>
-          </div>
-        </div>
-        <div class="sweep-controls">
-          <label class="field inline">What to vary
-            <select id="sweepLever"></select>
-          </label>
-          <button type="button" class="btn primary" id="sweepRun">Run comparison</button>
-          <span class="sub" id="sweepStatus" role="status"></span>
-        </div>
-        <div id="sweepResults"></div>
+        <h2>Add a what-if</h2>
+        <p class="sub">Each one adds a scenario: a copy of the plan you have open, with that change.</p>
+        <div class="idea-chips" id="ideaGrid"></div>
       </div>
     </section>
   </main>
@@ -344,7 +292,7 @@
 
   <footer class="page-foot">
     Horizon is a planning model, not financial advice. UK rules for tax year <span id="taxYear"></span>; check
-    figures on gov.uk and gov.scot. Your plan is stored only in this browser. Use Data → Save to a file to keep a copy or move to another computer.
+    figures on gov.uk and gov.scot. Your plan is stored only in this browser.
   </footer>
 
   <script src="data/market.js"></script>

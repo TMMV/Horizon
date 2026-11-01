@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const E = require('../../src/engine');
 const S = require('../../src/scenario-ideas');
+const SI = S;
+const L = require('../../src/levers');
 
 test('goals get a name, a lasting colour and an icon', () => {
   const p = E.defaultPlan(2026);
@@ -69,4 +71,19 @@ test('drivers show how typical choices move each goal', () => {
   assert.ok(row('weakMarkets').deltas[retireGoal] <= 0, 'weaker markets hurt');
   const debtGoal = p.goals.findIndex(g => g.type === 'debtFree');
   assert.ok(row('overpay').deltas[debtGoal] > 0, 'overpaying helps mortgage-free');
+});
+
+test('retiring earlier or later moves the retirement goal with it', () => {
+  const p = E.defaultPlan(2026);
+  const goal = p.goals.find(g => g.type === 'retire');
+  const later = SI.variantOf(SI.DRIVERS.find(d => d.key === 'retireLater'), p);
+  assert.equal(later.goals.find(g => g.type === 'retire').age, goal.age + 2);
+  const idea = SI.IDEAS.find(x => x.id === 'retire-early');
+  const early = SI.variantOf(idea, p);
+  assert.equal(early.household.people[0].retireAge, p.household.people[0].retireAge - 3);
+  assert.equal(early.goals.find(g => g.type === 'retire').age, goal.age - 3);
+  // The lever does the same for the first person.
+  const v = L.currentValues(p);
+  v.retireAge0 = p.household.people[0].retireAge + 4;
+  assert.equal(L.apply(p, v).goals.find(g => g.type === 'retire').age, goal.age + 4);
 });

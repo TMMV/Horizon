@@ -179,7 +179,7 @@
   function defaultWorkspace() {
     const id = uid();
     return {
-      version: 5,
+      version: 6,
       activeId: id,
       scenarios: [{ id, name: 'Base plan', plan: defaultPlan() }],
       checkins: [],
@@ -439,13 +439,21 @@
     const checkins = arr(w.checkins).map(normalizeCheckin).sort((a, b) => a.date.localeCompare(b.date));
     // Plans saved before figures had a date: the check-in recorded for that year, else today
     // for this year's plan, else 1 January.
+    // Version 6: the untouched example (Alex & Sam, never reviewed) moves its figures to the
+    // most recent 1 September, so it shows a few months of estimates like a fresh copy does.
+    if (num(w.version, 0) < 6 && !checkins.length) {
+      for (const s of scenarios) {
+        const names = s.plan.household.people.map(x => x.name).join('&');
+        if (s.name === 'Base plan' && names === 'Alex&Sam') { s.plan.asOf = lastSeptember(); s.plan.startYear = +s.plan.asOf.slice(0, 4); }
+      }
+    }
     for (const s of scenarios) {
       if (s.plan.asOf) continue;
       const c = checkins.filter(x => x.year === s.plan.startYear && isDate(x.date)).pop();
       s.plan.asOf = c ? c.date : s.plan.startYear === currentYear() ? todayISO() : `${s.plan.startYear}-01-01`;
     }
     return {
-      version: 5,
+      version: 6,
       activeId: scenarios.some(s => s.id === w.activeId) ? w.activeId : scenarios[0].id,
       scenarios,
       checkins,

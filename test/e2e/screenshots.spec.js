@@ -43,21 +43,18 @@ for (const scheme of ['light', 'dark']) {
         else if (name === 'retirement') await page.locator('.tab-list .goal-tab', { hasText: 'Retirement' }).click();
         else await go(page, name);
         if (name === 'scenarios') {
-          await page.click('#sweepRun');
-          await expect(page.locator('#sweepResults tbody tr')).toHaveCount(5, { timeout: 30000 });
+          // Two what-ifs, so the comparison has something to compare.
+          await page.locator('#ideaGrid .idea-chip').nth(0).click();
+          await page.locator('#ideaGrid .idea-chip').nth(1).click();
+          await expect(page.locator('#compareResults .sc-table tbody tr')).toHaveCount(3, { timeout: 30000 });
         }
         if (name === 'home') {
           await expect(page.locator('#ovGoalStrip .gt-driver').first()).not.toHaveClass(/muted/, { timeout: 30000 });
         }
-        if (name === 'scenarios') await expect(page.locator('#driversBody table.heat')).toBeVisible({ timeout: 30000 });
         if (name === 'retirement') await expect(page.locator('#histTiles')).toBeVisible({ timeout: 15000 });
         if (name === 'goal') {
           await expect(page.locator('#gpMoves .divbar').first()).toBeVisible({ timeout: 30000 });
           await expect(page.locator('#gpHistory .goal-pct')).toBeVisible({ timeout: 15000 });
-        }
-        if (name === 'scenarios') {
-          await page.locator('#expLevers input[aria-label="Share of surplus to overpay"]').fill('50');
-          await expect(page.locator('#expImpact')).toContainText('▲', { timeout: 15000 });
         }
         await page.waitForTimeout(300);
         await page.screenshot({ path: path.join(OUT, `${scheme}-${name.replace('/', '-')}.png`), fullPage: true });
@@ -96,6 +93,7 @@ for (const scheme of ['light', 'dark']) {
       await expect(page.locator('#gwPreview .goal-pct')).toBeVisible({ timeout: 15000 });
       await page.screenshot({ path: path.join(OUT, `${scheme}-emergency-goal.png`) });
       await page.click('#gwClose');
+      await go(page, 'finances/spending');
       await page.click('#lifeBtn');
       await page.locator('#lwBody input[aria-label="Number of children"]').fill('2');
       await page.locator('#lwBody input[aria-label="Child 1 age"]').fill('7');

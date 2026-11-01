@@ -14,8 +14,14 @@ test.describe('Horizon app', () => {
   test('home shows the portfolio today, the goals and a chart', async ({ page }) => {
     // The example's figures are as at the last 1 September: Home estimates each balance since.
     await expect(page.locator('#homePortfolio .pf-row.head')).toContainText('1 Sep');
-    await expect(page.locator('#homePortfolio .pf-row:not(.head)')).toHaveCount(9);
-    await expect(page.locator('#homePortfolio .pf-row').nth(8)).toContainText('£320,000');
+    await expect(page.locator('#homePortfolio [data-account]')).toHaveCount(9);
+    await expect(page.locator('#homePortfolio .pf-row.single')).toHaveCount(5);   // types with one account are one row
+    await expect(page.locator('#homePortfolio .pf-row.group')).toHaveCount(7);
+    await expect(page.locator('#homePortfolio .pf-row.single', { hasText: 'Property' })).toContainText('£320,000');
+    await expect(page.locator('#homePortfolio .pf-row.head')).toContainText('Today (estimated)');
+    // No duplicate key, and no "Estimated" tag on every row.
+    await expect(page.locator('#homePortfolio .pf-keys')).toHaveCount(0);
+    await expect(page.locator('#homePortfolio .src')).toHaveCount(0);
     await expect(page.locator('#homePortfolio')).toContainText('Estimated net worth today');
     await expect(page.locator('#homePortfolio')).toContainText('from your figures as at');
     await expect(page.locator('#ovGoalStrip .goal-tile:not(.add)')).toHaveCount(3);
@@ -36,7 +42,7 @@ test.describe('Horizon app', () => {
       window.__horizon.refresh();
       return iso;
     });
-    await expect(page.locator('#homePortfolio .pf-row .src.est').first()).toContainText('Estimated');
+    await expect(page.locator('#homePortfolio .pf-row.head')).toContainText('Today (estimated)');
     const nw = await page.evaluate(() => window.__horizon.model.est.netWorth);
     expect(nw).toBeGreaterThan(275000);
     expect(asOf).toMatch(/^\d{4}-/);
@@ -52,8 +58,9 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#udBody .rv-row').nth(1).locator('.rv-diff')).toContainText('vs estimate');
     await page.click('#udSave');
     await expect(page.locator('#updateDlg')).toBeHidden();
-    await expect(page.locator('#homePortfolio .pf-row').nth(2)).toContainText('Updated today');
-    await expect(page.locator('#homePortfolio .pf-row').nth(2)).toContainText('£30,000');
+    await expect(page.locator('#homePortfolio .pf-row.acct').nth(0)).toContainText('Updated today');
+    await expect(page.locator('#homePortfolio .pf-row.acct').nth(0)).toContainText('£30,000');
+    await expect(page.locator('#homePortfolio .src.updated')).toHaveCount(1);
     // Recorded in every scenario that has the account; the projection still starts from the figures.
     const latest = await page.evaluate(() => window.__horizon.ws.scenarios.map(s => s.plan.accounts[1].latest));
     expect(latest.map(l => l && l.value)).toEqual([30000, 30000]);
@@ -65,7 +72,7 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#rvBody .rv-row').nth(1).locator('input')).toHaveValue('30,000');
   });
 
-  test('the bell offers an update once the figures are a month old, and a save', async ({ page }) => {
+  test('the bell offers an update once the figures are a month old', async ({ page }) => {
     await page.evaluate(() => {
       const d = new Date(); d.setDate(d.getDate() - 45);
       const iso = window.Engine.todayISO(d);
@@ -75,7 +82,7 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#notifyCount')).toBeVisible();
     await page.click('#notifyBtn');
     await expect(page.locator('#notifyPop [data-notify="update"], #notifyPop [data-notify="review"]').first()).toBeVisible();
-    await expect(page.locator('#notifyPop [data-notify="save"]')).toContainText('Keep a copy');
+    await expect(page.locator('#notifyPop [data-notify="save"]')).toHaveCount(0);   // saving lives in the Data menu only
     await expect(page.locator('#homePortfolio')).toContainText('Estimated net worth today');
     await expect(page.locator('#homePortfolio .delta')).toContainText('since your last update');
   });
@@ -91,6 +98,65 @@ test.describe('Horizon app', () => {
     expect(p.startYear).toBe(year - 1);
     await expect(page.locator('#sec-accounts')).toContainText('15 Mar');
     await expect(page.locator('#sec-accounts .tag.est').first()).toContainText('today');
+  });
+
+  test('every dialog works inside a second scenario and never shows "null"', async ({ page }) => {
+    const noNull = async () => {
+      const text = await page.evaluate(() => document.body.innerText);
+      expect(text, 'no stray "null" text').not.toMatch(/\bnull\b/);
+    };
+    await tab(page, 'scenarios');
+    await page.click('#dupScenario');
+    await page.locator('#ideaGrid .idea-chip').first().click();
+    await expect(page.locator('#compareResults .sc-table tbody tr')).toHaveCount(3, { timeout: 30000 });
+    await noNull();
+    // Spending check-up
+    await go(page, 'finances/spending');
+    await page.click('#sec-expenses button:has-text("Spending check-up")');
+    for (let i = 0; i < 7; i++) { await noNull(); await page.click('#wizNext'); }
+    await noNull();
+    await page.click('#wizClose');
+    // Life check-up
+    await go(page, 'finances/spending');
+    await page.click('#lifeBtn');
+    for (let i = 0; i < 5; i++) { await noNull(); await page.click('#lwNext'); }
+    await noNull();
+    await page.click('#lwClose');
+    // Goal wizard: every kind of goal through to the last step
+    for (const kind of ['Plan your retirement', 'Emergency fund', 'Mortgage-free', 'Financial independence', 'Reach an amount', 'Passive income', 'Save for something']) {
+      await tab(page, 'home');
+      await page.click('#ovAddGoal');
+      await noNull();
+      await page.click(`.goal-option:has-text("${kind}")`);
+      await page.waitForTimeout(400);
+      await noNull();
+      await page.click('#gwNext');
+      await expect(page.locator('#gwImpact')).toContainText('Chance the money lasts', { timeout: 20000 });
+      await noNull();
+      await expect(page.locator('#gwNext')).toHaveText('Save goal');
+      await noNull();
+      await page.click('#gwClose');
+    }
+    // Update balances
+    await page.click('#updateBtn');
+    await noNull();
+    await page.locator('#udBody .rv-row').first().locator('input').fill('12345');
+    await page.click('#udSave');
+    await noNull();
+    // The yearly review, every step
+    await page.evaluate(() => window.__horizon.openReview());
+    for (let i = 0; i < 6; i++) { await page.waitForTimeout(150); await noNull(); await page.click('#rvNext'); }
+    await expect(page.locator('#rvBody .rv-scen')).toHaveCount(3);
+    await noNull();
+    await page.click('#rvSave');
+    await expect(page.locator('#reviewWiz')).toBeHidden({ timeout: 30000 });
+    await noNull();
+    // Every goal tab in this scenario
+    for (const id of await page.evaluate(() => window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan.goals.map(g => g.id))) {
+      await go(page, `goal/${id}`);
+      await page.waitForTimeout(300);
+      await noNull();
+    }
   });
 
   test('every tab renders without errors', async ({ page }) => {
@@ -236,13 +302,14 @@ test.describe('Horizon app', () => {
     await page.locator('#gwBody input[type="number"]').first().fill('2034');
     await expect(page.locator('#gwPreview')).toContainText('£750K by 2034', { timeout: 15000 });
     await page.click('#gwNext');
-    await expect(page.locator('#gwTitle')).toHaveText('Levers you can pull');
+    await expect(page.locator('#gwTitle')).toHaveText('Try changes');
+    await expect(page.locator('#gwNext')).toHaveText('Save goal');
     await page.locator('#gwBody input[aria-label="Spending before retirement"]').fill('85');
     await expect(page.locator('#gwImpact')).toContainText('£750K by 2034', { timeout: 15000 });
     await expect(page.locator('#gwImpact')).toContainText('▲');
+    await expect(page.locator('#gwSave')).toContainText('Spending before retirement: 100% → 85%');
+    await page.locator('#gwSave input[value="apply"]').check();
     await page.click('#gwNext');
-    await expect(page.locator('#gwBody')).toContainText('Spending before retirement: 100% → 85%');
-    await page.click('#gwBody button:has-text("Save goal and apply changes")');
     await expect(page.locator('#goalWiz')).toBeHidden();
     await expect(page.locator('#goalPage .goal-hero')).toContainText('£750K by 2034');
     await tab(page, 'home');
@@ -258,8 +325,8 @@ test.describe('Horizon app', () => {
     await page.click('#gwNext');
     await page.locator('#gwBody input[aria-label="Share of surplus to overpay"]').fill('50');
     await expect(page.locator('#gwStatus')).toContainText('1 change', { timeout: 15000 });
+    await page.locator('#gwSave input[value="scenario"]').check();
     await page.click('#gwNext');
-    await page.click('#gwBody button:has-text("as a new scenario")');
     await expect(page.locator('#scenarioSelect option')).toHaveCount(2);
     const ws = await page.evaluate(() => window.__horizon.ws);
     expect(ws.scenarios[0].plan.strategy.overpayPct).toBe(0);
@@ -274,7 +341,6 @@ test.describe('Horizon app', () => {
     await page.locator('#gwBody input[aria-label="Goal amount"]').fill('2m');
     await page.click('#gwNext');
     await page.click('#gwNext');
-    await page.click('#gwBody button:has-text("Save goal")');
     await expect(page.locator('#goalPage .goal-hero')).toContainText('£2M by');
     await page.click('.goal-hero button:has-text("Remove")');
     await expect(page.locator('#view-home')).toBeVisible();
@@ -282,28 +348,18 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#ovGoalStrip')).not.toContainText('£2M by');
   });
 
-  test('lever explorer compares, then applies changes', async ({ page }) => {
-    await tab(page, 'scenarios');
-    await expect(page.locator('#expApply')).toBeDisabled();
-    await page.locator('#expLevers input[aria-label="Alex retires at"]').fill('60');
-    await expect(page.locator('#expStatus')).toContainText('1 change', { timeout: 15000 });
-    await expect(page.locator('#expImpact')).toContainText('Chance the money lasts');
-    await expect(page.locator('#expChart canvas')).toBeVisible();
-    await page.click('#expApply');
+  test('a goal tab tries changes on its own levers and applies them', async ({ page }) => {
+    await openGoal(page, '£1M by');
+    await expect(page.locator('#gpApply')).toBeDisabled();
+    await page.locator('#gpLevers input[aria-label="Spending before retirement"]').fill('90');
+    await expect(page.locator('#gpStatus')).toContainText('1 change', { timeout: 15000 });
+    await expect(page.locator('#gpImpact')).toContainText('Chance the money lasts');
+    await expect(page.locator('#gpImpact')).toContainText('▲');
+    await page.click('#gpApply');
     await settle(page);
-    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.household.people[0].retireAge)).toBe(60);
-    await expect(page.locator('#expApply')).toBeDisabled();
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.strategy.spendNowPct)).toBe(90);
+    await expect(page.locator('#gpApply')).toBeDisabled();
   });
-
-  test('stress-test levers do not need applying to be useful', async ({ page }) => {
-    await tab(page, 'scenarios');
-    await page.locator('#expLevers summary:has-text("Stress test")').click();
-    await page.locator('#expLevers input[aria-label="Stock returns higher or lower"]').fill('-3');
-    await expect(page.locator('#expImpact')).toContainText('▼', { timeout: 15000 });
-    await page.click('#expReset');
-    await expect(page.locator('#expStatus')).toContainText('Move a slider');
-  });
-
   test('money: every page has its inputs, a prediction and a table, and accounts add up', async ({ page }) => {
     for (const [sub, box] of [['assumptions', '#mpAssumptions'], ['income', '#mpIncome'], ['spending', '#mpSpending'], ['cashflow', '#mpTax'], ['portfolio', '#mpPortfolio']]) {
       await go(page, `finances/${sub}`);
@@ -422,7 +478,7 @@ test.describe('Horizon app', () => {
 
   test('life check-up: children, cars, home, retirement and care', async ({ page }) => {
     const before = await page.evaluate(() => window.__horizon.model.mc.successRate);
-    await tab(page, 'home');
+    await go(page, 'finances/spending');
     await page.click('#lifeBtn');
     await expect(page.locator('#lifeWiz')).toBeVisible();
     await page.locator('#lwBody input[aria-label="Number of children"]').fill('2');
@@ -446,7 +502,7 @@ test.describe('Horizon app', () => {
     const after = await page.evaluate(() => window.__horizon.model.mc.successRate);
     expect(after).toBeLessThan(before);
     // Re-opening remembers the answers
-    await tab(page, 'home');
+    await go(page, 'finances/spending');
     await page.click('#lifeBtn');
     await expect(page.locator('#lwBody input[aria-label="Child 2 age"]')).toHaveValue('4');
   });
@@ -474,7 +530,6 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#gwPreview')).toContainText('£40K saved by', { timeout: 15000 });
     await page.click('#gwNext');
     await page.click('#gwNext');
-    await page.click('#gwBody button:has-text("Save goal")');
     await tab(page, 'home');
     await page.click('#ovAddGoal');
     await page.click('.goal-option:has-text("Passive income")');
@@ -482,7 +537,6 @@ test.describe('Horizon app', () => {
     await page.click('#gwNext');
     await expect(page.locator('#gwImpact')).toContainText('passive income', { timeout: 15000 });
     await page.click('#gwNext');
-    await page.click('#gwBody button:has-text("Save goal")');
     await expect(page.locator('#goalPage .goal-hero')).toContainText('passive income');
     await expect(page.locator('#goalPage canvas').first()).toBeVisible();
     await page.click('#gpTake button:has-text("Work it out")');
@@ -510,17 +564,6 @@ test.describe('Horizon app', () => {
     await settle(page);
     const after = await page.evaluate(() => window.__horizon.model.mc.bands.p50.join());
     expect(after).not.toBe(before);
-  });
-
-  test('mortgage overpayment sweep compares five variants', async ({ page }) => {
-    await tab(page, 'scenarios');
-    await page.selectOption('#sweepLever', 'overpay');
-    await page.click('#sweepRun');
-    await expect(page.locator('#sweepResults tbody tr')).toHaveCount(5, { timeout: 30000 });
-    await expect(page.locator('#sweepResults')).toContainText('100% overpay');
-    await page.locator('#sweepResults button:has-text("Save as scenario")').nth(2).click();
-    await expect(page.locator('#scenarioSelect option')).toHaveCount(2);
-    expect(await page.evaluate(() => window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan.strategy.overpayPct)).toBe(50);
   });
 
   test('duplicate a scenario, edit it and compare', async ({ page }) => {
@@ -644,10 +687,9 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#rqPreview .rq-answers')).toContainText('could spend', { timeout: 30000 });
     await page.click('#gwNext');
     await expect(page.locator('#gwBody .lever').first()).toBeVisible();
+    await expect(page.locator('#gwSave')).toContainText('Saving also updates your plan', { timeout: 15000 });
+    await expect(page.locator('#gwSave')).toContainText('Alex retires at 58');
     await page.click('#gwNext');
-    await expect(page.locator('#gwBody')).toContainText('Saving also updates your plan');
-    await expect(page.locator('#gwBody')).toContainText('Alex retires at 58');
-    await page.click('#gwBody button:has-text("Save goal")');
     const p = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
     expect(p.household.people[0].retireAge).toBe(58);
     expect(p.strategy.retireSpending).toBe(43900);
@@ -665,9 +707,8 @@ test.describe('Horizon app', () => {
     await page.locator('#gwBody select[aria-label="What counts"]').selectOption('cash');
     await expect(page.locator('#gwPreview .goal-pct')).toBeVisible({ timeout: 15000 });
     await page.click('#gwNext');
+    await expect(page.locator('#gwSave')).toContainText('Cash buffer', { timeout: 15000 });
     await page.click('#gwNext');
-    await expect(page.locator('#gwBody')).toContainText('Cash buffer');
-    await page.click('#gwBody button:has-text("Save goal")');
     const p = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
     expect(p.goals.some(g => g.type === 'emergency' && g.months === 6)).toBe(true);
     expect(p.strategy.cashReserve).toBeGreaterThan(15000);
@@ -730,23 +771,23 @@ test.describe('Horizon app', () => {
     await tiles.first().click();
     await expect(page.locator('#goalPage')).toBeVisible();
     await expect(page.locator('#gpMoves .divbar').first()).toBeVisible({ timeout: 30000 });
-    await expect(page.locator('#gpMoves')).toContainText('Retire 2 years later');
-    await tab(page, 'scenarios');
-    await expect(page.locator('#driversBody table.heat')).toBeVisible({ timeout: 30000 });
-    await expect(page.locator('#driversBody table.heat tbody tr')).not.toHaveCount(0);
-    await expect(page.locator('#driversBody')).toContainText('Retire 2 years later');
-    await page.locator('#driversBody .chart-tools button:has-text("Table")').click();
-    await expect(page.locator('#driversBody .table-wrap table')).toBeVisible();
+    // £1M by 2036 comes before anyone retires: no retirement changes on its tab.
+    await expect(page.locator('#gpMoves')).toContainText('Spend 10% less until retirement');
+    await expect(page.locator('#gpMoves')).not.toContainText('Retire 2 years later');
+    await expect(page.locator('#gpLevers .explorer-levers')).not.toContainText('retires at');
+    await page.locator('#gpMoves .chart-tools button:has-text("Table")').click();
+    await expect(page.locator('#gpMoves .table-wrap table')).toBeVisible();
   });
 
   test('add a named goal from a preset, with its own colour, then remove it', async ({ page }) => {
     await page.click('#ovAddGoal');
-    await page.click('.goal-option:has-text("House deposit")');
+    await page.click('.goal-option:has-text("Save for something")');
+    await page.click('#gwBody .idea-chip:has-text("House deposit")');
     await expect(page.locator('#gwBody input[aria-label="Goal name"]')).toHaveValue('House deposit');
+    await expect(page.locator('.goal-option')).toHaveCount(0);
     await page.locator('#gwBody .swatch').nth(5).click();
     await page.click('#gwNext');
     await page.click('#gwNext');
-    await page.click('#gwBody button:has-text("Save goal")');
     const g = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.goals.find(x => x.name === 'House deposit'));
     expect(g.color).toBe(5);
     expect(g.icon).toBe('home');
@@ -761,18 +802,30 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#ovGoalStrip')).not.toContainText('House deposit');
   });
 
-  test('scenario ideas add ready-made scenarios', async ({ page }) => {
+  test('scenarios: every scenario against every goal, and ready-made what-ifs', async ({ page }) => {
     await tab(page, 'scenarios');
-    await expect(page.locator('#ideaGrid .idea')).not.toHaveCount(0);
-    await page.locator('#ideaGrid .idea[data-idea="crash"] button').click();
-    await expect(page.locator('#ideaGrid .idea[data-idea="crash"] button')).toHaveText('Added');
+    const head = page.locator('#compareResults .sc-table thead');
+    await expect(head).toContainText('£1M by', { timeout: 30000 });
+    await expect(head).toContainText('Mortgage-free by');
+    await expect(head).toContainText('retires at');
+    await expect(page.locator('#compareResults .sc-table tbody tr')).toHaveCount(1);
+    await expect(page.locator('#ideaGrid .idea-chip')).not.toHaveCount(0);
+    await page.locator('#ideaGrid .idea-chip[data-idea="crash"]').click();
+    await expect(page.locator('#ideaGrid .idea-chip[data-idea="crash"]')).toBeDisabled();
     const s = await page.evaluate(() => window.__horizon.ws.scenarios.map(x => ({ name: x.name, crash: x.plan.assumptions.crashYear })));
     expect(s).toHaveLength(2);
     expect(s[1].name).toContain('Market crash');
     expect(s[1].crash).toBeGreaterThan(0);
-    await expect(page.locator('#compareResults tbody tr')).toHaveCount(2, { timeout: 30000 });
+    const rows = page.locator('#compareResults .sc-table tbody tr');
+    await expect(rows).toHaveCount(2, { timeout: 30000 });
+    await expect(rows.nth(1)).toContainText('pts');   // compared with the open scenario
+    await expect(page.locator('#scenarioPill')).toBeVisible();
+    // Open it from the table; the pill at the top names it.
+    await rows.nth(1).locator('button:has-text("Open")').click();
+    await expect(page.locator('#scenarioPill')).toContainText('Market crash');
+    await expect(page.locator('#compareResults .sc-table tbody tr.open')).toContainText('Market crash', { timeout: 30000 });
+    await expect(page.locator('#compareResults')).not.toContainText('null');
   });
-
   test('start a blank plan', async ({ page }) => {
     await page.click('#dataMenu summary');
     await page.click('#blankBtn');
@@ -859,8 +912,8 @@ test.describe('Horizon app', () => {
     expect(data.scenarios).toHaveLength(2);
     expect(Object.keys(data.settings).sort()).toEqual(['confidence', 'lastSaved', 'realDollars', 'runs', 'seed', 'theme']);
     expect(data.settings.lastSaved).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    await tab(page, 'home');
-    await expect(page.locator('#homeYear')).not.toContainText('Not yet');
+    await expect(page.locator('#savedNote')).toContainText('Last saved to a file');
+    await expect(page.locator('#homeYear')).not.toContainText('Saved to a file');
     expect(data.scenarios[0].plan.goals.length).toBeGreaterThan(0);
 
     await page.click('#dataMenu summary');
@@ -901,7 +954,7 @@ test.describe('Horizon app', () => {
     const file = require('path').resolve(__dirname, '../../plans/example.json');
     await page.setInputFiles('#importFile', file);
     await settle(page);
-    await expect(page.locator('#homePortfolio .pf-row').nth(8)).toContainText('£320,000');
+    await expect(page.locator('#homePortfolio .pf-row.single', { hasText: 'Property' })).toContainText('£320,000');
   });
 
   test('importing a broken file shows an error and keeps the plan', async ({ page }, info) => {
@@ -913,7 +966,7 @@ test.describe('Horizon app', () => {
     await page.setInputFiles('#importFile', file);
     await expect.poll(() => messages.length).toBe(1);
     expect(messages[0]).toContain('Could not open');
-    await expect(page.locator('#homePortfolio .pf-row').nth(8)).toContainText('£320,000');
+    await expect(page.locator('#homePortfolio .pf-row.single', { hasText: 'Property' })).toContainText('£320,000');
   });
 
   test('the inflation switch changes future amounts but not today', async ({ page }) => {
@@ -963,15 +1016,66 @@ test.describe('Horizon app', () => {
 test.describe('mobile layout', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('no horizontal scrolling on any tab', async ({ page }) => {
+  // Elements reaching past the right edge (outside anything that scrolls sideways on purpose).
+  const cropped = page => page.evaluate(() => {
+    const W = window.innerWidth;
+    const scrolls = el => { for (let a = el.parentElement; a; a = a.parentElement) { const o = getComputedStyle(a).overflowX; if (o === 'auto' || o === 'scroll' || o === 'hidden') return true; } return false; };
+    const out = [];
+    for (const el of document.querySelectorAll('main *, dialog[open] *, header *')) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height || el.closest('[hidden]')) continue;
+      if (r.right > W + 1 && !scrolls(el)) out.push(`${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} ${Math.round(r.right - W)}px`);
+    }
+    return out.slice(0, 5);
+  });
+
+  test('every page fits a phone screen', async ({ page }) => {
     const tracker = await openApp(page);
-    const goal = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.goals[0].id);
-    for (const name of ['home', `goal/${goal}`, 'finances/portfolio', 'finances/income', 'finances/spending', 'finances/cashflow', 'finances/assumptions', 'finances/history', 'scenarios']) {
+    const goals = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.goals.map(g => g.id));
+    for (const name of ['home', ...goals.map(g => `goal/${g}`), 'finances/portfolio', 'finances/income', 'finances/spending', 'finances/cashflow', 'finances/assumptions', 'finances/history', 'scenarios']) {
       await go(page, name);
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(500);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       expect(overflow, `${name} overflows by ${overflow}px`).toBeLessThanOrEqual(0);
+      expect(await cropped(page), `${name}: cut off on the right`).toEqual([]);
     }
+    expect(tracker.problems).toEqual([]);
+  });
+
+  test('every dialog fits a phone screen', async ({ page }) => {
+    const tracker = await openApp(page);
+    const check = async name => {
+      await page.waitForTimeout(300);
+      expect(await cropped(page), `${name}: cut off on the right`).toEqual([]);
+    };
+    await page.click('#updateBtn');
+    await check('update balances');
+    await page.click('#udCancel');
+    await page.click('#ovAddGoal');
+    await check('goal wizard: choose');
+    await page.click('.goal-option:has-text("Plan your retirement")');
+    await check('retirement questionnaire');
+    await page.click('#gwNext');
+    await expect(page.locator('#gwImpact')).toContainText('Chance', { timeout: 20000 });
+    await check('goal wizard: levers');
+    await page.click('#gwClose');
+    await go(page, 'finances/spending');
+    await page.click('#lifeBtn');
+    await check('life check-up');
+    await page.click('#lwClose');
+    await page.click('#notifyBtn');
+    await check('notifications');
+    await page.click('#notifyBtn');
+    await go(page, 'finances/spending');
+    await page.click('#sec-expenses button:has-text("Spending check-up")');
+    await check('spending check-up');
+    for (let i = 0; i < 7; i++) await page.click('#wizNext');
+    await check('spending check-up: compare');
+    await page.click('#wizClose');
+    await page.evaluate(() => window.__horizon.openReview());
+    for (let i = 0; i < 6; i++) { await check(`review step ${i + 1}`); await page.click('#rvNext'); }
+    await expect(page.locator('#rvBody .impact table')).toHaveCount(0);
+    await check('review: update scenarios');
     expect(tracker.problems).toEqual([]);
   });
 });

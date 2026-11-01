@@ -18,12 +18,11 @@ You set the plan up once, then review it once a year.
 |---|---|
 | **Home** | Your portfolio *today*: every account, estimated from your last figures (or a balance you updated since), with your estimated net worth and the change since your last update. Your goals as badges, where you're heading, what to invest each month this year, what's coming up, and suggestions worth a look. |
 | **One tab per goal** | How it's tracking (its range of outcomes against the target), the chance by year, what moves it, what it would take, levers to try and how it does if history repeated. The retirement tab also replays the plan through every starting year since 1928. Add a goal with **+**. |
-| **Finances** | All your inputs, each with its own prediction: **Portfolio** (accounts and how each grows), **Income**, **Spending**, **Cash flow & tax**, **Assumptions** (household, saving strategy, markets, tax rules and how things vary in the simulations) and **Past reviews**. At the top: the date your figures are as at. |
-| **Scenarios** | Your scenarios (open, duplicate, rename), what moves every goal, ready-made "what ifs", sliders to try changes, and ranges. |
+| **Finances** | All your inputs, with their prediction alongside and a "What your changes do" panel that shows every goal's chance move as you edit: **Portfolio** (accounts and how each grows), **Income**, **Spending** (with **Future costs**: children, cars, home repairs, care), **Cash flow & tax**, **Assumptions** (household, saving strategy, markets, tax rules and how things vary in the simulations) and **Past reviews**. At the top: the date your figures are as at. |
+| **Scenarios** | Every scenario against every goal in one table (chance and expected year, compared with the one you have open), plus ready-made what-ifs to add. |
 
-The **bell** at the top reminds you when it's time for the yearly review, when your figures are
-a month old (update a few balances, or do a full review) and when you haven't saved a copy to
-a file. Charts that look ahead have an **Adjust for inflation** switch: on, future amounts are in
+The **bell** at the top reminds you when it's time for the yearly review and when your figures
+are a month old (update a few balances, or do a full review). Charts that look ahead have an **Adjust for inflation** switch: on, future amounts are in
 today's money; off, they're the actual pounds of each year.
 
 **Figures "as at" a date.** Balances, pay and spending describe one date (shown at the top of
@@ -56,15 +55,16 @@ app with its date; it shows on Home and feeds the next review.
   badge, used on every chart; Home leads with them and each has its own tab (chance,
   progress, expected date, range of outcomes). Add or remove goals at any time; each has "what would it take" (the overpayment share,
   spending cut, cash buffer or retirement spending that gets you there).
-- **What moves your goals.** A heatmap shows how typical choices (retire later or earlier,
-  spend less now or in retirement, pay more into pensions, overpay the mortgage) and risks
-  (weaker markets, higher inflation, a crash next year) change the chance of every goal.
-  Each goal names its biggest help and biggest risk, and its page shows every change in points.
+- **What moves your goals.** Each goal's tab shows how typical choices (retire later or
+  earlier, spend less now or in retirement, pay more into pensions, overpay the mortgage) and
+  risks (weaker markets, higher inflation, a crash next year) change its chance, in points. Only
+  changes that can affect that goal are shown: a goal dated before you retire isn't asked about
+  retirement. Each goal's badge names its biggest help and biggest risk.
 - **Scenario ideas.** One click adds a ready-made "what if" as a scenario: retire earlier or
   later, part-time work, a year out, six months out of work, a new baby, a market crash,
   lower returns, higher inflation, a higher rate when the mortgage fix ends, overpaying,
   spending less, selling a property, or care costs later in life.
-- **Levers with trade-offs.** Sliders for retirement ages, spending in retirement, spending
+- **Levers with trade-offs** (on each goal's tab, and in the add-goal wizard). Sliders for retirement ages, spending in retirement, spending
   now, extra pension saving, mortgage overpayments and lump sums, stock allocation, selling a
   property, and stress tests. A side-by-side table shows how every goal moves, so you can see
   that paying the mortgage off faster costs investing, and apply the result or save it as a
@@ -90,7 +90,7 @@ app with its date; it shows on Home and feeds the next review.
   2026/27 rules: emergency fund, saving rate, Child Benefit and the £60k–£80k charge,
   Tax-Free Childcare, the £100k tax trap, ISA allowances, overpaying vs investing, PLSA
   retirement living standards and how much wealth is tied up in property.
-- **Life check-up.** A second questionnaire for the big costs that come with time:
+- **Future costs** (Finances → Spending). A questionnaire for the big costs that come with time:
   children (school, university, first car, wedding, house deposit), replacing cars, major
   home repairs, active early retirement, spending less later on, care in later life and
   helping family. Answers become dated spending items and events you can review.
@@ -171,8 +171,8 @@ saved before, or **Data → Start a blank plan** to begin your own.
   same address (http://localhost:8765) so it is there next time. Opening `index.html` directly, or
   the [online copy](https://tmmv.github.io/Horizon/), keeps a separate plan.
 - **Data → Save to a file** saves everything (scenarios, goals, check-ins, balance updates and
-  settings) to one JSON file in your downloads. Horizon shows when you last saved (on Home and
-  in the Data menu) and offers to save after each yearly review. Clearing your browser's data
+  settings) to one JSON file in your downloads. The Data menu shows when you last saved.
+  Clearing your browser's data
   would delete the plan kept in the browser, so keep the file somewhere safe.
 - **Carrying on on another computer** (or next year on a new one): save to a file, copy it
   across (USB stick, cloud drive, email to yourself), open Horizon there and use **Data → Open a
@@ -225,7 +225,7 @@ On Windows the browser tests use the installed Microsoft Edge. Elsewhere run
 | `src/benchmarks.js` | Typical UK spending ranges and the plan check ("worth a look") |
 | `src/scenario-ideas.js` | "What moves your goals" drivers and the ready-made scenario ideas |
 | `src/review.js` | The yearly review: roll forward, expected values, comparison, apply to scenarios |
-| `src/life-wizard.js` | Life check-up: costs that come with time |
+| `src/life-wizard.js` | Future costs: the big costs that come with time |
 | `src/levers.js` | The levers, how they change a plan, and goal-by-goal comparisons |
 | `src/chart.js` | Small canvas chart library (stacked columns, bands, lines, areas, tooltips, table view) |
 | `src/app.js` | The interface |

@@ -77,3 +77,40 @@ test('trade-offs: retiring later raises the chance the money lasts', () => {
   assert.ok(after.summary.success >= before.summary.success);
   assert.ok(after.summary.netWorthAtRetire > before.summary.netWorthAtRetire);
 });
+
+test('each goal is only offered the levers and changes that can move it', () => {
+  const p = E.defaultPlan(2026);   // first retirement in 2043
+  const p1 = p.household.people[0];
+  const goal = (g) => E.normalizeGoal(g, p.startYear, p1);
+  const keys = g => L.defs(p).filter(d => L.leverFits(d, g, p)).map(d => d.key);
+
+  const early = goal({ type: 'netWorth', amount: 1e6, year: 2036, measure: 'all' });
+  assert.ok(!keys(early).some(k => k.startsWith('retireAge') || k === 'retireSpending' || k === 'stockPctRetire'), 'no retirement levers before anyone retires');
+  assert.ok(keys(early).includes('extraPension0'), 'pensions count towards net worth');
+  assert.ok(!L.groupsForGoal(p, early).includes('retirement'));
+  for (const k of ['retireLater', 'retireEarlier', 'spendLessRetired']) assert.equal(L.driverFits(k, early, p), false, k);
+
+  const late = goal({ type: 'netWorth', amount: 1e6, year: 2060, measure: 'all' });
+  assert.ok(L.groupsForGoal(p, late).includes('retirement'), 'a goal after retirement depends on it');
+  assert.equal(L.driverFits('retireLater', late, p), true);
+
+  const saved = goal({ type: 'netWorth', amount: 40000, year: 2030, measure: 'savings' });
+  assert.ok(!keys(saved).some(k => k.startsWith('extraPension')), 'savings goals ignore pensions');
+  assert.ok(!keys(saved).includes('houses'));
+  assert.equal(L.driverFits('pension', saved, p), false);
+
+  const mortgage = goal({ type: 'debtFree', year: 2040 });
+  assert.ok(!keys(mortgage).includes('stockReturn') && !keys(mortgage).includes('stockPctNow'), 'share returns do not pay off a mortgage');
+  assert.ok(keys(mortgage).includes('overpayPct'));
+  assert.equal(L.driverFits('weakMarkets', mortgage, p), false);
+  assert.equal(L.driverFits('spendLess', mortgage, p), false, 'spending less only helps if the surplus overpays');
+
+  const cash = goal({ type: 'emergency', months: 6, year: 2028, counts: 'cash' });
+  assert.deepEqual(L.groupsForGoal(p, cash), ['saving', 'stress']);
+  assert.equal(L.driverFits('crash', cash, p), false);
+  assert.equal(L.driverFits('crash', goal({ type: 'emergency', months: 6, year: 2028, counts: 'investments' }), p), true);
+
+  const retire = goal({ type: 'retire', age: 55 });
+  assert.ok(L.groupsForGoal(p, retire).includes('retirement'));
+  assert.equal(L.driverFits('retireLater', retire, p), true);
+});

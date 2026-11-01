@@ -206,7 +206,7 @@
       if (eligible) out.push({ id: 'tfc', tone: 'tip', title: `Tax-Free Childcare could save about ${money(gain)} a year`, text: `On ${money(childcare)} a year of childcare and clubs, if the providers are registered: the government pays 20%, up to ${money(R.TAX_FREE_CHILDCARE.capPerChild)} per child under 12. Each parent must earn under ${money(R.TAX_FREE_CHILDCARE.incomeLimit)}.` });
       else out.push({ id: 'tfc', tone: 'warn', title: 'Over £100k loses Tax-Free Childcare', text: `One income is over ${money(R.TAX_FREE_CHILDCARE.incomeLimit)}, which rules out up to ${money(gain)} a year of Tax-Free Childcare. Pension contributions that bring it back under £100k restore it.`, action: 'explorer' });
     } else if (!kids.length && plan.expenses.some(e => { const q = questionFor(e); return q && q.step === 'children'; }) && !(plan.life && plan.life.children)) {
-      out.push({ id: 'kids-unknown', tone: 'tip', title: 'Tell Horizon about your children', text: 'With their ages, the life check-up plans school, university and help with a first home, and the plan check can test Child Benefit and Tax-Free Childcare.', action: 'life' });
+      out.push({ id: 'kids-unknown', tone: 'tip', title: 'Tell Horizon about your children', text: 'With their ages, Future costs (in Spending) plans school, university and help with a first home, and the plan check can test Child Benefit and Tax-Free Childcare.', action: 'life' });
     }
 
     // 4. The £100k trap
@@ -266,7 +266,7 @@
 
     // 10. Life check-up
     const lifeDone = plan.expenses.some(e => (e.key || '').startsWith('life:')) || plan.events.some(e => (e.id || '').startsWith('life:'));
-    if (!lifeDone) out.push({ id: 'life', tone: 'tip', title: 'Plan for costs that come later', text: 'Cars, home repairs, children’s education, travel in early retirement and care later on. The life check-up adds them in two minutes.', action: 'life' });
+    if (!lifeDone) out.push({ id: 'life', tone: 'tip', title: 'Plan for costs that come later', text: 'Cars, home repairs, children’s education, travel in early retirement and care later on. Future costs (in Spending) adds them as dated spending in two minutes.', action: 'life' });
     if (kids.some(a => a < 18)) out.push({ id: 'jisa', tone: 'info', title: 'Junior ISA', text: `Up to ${money(R.JUNIOR_ISA_ALLOWANCE)} a year per child grows tax-free and becomes theirs at 18. A “Save for something” goal can track university or a first deposit.` });
 
     const rank = { warn: 0, tip: 1, good: 2, info: 3 };

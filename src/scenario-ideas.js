@@ -50,11 +50,18 @@
   }
 
   // ---- what moves your goals
+  // Retire earlier or later: everyone's retirement age, and a retirement goal with it
+  // (that goal is about retiring when the plan says you do).
+  function moveRetirement(p, years) {
+    for (const x of people(p)) x.retireAge += years;
+    for (const g of p.goals) if (g.type === 'retire') g.age += years;
+  }
+
   const DRIVERS = [
     { key: 'retireLater', kind: 'choice', label: 'Retire 2 years later', applies: p => people(p).every(x => x.retireAge + 2 <= 80),
-      apply: p => { for (const x of people(p)) x.retireAge += 2; } },
+      apply: p => { moveRetirement(p, 2); } },
     { key: 'retireEarlier', kind: 'choice', label: 'Retire 2 years earlier', applies: p => people(p).every(x => x.retireAge - 2 > x.age),
-      apply: p => { for (const x of people(p)) x.retireAge -= 2; } },
+      apply: p => { moveRetirement(p, -2); } },
     { key: 'spendLess', kind: 'choice', label: 'Spend 10% less until retirement', applies: () => true,
       apply: p => { p.strategy.spendNowPct = Math.round(p.strategy.spendNowPct * 0.9); } },
     { key: 'spendLessRetired', kind: 'choice', label: 'Spend 10% less in retirement', applies: p => p.strategy.retireSpending > 0 || retirementSpending(p) > 0,
@@ -74,9 +81,9 @@
   // ---- ready-made scenarios
   const IDEAS = [
     { id: 'retire-early', icon: 'retire', title: 'Retire 3 years earlier', text: 'Everyone stops work three years sooner.',
-      applies: p => people(p).every(x => x.retireAge - 3 > x.age), apply: p => { for (const x of people(p)) x.retireAge -= 3; } },
+      applies: p => people(p).every(x => x.retireAge - 3 > x.age), apply: p => { moveRetirement(p, -3); } },
     { id: 'work-longer', icon: 'retire', title: 'Work 3 years longer', text: 'More years of saving, fewer years to fund.',
-      applies: p => people(p).every(x => x.retireAge + 3 <= 80), apply: p => { for (const x of people(p)) x.retireAge += 3; } },
+      applies: p => people(p).every(x => x.retireAge + 3 <= 80), apply: p => { moveRetirement(p, 3); } },
     { id: 'part-time', icon: 'clock', title: 'Go part-time', text: p => `${worker(p).name} works 60% from next year until retirement.`,
       applies: p => !!worker(p), apply: p => changeSalary(p, worker(p).id, 1, Infinity, 0.6) },
     { id: 'career-break', icon: 'pause', title: 'Take a year out', text: p => `${worker(p).name} takes a year off work next year.`,

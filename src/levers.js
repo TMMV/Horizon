@@ -18,6 +18,61 @@
     emergency: ['saving'],
   };
 
+  // What a goal depends on, so its page only offers changes that can move it. A goal dated
+  // before anyone retires doesn't care about retirement; one that ignores pensions doesn't
+  // care about pension saving; a mortgage goal doesn't care about share returns.
+  function goalScope(plan, goal) {
+    const people = plan.household.people;
+    const firstRetire = Math.min(...people.map(p => plan.startYear + p.retireAge - p.age));
+    const m = goal.measure;
+    return {
+      type: goal.type,
+      retire: goal.type === 'retire',
+      afterRetire: goal.type === 'retire' || goal.year > firstRetire,
+      pensions: goal.type === 'retire' || (goal.type === 'netWorth' && (m === 'all' || m === 'liquid')) || (goal.type === 'passiveIncome' && goal.includePensions),
+      property: goal.type === 'netWorth' && (m === 'all' || m === 'noPension'),
+      investments: goal.type !== 'debtFree' && !(goal.type === 'emergency' && goal.counts !== 'investments'),
+      mortgage: plan.accounts.some(a => a.type === 'debt' && !a.excluded && a.balance > 0),
+      overpaying: plan.strategy.overpayPct > 0,
+    };
+  }
+
+  // Does this lever matter for this goal?
+  function leverFits(def, goal, plan) {
+    const s = goalScope(plan, goal);
+    const k = def.key;
+    if (k.startsWith('retireAge') || k === 'retireSpending') return s.afterRetire;
+    if (k === 'spendNowPct') return s.type !== 'debtFree' || s.overpaying;
+    if (k === 'cashReserve') return s.type === 'emergency' || s.type === 'netWorth';
+    if (k.startsWith('extraPension')) return s.pensions;
+    if (def.group === 'mortgage') return s.mortgage && ['debtFree', 'netWorth', 'retire'].includes(s.type);
+    if (k === 'mortgageRate') return s.mortgage && (s.type === 'debtFree' || s.property);
+    if (k === 'stockPctNow' || k === 'stockReturn') return s.investments;
+    if (k === 'stockPctRetire') return s.investments && s.afterRetire;
+    if (k.startsWith('sell-')) return ['netWorth', 'passiveIncome', 'retire'].includes(s.type);
+    if (k === 'houses') return s.property;
+    return true;
+  }
+
+  // Does this "what moves your goals" change matter for this goal? (keys from ScenarioIdeas.DRIVERS)
+  function driverFits(key, goal, plan) {
+    const s = goalScope(plan, goal);
+    switch (key) {
+      case 'retireLater': case 'retireEarlier': case 'spendLessRetired': return s.afterRetire;
+      case 'spendLess': return s.type !== 'debtFree' || s.overpaying;
+      case 'pension': return s.pensions;
+      case 'overpay': return s.type !== 'emergency';
+      case 'weakMarkets': case 'crash': return s.investments;
+      default: return true;
+    }
+  }
+
+  // The lever groups with something for this goal, in display order (stress tests last).
+  function groupsForGoal(plan, goal) {
+    const fit = defs(plan).filter(d => leverFits(d, goal, plan));
+    return Object.keys(GROUPS).filter(g => fit.some(d => d.group === g));
+  }
+
   const GROUPS = {
     retirement: { title: 'Retirement', intro: 'When you stop work and what you spend afterwards.' },
     saving: { title: 'Saving & spending', intro: 'What you spend now and what you put into pensions.' },
@@ -38,7 +93,11 @@
         key: `retireAge${i}`, group: 'retirement', unit: 'age',
         label: `${p.name} retires at`, min: Math.max(p.age, 40), max: 75, step: 1,
         get: pl => pl.household.people[i].retireAge,
-        set: (pl, v) => { pl.household.people[i].retireAge = v; },
+        set: (pl, v) => {
+          // The first person's retirement goal moves with their retirement age.
+          if (i === 0) for (const g of pl.goals) if (g.type === 'retire' && g.age === pl.household.people[0].retireAge) g.age = v;
+          pl.household.people[i].retireAge = v;
+        },
         hint: i === 0 ? 'Salaries stop at retirement; pensions can be drawn from the access age.' : null,
       });
     });
@@ -230,7 +289,7 @@
     };
   }
 
-  const api = { GROUPS, GOAL_GROUPS, LUMP_ID, defs, currentValues, apply, changed, goalComparison, summaryOf };
+  const api = { GROUPS, GOAL_GROUPS, LUMP_ID, defs, goalScope, leverFits, driverFits, groupsForGoal, currentValues, apply, changed, goalComparison, summaryOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Levers = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
