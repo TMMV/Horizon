@@ -5,6 +5,9 @@ tax rules. Inspired by tools like ProjectionLab, but nothing you enter ever leav
 browser: there is no server, no account and no tracking, and the page is blocked from
 making network requests.
 
+**Try it:** [tmmv.github.io/Horizon](https://tmmv.github.io/Horizon/). It runs entirely in your
+browser; your plan is saved only on your device (export it from the Data menu to back it up).
+
 ![Overview](screenshots/light-overview.png)
 
 ## What it does
