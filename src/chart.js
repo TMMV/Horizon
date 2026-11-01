@@ -153,7 +153,7 @@
       new ResizeObserver(() => this.draw()).observe(host);
     }
 
-    // cfg: { xs, bars:[{label,color,values}], bands:[{label,lower,upper,color,alpha}],
+    // cfg: { xs, bars:[{label,color,values}], areas:[{label,color,values}] (stacked, + up, − down), bands:[{label,lower,upper,color,alpha}],
     //        lines:[{label,color,values,dash,area,points}], markers:[{x,label}],
     //        refLines:[{y,label}], yFormat, yDomain, xFormat, xLabel,
     //        table() -> {headers, rows, formats}, tooltip(i) -> {title, rows:[{label,color,shape,text}]} }
@@ -170,7 +170,7 @@
 
     compatible(prev, cfg) {
       const n = cfg.xs.length;
-      return prev.n === n && prev.bars.length === (cfg.bars || []).length &&
+      return prev.n === n && prev.bars.length === (cfg.bars || []).length && prev.areas.length === (cfg.areas || []).length &&
         prev.lines.length === (cfg.lines || []).length && prev.bands.length === (cfg.bands || []).length;
     }
 
@@ -203,6 +203,7 @@
       const headers = [cfg.xLabel || 'Year'];
       const cols = [];
       for (const b of cfg.bars || []) { headers.push(b.label); cols.push(b.values); }
+      for (const a of cfg.areas || []) { headers.push(a.label); cols.push(a.values); }
       for (const l of cfg.lines || []) { headers.push(l.label); cols.push(l.values); }
       for (const b of cfg.bands || []) {
         const name = b.label || 'Range';
@@ -242,13 +243,15 @@
     resolve(k, kind) {
       const cfg = this.cfg;
       const bars = (cfg.bars || []).map(b => (this.hidden.has(b.label) ? b.values.map(() => 0) : b.values.slice()));
+      const areas = (cfg.areas || []).map(a => (this.hidden.has(a.label) ? a.values.map(() => 0) : a.values.slice()));
       const lines = (cfg.lines || []).map(l => l.values.slice());
       const bands = (cfg.bands || []).map(b => [b.lower.slice(), b.upper.slice()]);
-      const out = { n: cfg.xs.length, bars, lines, bands };
+      const out = { n: cfg.xs.length, bars, areas, lines, bands };
       if (kind === 'tween' && k < 1) {
         const f = this.anim.from;
         const mix = (a, b) => b.map((v, i) => (isNum(v) && isNum(a[i]) ? a[i] + (v - a[i]) * k : v));
         out.bars = bars.map((v, j) => mix(f.bars[j], v));
+        out.areas = areas.map((v, j) => mix(f.areas[j], v));
         out.lines = lines.map((v, j) => mix(f.lines[j], v));
         out.bands = bands.map((v, j) => [mix(f.bands[j][0], v[0]), mix(f.bands[j][1], v[1])]);
       }
@@ -306,7 +309,7 @@
       } else {
         for (let i = 0; i < n; i++) {
           let pos = 0, neg = 0;
-          for (const v of vals.bars) { if (v[i] > 0) pos += v[i]; else neg += v[i]; }
+          for (const v of vals.bars.concat(vals.areas)) { if (v[i] > 0) pos += v[i]; else neg += v[i]; }
           hi = Math.max(hi, pos); lo = Math.min(lo, neg);
         }
         vals.bands.forEach((b, j) => { if (showBand(j)) for (let i = 0; i < n; i++) { hi = Math.max(hi, b[1][i]); lo = Math.min(lo, b[0][i]); } });
@@ -409,6 +412,39 @@
         ctx.fill();
       });
       ctx.globalAlpha = 1;
+
+      // ---- stacked areas: each layer filled softly with a solid top edge; positive
+      //      values stack up from zero and negative ones down.
+      const areaDefs = cfg.areas || [];
+      if (areaDefs.length) {
+        const zero = Y(Math.max(ymin, Math.min(0, ymax)));
+        for (const sign of [1, -1]) {
+          const cum = new Array(n).fill(0);
+          vals.areas.forEach((v, j) => {
+            const d = areaDefs[j];
+            if (!v.some(x => (sign > 0 ? x > 0 : x < 0))) return;
+            const lower = cum.slice();
+            for (let i = 0; i < n; i++) { const x = v[i] || 0; if (sign > 0 ? x > 0 : x < 0) cum[i] += x; }
+            const c = color(d.color);
+            const top = Math.min(...cum.map(Y)), bot = sign > 0 ? zero : Math.max(...cum.map(Y));
+            const grad = ctx.createLinearGradient(0, sign > 0 ? top : zero, 0, sign > 0 ? zero : bot);
+            grad.addColorStop(0, withAlpha(c, this.hover >= 0 ? 0.38 : 0.46));
+            grad.addColorStop(1, withAlpha(c, 0.16));
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) ctx[i ? 'lineTo' : 'moveTo'](Xi(i), Y(cum[i]));
+            for (let i = n - 1; i >= 0; i--) ctx.lineTo(Xi(i), Y(lower[i]));
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = c;
+            ctx.lineWidth = 1.75;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) ctx[i ? 'lineTo' : 'moveTo'](Xi(i), Y(cum[i]));
+            ctx.stroke();
+          });
+        }
+      }
 
       // ---- areas under lines (soft gradient down to the baseline)
       const base = Y(Math.max(ymin, Math.min(0, ymax)));

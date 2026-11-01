@@ -6,7 +6,7 @@ const path = require('path');
 const { openApp, tab, go } = require('./helpers');
 
 const OUT = path.resolve(__dirname, '../../screenshots');
-const VIEWS = ['home', 'goals', 'goal', 'money/portfolio', 'money/income', 'money/spending', 'money/cashflow', 'money/assumptions', 'outlook', 'scenarios', 'review'];
+const VIEWS = ['home', 'goal', 'retirement', 'finances/portfolio', 'finances/income', 'finances/spending', 'finances/cashflow', 'finances/assumptions', 'finances/history', 'scenarios'];
 
 async function prepare(page) {
   // A check-in history so the Review tab has something to show, figures from a few months
@@ -39,7 +39,8 @@ for (const scheme of ['light', 'dark']) {
       const { problems } = await openApp(page);
       await prepare(page);
       for (const name of VIEWS) {
-        if (name === 'goal') await page.locator('#goalList .gl-row').first().click();
+        if (name === 'goal') await page.locator('.tab-list .goal-tab').first().click();
+        else if (name === 'retirement') await page.locator('.tab-list .goal-tab', { hasText: 'Retirement' }).click();
         else await go(page, name);
         if (name === 'scenarios') {
           await page.click('#sweepRun');
@@ -48,7 +49,8 @@ for (const scheme of ['light', 'dark']) {
         if (name === 'home') {
           await expect(page.locator('#ovGoalStrip .gt-driver').first()).not.toHaveClass(/muted/, { timeout: 30000 });
         }
-        if (name === 'goals') await expect(page.locator('#driversBody table.heat')).toBeVisible({ timeout: 30000 });
+        if (name === 'scenarios') await expect(page.locator('#driversBody table.heat')).toBeVisible({ timeout: 30000 });
+        if (name === 'retirement') await expect(page.locator('#histTiles')).toBeVisible({ timeout: 15000 });
         if (name === 'goal') {
           await expect(page.locator('#gpMoves .divbar').first()).toBeVisible({ timeout: 30000 });
           await expect(page.locator('#gpHistory .goal-pct')).toBeVisible({ timeout: 15000 });
@@ -66,20 +68,20 @@ for (const scheme of ['light', 'dark']) {
       await page.waitForTimeout(150);
       await page.screenshot({ path: path.join(OUT, `${scheme}-update-balances.png`) });
       await page.click('#udCancel');
-      await go(page, 'money/spending');
+      await go(page, 'finances/spending');
       await page.click('#sec-expenses button:has-text("Spending check-up")');
       await page.waitForTimeout(200);
       await page.screenshot({ path: path.join(OUT, `${scheme}-wizard.png`) });
       await page.click('#wizClose');
-      await go(page, 'goals');
-      await page.click('#addGoalBtn');
+      await go(page, 'home');
+      await page.click('#ovAddGoal');
       await page.click('.goal-option:has-text("Mortgage-free")');
       await page.click('#gwNext');
       await page.locator('#gwBody input[aria-label="Share of surplus to overpay"]').fill('40');
       await expect(page.locator('#gwImpact')).toContainText('▲', { timeout: 15000 });
       await page.screenshot({ path: path.join(OUT, `${scheme}-goal-wizard.png`) });
       await page.click('#gwClose');
-      await page.click('#addGoalBtn');
+      await page.click('#ovAddGoal');
       await page.click('.goal-option:has-text("Plan your retirement")');
       await page.click('#gwBody .spend-option:has-text("Moderate")');
       await page.locator('#gwBody input[aria-label="Extra travel a year"]').fill('6000');
@@ -89,7 +91,7 @@ for (const scheme of ['light', 'dark']) {
       await page.waitForTimeout(200);
       await page.screenshot({ path: path.join(OUT, `${scheme}-retirement-questionnaire.png`) });
       await page.click('#gwClose');
-      await page.click('#addGoalBtn');
+      await page.click('#ovAddGoal');
       await page.click('.goal-option:has-text("Emergency fund")');
       await expect(page.locator('#gwPreview .goal-pct')).toBeVisible({ timeout: 15000 });
       await page.screenshot({ path: path.join(OUT, `${scheme}-emergency-goal.png`) });
@@ -109,7 +111,7 @@ for (const scheme of ['light', 'dark']) {
       await page.locator('#ovChart .chart-tools button:has-text("Chart")').click();
 
       // Spending check-up with typical ranges.
-      await go(page, 'money/spending');
+      await go(page, 'finances/spending');
       await page.click('#sec-expenses button:has-text("Spending check-up")');
       await page.locator('#wizBody .wiz-q').filter({ hasText: 'Gas & electricity' }).locator('input').fill('240');
       await page.waitForTimeout(150);
@@ -119,8 +121,12 @@ for (const scheme of ['light', 'dark']) {
       await page.screenshot({ path: path.join(OUT, `${scheme}-wizard-compare.png`) });
       await page.click('#wizClose');
 
-      // Yearly review.
-      await go(page, 'review');
+      // Notifications, then the yearly review.
+      await page.click('#notifyBtn');
+      await page.waitForTimeout(150);
+      await page.screenshot({ path: path.join(OUT, `${scheme}-notifications.png`) });
+      await page.click('#notifyBtn');
+      await go(page, 'finances/history');
       await page.click('#reviewBtn');
       await page.click('#rvBody .goal-option >> nth=0');
       await page.waitForTimeout(150);
@@ -153,20 +159,20 @@ for (const scheme of ['light', 'dark']) {
 
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
-  test('home, a goal, money and the review on a phone', async ({ page }) => {
+  test('home, a goal, finances and the review on a phone', async ({ page }) => {
     const { problems } = await openApp(page);
     await prepare(page);
     await page.screenshot({ path: path.join(OUT, 'phone-home.png'), fullPage: true });
     await page.locator('#ovGoalStrip .goal-tile').first().click();
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(OUT, 'phone-goal.png'), fullPage: true });
-    await go(page, 'money/portfolio');
-    await page.screenshot({ path: path.join(OUT, 'phone-money.png') });
-    await go(page, 'money/spending');
+    await go(page, 'finances/portfolio');
+    await page.screenshot({ path: path.join(OUT, 'phone-finances.png') });
+    await go(page, 'finances/spending');
     await page.screenshot({ path: path.join(OUT, 'phone-spending.png') });
-    await go(page, 'money/cashflow');
+    await go(page, 'finances/cashflow');
     await page.screenshot({ path: path.join(OUT, 'phone-cashflow.png') });
-    await go(page, 'review');
+    await go(page, 'finances/history');
     await page.click('#reviewBtn');
     await page.click('#rvNext');
     await page.screenshot({ path: path.join(OUT, 'phone-review.png') });

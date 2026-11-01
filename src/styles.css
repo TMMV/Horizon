@@ -989,6 +989,77 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
   .gl-chance { grid-column: 2; grid-auto-flow: column; align-items: center; gap: 8px; justify-content: start; }
 }
 
+/* ---------- tabs: Home, one per goal, Finances, Scenarios */
+.tabs { display: block; }
+.tab-list { display: flex; gap: 2px; align-items: stretch; overflow-x: auto; scrollbar-width: none; }
+.tab-list::-webkit-scrollbar { display: none; }
+.tab-list > button {
+  border: none; background: none; cursor: pointer; padding: 11px 14px; white-space: nowrap;
+  color: var(--text-2); border-bottom: 2px solid transparent; font-weight: 500; font: inherit; display: inline-flex; align-items: center; gap: 7px;
+}
+.tab-list > button:hover { color: var(--text); }
+.tab-list > button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 650; }
+.tab-list > .goal-tab[aria-selected="true"] { border-bottom-color: var(--gc); }
+.tab-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gc); flex: none; }
+.tab-list > .tab-add { color: var(--accent); font-size: 1.15rem; font-weight: 600; padding: 8px 12px; }
+.tab-list > .tab-right { margin-left: auto; }
+
+/* ---------- top bar: scenario pill and notifications */
+.scenario-pill {
+  display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); background: var(--surface-2);
+  border-radius: 20px; padding: 4px 12px; cursor: pointer; font: inherit; color: var(--text); font-size: 0.85rem; max-width: 46vw;
+}
+.scenario-pill strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scenario-pill[hidden] { display: none; }
+.notify summary { position: relative; }
+.notify summary .glyph { width: 18px; height: 18px; }
+.notify summary.has-news { color: var(--accent); }
+.notify-count {
+  position: absolute; top: 1px; right: 0; min-width: 17px; height: 17px; border-radius: 9px; padding: 0 4px;
+  background: var(--bad); color: #fff; font-size: 0.68rem; font-weight: 700; display: grid; place-items: center;
+}
+.notify-count[hidden] { display: none; }
+.notify-pop { width: min(380px, calc(100vw - 24px)); padding: 10px; gap: 6px; }
+.notify-head { font-weight: 650; padding: 2px 4px 4px; }
+.notify-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.notify-item { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 10px; border-radius: 10px; background: var(--surface-2); }
+.notify-item.accent { background: var(--accent-soft); }
+.notify-item.warn { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); }
+.notify-item p { color: var(--text-2); font-size: 0.84rem; margin: 2px 0 0; }
+.notify-item .add-row { margin-top: 8px; }
+.notify-item .ins-ico { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--surface); color: var(--accent); }
+.notify-item .ins-ico .glyph { width: 16px; height: 16px; }
+
+.switch.small { font-size: 0.84rem; color: var(--text-2); }
+.delta.flat { color: var(--text-2); background: var(--surface-2); }
+
+/* ---------- goals as achievement badges: the goal's colour, white type */
+.goal-tile, .goal-hero {
+  --gc-deep: color-mix(in srgb, var(--gc) 58%, #000);
+  --gc-mid: color-mix(in srgb, var(--gc) 74%, #000);
+  background: linear-gradient(150deg, var(--gc-mid), var(--gc-deep));
+  color: #fff; border: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 8px 22px color-mix(in srgb, var(--gc) 22%, transparent);
+}
+.goal-tile::before { display: none; }
+.goal-tile:hover, .goal-tile:focus-visible { box-shadow: 0 2px 4px rgba(0, 0, 0, 0.14), 0 12px 28px color-mix(in srgb, var(--gc) 34%, transparent); }
+.goal-tile .goal-badge, .goal-hero .goal-badge { background: rgba(255, 255, 255, 0.95); color: var(--gc-deep); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25); }
+.goal-tile .gt-names span, .goal-tile .gt-progress, .goal-tile .gt-driver, .goal-tile .gt-driver .muted,
+.goal-hero .sub, .goal-hero .eyebrow, .goal-hero .rv-k, .goal-hero .note, .goal-hero .gt-progress { color: rgba(255, 255, 255, 0.86); }
+.goal-tile .gt-when, .goal-tile strong, .goal-hero strong, .goal-hero h2 { color: #fff; }
+.goal-tile .status, .goal-hero .status { color: #fff; background: rgba(255, 255, 255, 0.18); border-radius: 20px; padding: 2px 9px 2px 5px; }
+.goal-tile .ring-track, .goal-hero .ring-track { stroke: rgba(255, 255, 255, 0.24); }
+.goal-tile .ring-fill, .goal-hero .ring-fill, .gh-chance .ring-fill { stroke: #fff; }
+.goal-tile .ring-centre, .goal-hero .ring-centre { color: #fff; }
+.goal-tile .gt-bar, .goal-hero .gt-bar { background: rgba(255, 255, 255, 0.24); }
+.goal-tile .gt-bar span, .goal-hero .gt-bar span { background: #fff; }
+.goal-tile .drv-k.up, .goal-tile .drv-k.down { color: #fff; }
+.goal-tile .gt-driver { border-top-color: rgba(255, 255, 255, 0.22); }
+.goal-hero .gh-facts { border-top-color: rgba(255, 255, 255, 0.22); }
+.goal-hero .btn { background: rgba(255, 255, 255, 0.16); color: #fff; border-color: rgba(255, 255, 255, 0.35); }
+.goal-hero .btn:hover { background: rgba(255, 255, 255, 0.26); }
+.goal-tile.add { background: var(--surface); color: var(--text-2); border: 1px dashed var(--border-strong); box-shadow: none; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }

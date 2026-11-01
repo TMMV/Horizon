@@ -14,17 +14,20 @@ browser; your plan is saved only on your device (use **Data → Save to a file**
 
 You set the plan up once, then review it once a year.
 
-| Section | What's there |
+| Tab | What's there |
 |---|---|
-| **Home** | Your portfolio *today*: every account, estimated from your last figures (or a balance you updated since), with net worth and how it's split. Your goals and whether each is on track. Where you're heading, what to invest each month this year, what's coming up, and a quick plan check. |
-| **Goals** | Every goal in a list, what moves each one, and milestones. Each goal has its own page: how it's tracking (its range of outcomes against the target), the chance by year, what moves it, what it would take, levers to try, and how it does if history repeated. |
-| **Money** | All your inputs, each with its own prediction: **Portfolio** (accounts and how each grows), **Income**, **Spending**, **Cash flow & tax**, and **Assumptions** (household, saving strategy, markets, tax rules). At the top: the date your figures are as at. |
-| **Outlook** | The range of outcomes across thousands of simulated futures, and the plan replayed through history since 1928. |
-| **Scenarios** | Ready-made "what ifs", sliders to try changes, ranges, and your saved scenarios side by side. |
-| **Review** | The yearly review, balance updates between reviews, and how earlier plans turned out. |
+| **Home** | Your portfolio *today*: every account, estimated from your last figures (or a balance you updated since), with your estimated net worth and the change since your last update. Your goals as badges, where you're heading, what to invest each month this year, what's coming up, and suggestions worth a look. |
+| **One tab per goal** | How it's tracking (its range of outcomes against the target), the chance by year, what moves it, what it would take, levers to try and how it does if history repeated. The retirement tab also replays the plan through every starting year since 1928. Add a goal with **+**. |
+| **Finances** | All your inputs, each with its own prediction: **Portfolio** (accounts and how each grows), **Income**, **Spending**, **Cash flow & tax**, **Assumptions** (household, saving strategy, markets, tax rules and how things vary in the simulations) and **Past reviews**. At the top: the date your figures are as at. |
+| **Scenarios** | Your scenarios (open, duplicate, rename), what moves every goal, ready-made "what ifs", sliders to try changes, and ranges. |
+
+The **bell** at the top reminds you when it's time for the yearly review, when your figures are
+a month old (update a few balances, or do a full review) and when you haven't saved a copy to
+a file. Charts that look ahead have an **Adjust for inflation** switch: on, future amounts are in
+today's money; off, they're the actual pounds of each year.
 
 **Figures "as at" a date.** Balances, pay and spending describe one date (shown at the top of
-Money). From there Horizon estimates every account for any later day: Home shows today's
+Finances). From there Horizon estimates every account for any later day: Home shows today's
 estimate, and the yearly review starts from the estimate for the review date, so you only type
 over what's different. Between reviews, **Update balances** records a figure from your banking
 app with its date; it shows on Home and feeds the next review.
@@ -50,7 +53,7 @@ app with its date; it shows on Home and feeds the next review.
 - **Goals at the centre.** Retirement, emergency fund, mortgage-free, financial independence,
   an amount by a year, passive income, house deposit, university fund, big purchase, leaving
   an inheritance, or saving for anything else. Each goal has its own name, colour and icon
-  badge, used on every chart; Home leads with them and each has its own page (chance,
+  badge, used on every chart; Home leads with them and each has its own tab (chance,
   progress, expected date, range of outcomes). Add or remove goals at any time; each has "what would it take" (the overpayment share,
   spending cut, cash buffer or retirement spending that gets you there).
 - **What moves your goals.** A heatmap shows how typical choices (retire later or earlier,
@@ -66,7 +69,7 @@ app with its date; it shows on Home and feeds the next review.
   property, and stress tests. A side-by-side table shows how every goal moves, so you can see
   that paying the mortgage off faster costs investing, and apply the result or save it as a
   scenario.
-- **Workings under every input.** Each Money page shows its prediction as a chart and a
+- **Workings under every input.** Each Finances page shows its prediction as a chart and a
   spreadsheet-style table: assumptions, income, spending, tax per person and each account's
   roll-forward (start + growth + in − out = end, checked on every
   row), each downloadable as CSV. Income items show their typical trend range.
@@ -78,8 +81,8 @@ app with its date; it shows on Home and feeds the next review.
   figures are as at. It shows how far you are ahead of or behind last year's prediction, which accounts
   made the difference, and how each goal moved. It then rolls every scenario forward,
   growing amounts the way the plan expected and keeping each scenario's own assumptions,
-  and gives this year's "invest each month" figure. A banner reminds you from October. Quick
-  check-ins and hand-entered past years are still there.
+  and gives this year's "invest each month" figure. The bell reminds you from October. Snapshots,
+  past reviews and hand-entered past years are still there.
 - **Charts you can check.** Every chart has a Chart/Table switch showing the exact numbers
   behind it (with CSV download), legend items that hide and show series, hover and keyboard
   tooltips, goal lines and milestone markers.
@@ -188,12 +191,12 @@ to a file first to be safe.
 
 To reproduce a simple spreadsheet exactly, use the same simplifications it does:
 
-- Money → Assumptions → switch **Work out UK tax** off and enter take-home pay.
-- Money → Assumptions → Markets → **Use your own return** for investments and pensions (e.g. 10% and 7%).
+- Finances → Assumptions → switch **Work out UK tax** off and enter take-home pay.
+- Finances → Assumptions → Markets → **Use your own return** for investments and pensions (e.g. 10% and 7%).
 - Set cash interest to 0 and the cash buffer to 0 so every penny of surplus is invested.
 - Enter rent with its exchange rate, costs (%) and a flat tax rate, as in the sheet.
 
-The tables under each Money page then show the same year-by-year numbers, with a CSV download
+The tables under each Finances page then show the same year-by-year numbers, with a CSV download
 to compare.
 
 ## Develop

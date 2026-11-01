@@ -123,17 +123,23 @@
     ];
   }
 
-  // A fictional example household. Never put real personal data in here: this repo is public.
-  function defaultPlan(startYear = currentYear()) {
-    return normalizePlan(rawDefaultPlan(startYear));
+  // The most recent 1 September (the example's figures date, so Home shows a few months of estimates).
+  function lastSeptember(d = new Date()) {
+    return `${d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1}-09-01`;
   }
 
-  function rawDefaultPlan(startYear) {
+  // A fictional example household. Never put real personal data in here: this repo is public.
+  function defaultPlan(startYear) {
+    const asOf = startYear ? `${startYear}-09-01` : lastSeptember();
+    return normalizePlan(rawDefaultPlan(startYear || +asOf.slice(0, 4), asOf));
+  }
+
+  function rawDefaultPlan(startYear, asOf) {
     const p1 = { id: 'p1', name: 'Alex', age: 38, retireAge: 55, endAge: 95, statePension: R.STATE_PENSION_FULL, statePensionAge: 68, pensionAccessAge: R.MIN_PENSION_AGE, extraPension: 0 };
     const p2 = { id: 'p2', name: 'Sam', age: 36, retireAge: 55, endAge: 95, statePension: R.STATE_PENSION_FULL, statePensionAge: 68, pensionAccessAge: R.MIN_PENSION_AGE, extraPension: 0 };
     return {
       startYear,
-      asOf: startYear === currentYear() ? todayISO() : `${startYear}-01-01`,
+      asOf,
       household: { region: 'scotland', ignoreTax: false, people: [p1, p2] },
       accounts: [
         { id: uid(), name: 'Current & savings', type: 'cash', owner: 'joint', balance: 18000 },
@@ -173,12 +179,12 @@
   function defaultWorkspace() {
     const id = uid();
     return {
-      version: 4,
+      version: 5,
       activeId: id,
       scenarios: [{ id, name: 'Base plan', plan: defaultPlan() }],
       checkins: [],
       dismissed: [],
-      settings: { realDollars: true, runs: 1000, seed: 42, theme: 'auto', confidence: 90, lastSaved: null },
+      settings: { realDollars: true, runs: 1000, seed: 42, theme: 'light', confidence: 90, lastSaved: null },
     };
   }
 
@@ -439,7 +445,7 @@
       s.plan.asOf = c ? c.date : s.plan.startYear === currentYear() ? todayISO() : `${s.plan.startYear}-01-01`;
     }
     return {
-      version: 4,
+      version: 5,
       activeId: scenarios.some(s => s.id === w.activeId) ? w.activeId : scenarios[0].id,
       scenarios,
       checkins,
@@ -448,7 +454,8 @@
         realDollars: st.realDollars !== undefined ? !!st.realDollars : ds.realDollars,
         runs: Math.min(20000, Math.max(100, Math.round(num(st.runs, ds.runs)))),
         seed: Math.round(num(st.seed, ds.seed)),
-        theme: oneOf(st.theme, ['auto', 'light', 'dark'], 'auto'),
+        // Light by default; plans saved before version 5 on "automatic" switch to light.
+        theme: (num(w.version, 0) < 5 && st.theme === 'auto') ? 'light' : oneOf(st.theme, ['auto', 'light', 'dark'], 'light'),
         confidence: Math.min(99, Math.max(50, num(st.confidence, ds.confidence))),
         lastSaved: isDate(st.lastSaved) ? st.lastSaved : null,   // when the plan was last saved to a file
       },
@@ -1940,7 +1947,7 @@
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
     incomeAfterCosts, taxOf, dbPensionAt, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
-    uid, currentYear, todayISO, isDate, asOfDate, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
+    uid, currentYear, todayISO, isDate, asOfDate, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     streamAt, streamWindow, isActive, growthFactor, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,

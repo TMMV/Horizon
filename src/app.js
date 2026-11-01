@@ -222,6 +222,12 @@
     return h('div', {}, h('div', { class: 'table-tools' }, csvBtn), h('div', { class: `table-wrap ${opts.tall === false ? '' : 'tall'}` }, tbl));
   }
 
+  // The numbers behind a chart, shown by its Chart/Table switch (with a CSV download).
+  function tableOn(c, headers, rows, formats) {
+    c.cfg.table = () => ({ headers, rows, formats });
+    if (c.view === 'table') c.renderTable();
+  }
+
   function downloadCSV(name, headers, rows) {
     const esc = v => {
       const s = typeof v === 'number' ? String(Math.round(v * 100) / 100) : String(v ?? '');
@@ -294,23 +300,6 @@
   }
 
   // ------------------------------------------------------------------ status & warnings
-
-  function renderWarnings() {
-    const box = $('#warnings');
-    const list = model.warnings.slice();
-    const due = RV.due(ws);
-    const out = [];
-    if (due.due && route.tab === 'home') {
-      out.push(h('div', { class: 'banner review-due', role: 'note' },
-        h('span', { class: 'banner-ico' }, glyph('review')),
-        h('div', {},
-          h('strong', {}, due.reason === 'behind' ? `Your plan still starts in ${plan().startYear}: time for a yearly review` : `It's October: time for your ${due.year} yearly review`),
-          h('p', {}, 'Update balances, pay and spending, see how close last year’s plan was, and roll every scenario forward.')),
-        h('button', { type: 'button', class: 'btn primary small', onclick: () => openReview() }, 'Start review')));
-    }
-    if (list.length) out.push(h('div', { class: 'banner', role: 'note' }, h('strong', {}, 'Check your plan'), h('ul', {}, list.map(w => h('li', {}, w)))));
-    box.replaceChildren(...out);
-  }
 
   // ------------------------------------------------------------------ overview
 
@@ -387,8 +376,9 @@
     const p = plan();
     const est = estimateToday();
     const box = $('#homePortfolio');
-    const last = ws.checkins.filter(c => c.date < today()).sort((a, b) => a.date.localeCompare(b.date)).pop();
-    const delta = last ? est.netWorth - last.actual.netWorth : null;
+    // The last update: the figures date, or the latest balance read since.
+    const lastUpdate = [est.asOf, ...Object.values(est.reading).map(r => r.date)].sort().pop();
+    const delta = lastUpdate < today() ? est.netWorth - RV.estimateAt(p, lastUpdate, model.proj).netWorth : null;
     const assets = PF_GROUPS.filter(g => g.key !== 'debt' && est.byType[g.key] > 0.5);
     const totalAssets = assets.reduce((s, g) => s + est.byType[g.key], 0);
     const debt = est.byType.debt || 0;
@@ -426,13 +416,15 @@
             ? `Estimated for today from your figures as at ${fmtDate(est.asOf)} (${sinceText(days)}), on average returns${readings ? `, with ${readings} balance${readings === 1 ? '' : 's'} you updated since` : ''}.`
             : `Your figures as at ${fmtDate(est.asOf)}. From here Horizon estimates each balance until your next review.`)),
         h('div', { class: 'controls' },
-          h('button', { type: 'button', class: 'btn small', onclick: () => navigate('money/portfolio') }, 'Edit accounts'),
+          h('button', { type: 'button', class: 'btn small', onclick: () => navigate('finances/portfolio') }, 'Edit accounts'),
           h('button', { type: 'button', class: 'btn small primary', id: 'updateBtn', onclick: openUpdate }, 'Update balances'))),
       h('div', { class: 'pf-top' },
         h('div', { class: 'pf-total' },
-          h('div', { class: 'hero-label' }, 'Net worth today'),
+          h('div', { class: 'hero-label' }, 'Estimated net worth today'),
           h('div', { class: 'hero-value' }, money(est.netWorth)),
-          delta != null && Math.abs(delta) >= 1 ? h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your ${fmtDate(last.date)} ${last.scenarioName === 'Manual' ? 'record' : 'review'}`) : null),
+          delta == null
+            ? h('div', { class: 'delta flat' }, glyph('good'), 'Updated today')
+            : h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your last update (${fmtDate(lastUpdate)})`)),
         h('div', { class: 'pf-mix' }, bar, keyList)),
       list,
       readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null,
@@ -469,7 +461,7 @@
         h('strong', {}, m.year === p.startYear ? 'this year' : `in ${m.year - p.startYear} yr${m.year - p.startYear === 1 ? '' : 's'}`)))),
       h('div', { class: 'year-actions' },
         h('div', {}, h('span', { class: 'rv-k' }, 'Next yearly review'), h('strong', {}, nextReview),
-          due.due ? h('button', { type: 'button', class: 'btn small primary', onclick: () => openReview() }, 'Start review') : h('button', { type: 'button', class: 'btn small ghost', onclick: () => navigate('review') }, 'About the review')),
+          due.due ? h('button', { type: 'button', class: 'btn small primary', onclick: () => openReview() }, 'Start review') : h('button', { type: 'button', class: 'btn small ghost', onclick: () => navigate('finances/history') }, 'Past reviews')),
         h('div', {}, h('span', { class: 'rv-k' }, 'Saved to a file'), h('strong', {}, saved ? fmtDate(saved) : 'Not yet'),
           h('button', { type: 'button', class: 'btn small ghost', onclick: exportFile, title: 'Keep a copy, or move your plan to another computer' }, 'Save to a file'))));
   }
@@ -503,7 +495,7 @@
     if (a === 'review') return openReview();
     if (a === 'emergency') return openGoalWizard(null, 'emergency');
     if (a === 'explorer') { navigate('scenarios'); requestAnimationFrame(() => $('#explorer').scrollIntoView({ behavior: 'smooth', block: 'start' })); return; }
-    navigate(a === 'accounts' ? 'money/portfolio' : 'money/assumptions');
+    navigate(a === 'accounts' ? 'finances/portfolio' : 'finances/assumptions');
     requestAnimationFrame(() => { const sec = $(`#sec-${a}`); if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   }
 
@@ -557,7 +549,7 @@
     const refLines = hg ? [{ y: hg.goal.amount, label: `${fmtCompact(hg.goal.amount)} goal` }] : [];
     const ovCols = ['cash', 'isa', 'gia', 'pension', 'bonds', 'property'];
     chart('ovChart', 320, 'Net worth by account type over time').set({
-      xs, bars, markers, refLines,
+      xs, areas: bars, markers, refLines,
       lines: [{ label: 'Net worth', color: '--text', values: nw }],
       tooltip: i => ({
         title: titleAt(i),
@@ -645,7 +637,7 @@
 
   function scheduleDrivers() {
     clearTimeout(driverTimer);
-    if (route.tab !== 'home' && route.tab !== 'goals') return;
+    if (!['home', 'goal', 'scenarios'].includes(route.tab)) return;
     if (drivers.done && drivers.key === driversKey()) return;
     driverTimer = setTimeout(computeDrivers, 600);
   }
@@ -667,8 +659,8 @@
       else {
         drivers.done = true;
         if (route.tab === 'home') renderGoalStrip();
-        if (route.tab === 'goals' && !route.sub) { renderDriversCard(); renderGoalList(); }
-        if (route.tab === 'goals' && route.sub) { const res = model.goals.find(x => x.goal.id === route.sub); if (res) renderGoalMoves(res); }
+        if (route.tab === 'scenarios') renderDriversCard();
+        if (route.tab === 'goal') { const res = model.goals.find(x => x.goal.id === route.sub); if (res) renderGoalMoves(res); }
       }
     };
     setTimeout(step, 0);
@@ -744,38 +736,6 @@
       h('span', {}, `${fmtCompact(prog.cur)} of ${fmtCompact(prog.target)}${prog.perYear ? ' a year' : ''} today`));
   }
 
-  function renderGoalList() {
-    const box = $('#goalList');
-    if (!model.goals.length) { box.replaceChildren(goalEmpty()); return; }
-    box.replaceChildren(...model.goals.map(res => {
-      const g = res.goal;
-      const st = goalStatus(res.probability);
-      const open = () => navigate(`goal/${g.id}`);
-      const spark = h('div', { class: 'gl-spark' });
-      const row = h('article', {
-        class: 'gl-row', style: `--gc:${cssVar(goalColor(g))}`, 'data-goal': g.id, tabindex: '0', role: 'link',
-        'aria-label': `${res.title}: ${pct(res.probability)} chance. Open its page.`,
-        onclick: open, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } },
-      },
-      goalBadge(g),
-      h('div', { class: 'gl-main' },
-        h('div', { class: 'gl-names' }, h('strong', {}, res.title), h('span', {}, g.name ? E.autoTitle(g, plan()) : GOAL_TYPE_LABEL[g.type])),
-        h('p', { class: 'note' }, res.summary),
-        goalProgressBar(goalProgress(res)),
-        driverLine(g.id)),
-      h('div', { class: 'gl-chance' }, h('span', { class: 'goal-pct' }, pct(res.probability)), badge(st), h('span', { class: 'gt-when' }, goalWhen(res))),
-      spark,
-      h('span', { class: 'gl-open', 'aria-hidden': 'true' }, '›'));
-      const xs = model.mc.years;
-      const ys = chanceByYear(res);
-      const c = new Chart(spark, { height: 54, spark: true, label: `Chance of ${res.title} by year` });
-      c.set({ xs, yDomain: [0, 1], lines: [{ label: chanceLabel(g), color: goalColor(g), values: ys, area: true }],
-        tooltip: i => ({ title: String(xs[i]), rows: [{ label: chanceLabel(g), color: goalColor(g), shape: 'line', text: pct(ys[i]) }] }) });
-      return row;
-    }), h('button', { type: 'button', class: 'gl-row add', onclick: () => openGoalWizard() }, h('span', { class: 'plus' }, '+'),
-      h('span', {}, h('strong', {}, 'Add a goal'), h('span', { class: 'sub' }, ' Retirement, an emergency fund, mortgage-free, a house deposit, financial independence…'))));
-  }
-
   // ---- one goal's own page
 
   let gp = null;   // { id, values, open, timer }
@@ -795,7 +755,7 @@
     const res = model.goals.find(x => x.goal.id === id);
     if (!res) {
       box.replaceChildren(h('section', { class: 'card' }, h('p', {}, 'This goal is not in the current scenario.'),
-        h('button', { type: 'button', class: 'btn', onclick: () => navigate('goals') }, '‹ All goals')));
+        h('button', { type: 'button', class: 'btn', onclick: () => navigate('home') }, 'Home')));
       return;
     }
     if (!gp || gp.id !== id) gp = { id, values: null, open: {}, timer: null };
@@ -805,12 +765,12 @@
     const remove = () => {
       if (!confirm(`Remove the goal “${res.title}”?`)) return;
       p.goals = p.goals.filter(x => x.id !== g.id);
-      navigate('goals');
+      navigate('home');
       refresh();
     };
     const hero = h('section', { class: 'card goal-hero', style: `--gc:${cssVar(goalColor(g))}`, 'data-goal': g.id },
       h('div', { class: 'gh-top' },
-        h('button', { type: 'button', class: 'btn small ghost', onclick: () => navigate('goals') }, '‹ All goals'),
+        h('span', { class: 'eyebrow' }, 'Goal'),
         h('div', { class: 'controls' },
           h('button', { type: 'button', class: 'btn small', onclick: () => openGoalWizard(g) }, g.type === 'retire' ? 'Edit retirement plan' : 'Edit goal'),
           h('button', { type: 'button', class: 'btn small ghost danger', 'aria-label': `Remove goal ${res.title}`, onclick: remove }, 'Remove'))),
@@ -833,13 +793,14 @@
     const moves = h('section', { class: 'card', id: 'gpMoves' });
     const take = h('section', { class: 'card', id: 'gpTake' });
     const levers = h('section', { class: 'card', id: 'gpLevers' });
-    box.replaceChildren(...[hero, track, h('div', { class: 'grid-2' }, chance, hist), g.type === 'retire' ? retireSummary(res) : null, moves, take, levers].filter(Boolean));
+    const fullHistory = g.type === 'retire' ? h('div') : null;
+    box.replaceChildren(...[hero, track, h('div', { class: 'grid-2' }, chance, hist), g.type === 'retire' ? retireSummary(res) : null, moves, take, levers, fullHistory].filter(Boolean));
     goalTrackChart(track, res);
     goalChanceChart(chance, res);
     renderGoalMoves(res);
     renderGoalTake(res);
     renderGoalLevers(res);
-    setTimeout(() => renderGoalHistory(res), 30);
+    setTimeout(() => { renderGoalHistory(res); if (fullHistory) renderHistory(fullHistory); }, 30);
   }
 
   // The goal's own measure over time: its range across simulations, the average-returns
@@ -927,7 +888,7 @@
     card.replaceChildren(h('h2', {}, 'If history repeated'),
       h('div', { class: 'goal-figure' }, h('span', { class: 'goal-pct big' }, pct(rate)), badge(goalStatus(rate))),
       h('p', { class: 'note' }, `Reached in ${Math.round(rate * r.starts.length)} of ${r.starts.length} starting years since ${r.first}, replaying that period’s real markets with UK inflation. The random simulations give ${pct(res.probability)}.`),
-      h('button', { type: 'button', class: 'btn small ghost', onclick: () => { navigate('outlook'); requestAnimationFrame(() => $('#histCard').scrollIntoView({ behavior: 'smooth', block: 'start' })); } }, 'See every starting year'));
+      h('button', { type: 'button', class: 'btn small ghost', onclick: () => { const c = $('#histCard'); if (c && !c.closest('[hidden]')) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); else { navigate('finances/assumptions'); requestAnimationFrame(() => { const x = $('#histCard'); if (x) x.scrollIntoView({ behavior: 'smooth', block: 'start' }); }); } } }, 'See every starting year'));
   }
 
   // What moves this goal: each typical change, in percentage points.
@@ -1543,7 +1504,7 @@
           h('p', { class: 'hint' }, 'Spending often falls from the late 70s, though care costs can rise (see the life check-up).')),
         sec(5, 'Pensions you will be paid',
           h('div', { class: 'fields' }, sps),
-          h('p', { class: 'hint' }, `Full new State Pension: ${money(R.STATE_PENSION_FULL)} a year. Get your own forecast at gov.uk/check-state-pension.${dbs.length ? ` Also counted: ${dbs.map(i => i.name).join(', ')} (edit in Money → Income).` : ''}`)),
+          h('p', { class: 'hint' }, `Full new State Pension: ${money(R.STATE_PENSION_FULL)} a year. Get your own forecast at gov.uk/check-state-pension.${dbs.length ? ` Also counted: ${dbs.map(i => i.name).join(', ')} (edit in Finances → Income).` : ''}`)),
         sec(6, 'How sure do you want to be?',
           h('div', { class: 'fields' }, h('label', { class: 'field' }, h('span', {}, 'Confidence'),
             h('select', { onchange: e => { gw.goal.confidence = +e.target.value; r.answers = null; previewRetire(); } }, [70, 75, 80, 85, 90, 95].map(v => h('option', { value: v, selected: gw.goal.confidence === v }, `${v}% of simulated futures`))))),
@@ -1680,7 +1641,7 @@
     ].filter(b => b.values.some(v => Math.abs(v) > 0.5));
     const keys = ['earnings', 'otherIncome', 'statePension', 'wCash', 'wGia', 'wIsa', 'wLisa', 'wPension', 'spending', 'taxes', 'pensionRelief', 'debtPay', 'overpay', 'toIsa', 'toLisa', 'lisaBonus', 'toGia', 'pensionIn', 'unfunded'];
     chart('cfChart', 360, 'Money in and out by year').set({
-      xs, bars,
+      xs, areas: bars,
       tooltip: i => ({
         title: titleAt(i),
         rows: bars.filter(b => Math.abs(b.values[i]) > 0.5).map(b => ({ label: b.label, color: b.color, text: money(Math.abs(b.values[i])) })),
@@ -1694,51 +1655,7 @@
     legend($('#cfLegend'), bars.map(b => ({ label: b.label, color: b.color })), charts.cfChart);
   }
 
-  // ------------------------------------------------------------------ Monte Carlo
-
-  function renderMC() {
-    const { mc, proj } = model;
-    const N = proj.pre.N;
-    const xs = mc.years;
-    const b = mc.series.liquid[view()];
-    const base = proj.rows.map((r, t) => D(r.liquid, t));
-    const tr = retireT();
-    const p1 = people()[0];
-
-    $('#mcTiles').replaceChildren(
-      tile('Chance of success', pct(mc.successRate), badge(statusFor(mc.successRate)), true),
-      tile(`Median at retirement (${xs[tr]})`, money(b.p50[tr]), h('p', { class: 'note' }, `Liquid assets, ${unitLabel()}.`)),
-      tile(`Bad markets: 10th percentile at ${xs[N]}`, money(b.p10[N]), h('p', { class: 'note' }, '1 in 10 simulations end below this.')),
-      tile('If the money runs out', mc.medianFailYear ? `Around ${mc.medianFailYear}` : 'Never', h('p', { class: 'note' }, mc.fails ? `Median year among the ${mc.fails.toLocaleString('en-GB')} failing simulations.` : 'No simulation ran out.')),
-    );
-    const a = plan().assumptions;
-    const varied = [a.varyInflation && 'inflation', a.varySalaries && 'salaries', a.varyHouses && 'house prices', a.varyRates && 'interest rates'].filter(Boolean);
-    $('#mcSub').textContent = `Cash, ISAs, general investments, bonds and pensions, in ${unitLabel()}. Each simulation draws random stock and bond returns${varied.length ? `, and also ${varied.join(', ')}` : ''}.`;
-    $('#runsSelect').value = String(ws.settings.runs);
-
-    chart('mcChart', 340, 'Monte Carlo percentile bands for liquid assets').set({
-      ...fanConfig(xs, b, { expected: base, title: titleAt, markers: [{ x: plan().startYear + tr, label: `${p1.name} retires` }] }),
-    });
-    legend($('#mcLegend'), [
-      { label: 'Median', color: '--s1', shape: 'line' },
-      { label: 'Average returns', series: 'Expected', color: '--muted', shape: 'dash' },
-      { label: 'Middle half of outcomes', color: '--band', shape: 'band' },
-      { label: '10th–90th percentile', color: '--band', shape: 'band' },
-    ], charts.mcChart);
-
-    const pctAxis = { yDomain: [0, 1], yFormat: v => `${Math.round(v * 100)}%` };
-    chart('mcFundedChart', 220, 'Chance still funded by year').set({
-      xs, ...pctAxis,
-      lines: [{ label: 'Still funded', color: '--s1', values: mc.fundedByYear, area: true }],
-      tooltip: i => ({ title: titleAt(i), rows: [{ label: 'Still funded', color: '--s1', shape: 'line', text: pct(mc.fundedByYear[i]) }] }),
-    });
-    const keyTs = [...new Set([Math.min(5, N), tr, Math.min(N, tr + 10), Math.min(N, tr + 20), N])].sort((x, y) => x - y);
-    $('#mcTable').replaceChildren(table(
-      ['Year', 'Ages', '10th', '25th', 'Median', '75th', '90th', 'Still funded'],
-      keyTs.map(t => ({ cls: t === tr ? 'hl' : '', cells: [String(xs[t]), agesAt(t), money(b.p10[t]), money(b.p25[t]), money(b.p50[t]), money(b.p75[t]), money(b.p90[t]), pct(mc.fundedByYear[t])] }))));
-
-    renderFans(keyTs);
-  }
+  // ------------------------------------------------------------------ simulations: what varies, and replaying history
 
   // ---- replaying history
 
@@ -1754,10 +1671,10 @@
     return histCache.res;
   }
 
-  function renderHistory() {
-    const card = $('#histCard');
+  // A full "Replaying history" card in `host` (the retirement goal, or Assumptions).
+  function renderHistory(host) {
     const r = historyRuns();
-    if (!r) { card.hidden = true; return; }
+    if (!r) { host.replaceChildren(); return; }
     const p = plan();
     const p1 = people()[0];
     const ageAt = y => p1.age + (y - p.startYear);
@@ -1765,19 +1682,31 @@
     const worst = r.starts.reduce((a, b) => (b.endReal < a.endReal ? b : a));
     const best = r.starts.reduce((a, b) => (b.endReal > a.endReal ? b : a));
     const era = y => (ERAS[y] ? ` (${ERAS[y]})` : '');
-    $('#histSub').textContent = `What if the markets of the past happened again? Your plan is run from every starting year since ${r.first}, using that period’s real share and bond returns (the US market: the longest reliable record) with UK inflation from the same years. ${r.complete} starting years have a full ${r.years.length - 1}-year history; later ones carry on from ${r.first} again. The US was one of the best-performing markets of the last century, so treat this as a kinder test than the random simulations’ bad cases.`;
-    $('#histTiles').replaceChildren(
-      tile('Money lasts', `${r.starts.length - fails.length} of ${r.starts.length}`, [badge(statusFor(r.successRate)), h('p', { class: 'note' }, `${pct(r.successRate)} of starting years, against ${pct(model.mc.successRate)} in the random simulations.`)], true),
-      tile('Toughest start', String(worst.year), h('p', { class: 'note' }, `${era(worst.year).replace(/[()]/g, '')}${ERAS[worst.year] ? '. ' : ''}${worst.wraps ? `Runs on into ${r.first} and beyond. ` : ''}${worst.success ? `Still funded, with ${money(worst.endReal)} left at the end (today’s £).` : `Money runs out in ${worst.failYear}, when ${p1.name} is ${ageAt(worst.failYear)}.`}`)),
-      tile('Kindest start', String(best.year), h('p', { class: 'note' }, `${money(best.endReal)} left at the end (today’s £).`)),
-      tile('Lowest point', money(Math.min(...r.starts.map(x => x.minReal))), h('p', { class: 'note' }, 'The least ever held in savings, investments and pensions across all starting years (today’s £).')));
+    const barsBox = h('div', { class: 'chart' }), barsLegend = h('div', { class: 'legend' });
+    const linesBox = h('div', { class: 'chart' }), linesLegend = h('div', { class: 'legend' });
+    host.replaceChildren(h('section', { class: 'card', id: 'histCard' },
+      h('h2', {}, 'Replaying history'),
+      h('p', { class: 'sub' }, `What if the markets of the past happened again? Your plan is run from every starting year since ${r.first}, using that period’s real share and bond returns (the US market: the longest reliable record) with UK inflation from the same years. ${r.complete} starting years have a full ${r.years.length - 1}-year history; later ones carry on from ${r.first} again. The US did better than most markets over the last century, so this is a kinder test than the random simulations’ bad cases.`),
+      h('div', { class: 'tiles', id: 'histTiles' },
+        tile('Money lasts', `${r.starts.length - fails.length} of ${r.starts.length}`, [badge(statusFor(r.successRate)), h('p', { class: 'note' }, `${pct(r.successRate)} of starting years, against ${pct(model.mc.successRate)} in the random simulations.`)], true),
+        tile('Toughest start', String(worst.year), h('p', { class: 'note' }, `${era(worst.year).replace(/[()]/g, '')}${ERAS[worst.year] ? '. ' : ''}${worst.wraps ? `Runs on into ${r.first} and beyond. ` : ''}${worst.success ? `Still funded, with ${money(worst.endReal)} left at the end (today’s £).` : `Money runs out in ${worst.failYear}, when ${p1.name} is ${ageAt(worst.failYear)}.`}`)),
+        tile('Kindest start', String(best.year), h('p', { class: 'note' }, `${money(best.endReal)} left at the end (today’s £).`)),
+        tile('Lowest point', money(Math.min(...r.starts.map(x => x.minReal))), h('p', { class: 'note' }, 'The least ever held in savings, investments and pensions across all starting years (today’s £).'))),
+      h('h3', { class: 'chart-title' }, 'Money left at the end of the plan, by the year history starts (today’s £)'), barsBox, barsLegend,
+      h('h3', { class: 'chart-title' }, 'Savings, investments and pensions through famous stretches of history (today’s £)'), linesBox, linesLegend,
+      h('h3', { class: 'chart-title' }, 'Your goals: random simulations and history'),
+      h('div', { id: 'histGoals' }, model.goals.length
+        ? h('div', { class: 'table-wrap' }, table(['Goal', 'Random simulations', 'Starting years in history'],
+          model.goals.map(g => ({ cells: [h('span', { class: 'goal-name' }, goalBadge(g.goal, 'small'), g.title), pct(g.probability), pct(r.goalRates[g.goal.id] || 0)] }))))
+        : h('p', { class: 'sub' }, 'Add goals to compare them here.'))));
 
     const xs = r.starts.map(x => x.year);
     const bars = [
       { label: 'Left at the end', color: '--s1', values: r.starts.map(x => (x.success ? x.endReal : 0)) },
       { label: 'Ran out', color: '--s8', values: r.starts.map(x => (x.success ? 0 : x.endReal)) },
     ];
-    chart('histBars', 260, 'Money left at the end of the plan by starting year in history').set({
+    const cb = new Chart(barsBox, { height: 240, label: 'Money left at the end of the plan by starting year in history', name: 'history-starts' });
+    cb.set({
       xs, bars,
       tooltip: i => {
         const x = r.starts[i];
@@ -1792,7 +1721,7 @@
         formats: [String, String, String, String, money, money, String],
       }),
     });
-    legend($('#histBarsLegend'), bars.map(b => ({ label: b.label, color: b.color })), charts.histBars);
+    legend(barsLegend, bars.map(b => ({ label: b.label, color: b.color })), cb);
 
     // Famous stretches against the range of all of history.
     const picks = Object.keys(ERAS).map(Number).filter(y => y >= r.first && y <= r.last);
@@ -1810,44 +1739,41 @@
       rows: r.years.map((y, i) => [y, r.bands.p50[i], ...picks.map(s => r.liquid[idx(s)][i])]),
       formats: [String, money, ...picks.map(() => money)],
     });
-    chart('histLines', 320, 'Savings through famous stretches of history').set(cfg);
-    legend($('#histLegend'), [
+    const cl = new Chart(linesBox, { height: 300, label: 'Savings through famous stretches of history', name: 'history-eras' });
+    cl.set(cfg);
+    legend(linesLegend, [
       ...cfg.lines.slice(1).map(l => ({ label: l.label, color: l.color, shape: 'line' })),
       { label: 'Median of history', series: 'Median', color: '--s1', shape: 'line' },
       { label: 'Middle half of history', series: 'Middle half of outcomes', color: '--band', shape: 'band' },
       { label: '10th–90th percentile', color: '--band', shape: 'band' },
-    ], charts.histLines);
-
-    $('#histGoals').replaceChildren(model.goals.length
-      ? h('div', { class: 'table-wrap' }, table(['Goal', 'Random simulations', 'Starting years in history'],
-        model.goals.map(g => ({ cells: [h('span', { class: 'goal-name' }, goalBadge(g.goal, 'small'), g.title), pct(g.probability), pct(r.goalRates[g.goal.id] || 0)] }))))
-      : h('p', { class: 'sub' }, 'Add goals to compare them here.'));
+    ], cl);
   }
 
-  function renderFans(keyTs) {
+  // ---- what else varies in the simulations (on Assumptions)
+  function renderFans(host) {
     const { mc, proj } = model;
     const xs = mc.years;
     const a = plan().assumptions;
-    const host = $('#mcFans');
-    host.replaceChildren();
+    const grid = h('div', { class: 'fan-grid', id: 'mcFans' });
+    const runs = h('select', { id: 'runsSelect', 'aria-label': 'Simulations', onchange: e => { ws.settings.runs = parseInt(e.target.value, 10); refresh(); } },
+      [500, 1000, 2000, 5000, 10000].map(n => h('option', { value: n, selected: ws.settings.runs === n }, n.toLocaleString('en-GB'))));
+    host.replaceChildren(h('section', { class: 'card' },
+      h('div', { class: 'card-head' },
+        h('div', {}, h('h2', {}, 'How things vary in the simulations'),
+          h('p', { class: 'sub' }, `Every goal’s chance comes from ${ws.settings.runs.toLocaleString('en-GB')} simulated futures. Each draws its own share and bond returns and, as switched on above, its own inflation, pay rises, house prices and interest rates. These are the ranges.`)),
+        h('div', { class: 'controls' }, h('label', {}, 'Simulations', runs),
+          h('button', { type: 'button', class: 'btn small', id: 'rerollBtn', onclick: () => { ws.settings.seed = Math.floor(Math.random() * 2 ** 31); refresh(); } }, 'Re-roll'))),
+      grid));
     const fans = [
-      { title: 'Net worth', text: 'Everything you own minus what you owe.', bands: mc.series.netWorth[view()], expected: proj.rows.map((r, t) => D(r.netWorth, t)) },
-      { title: 'Inflation each year', text: a.varyInflation ? `Centred on ${a.inflation}% with year-to-year swings of about ${a.inflationVolatility} points; surprises fade gradually.` : 'Fixed (switched off in Markets & inflation).', bands: mc.inflation, format: pct1, yFormat: v => `${Math.round(v * 1000) / 10}%`, money: false },
-      { title: 'Property values', text: a.varyHouses ? `Each property grows at its own rate plus inflation surprises and a ±${a.houseVolatility}% yearly swing.` : 'Fixed growth (switched off).', bands: mc.series.property[view()], expected: proj.rows.map((r, t) => D(r.property, t)) },
+      { title: 'Inflation each year', text: a.varyInflation ? `Centred on ${a.inflation}% with year-to-year swings of about ${a.inflationVolatility} points; surprises fade gradually.` : 'Fixed (switched off above).', bands: mc.inflation, format: pct1, yFormat: v => `${Math.round(v * 1000) / 10}%` },
       { title: 'Earnings from work', text: a.varySalaries ? `Salaries rise at their own rate, follow inflation surprises and get a ±${a.salaryVolatility}% yearly surprise.` : 'Fixed growth (switched off).', bands: mc.series.earnings[view()], expected: proj.rows.map((r, t) => D(r.earnings, t)) },
-      { title: 'Mortgage balance', text: a.varyRates ? `After any fixed period ends, the rate moves ${a.rateSensitivity}× with inflation surprises. Payments stay the same, so the payoff date moves.` : 'Rates fixed (switched off).', bands: mc.series.debt[view()], expected: proj.rows.map((r, t) => D(r.debt, t)) },
-      { title: 'Chance mortgage-free', text: 'Share of simulations with no mortgage left by each year.', probability: mc.debtFreeByYear },
+      { title: 'Property values', text: a.varyHouses ? `Each property grows at its own rate plus inflation surprises and a ±${a.houseVolatility}% yearly swing.` : 'Fixed growth (switched off).', bands: mc.series.property[view()], expected: proj.rows.map((r, t) => D(r.property, t)) },
     ];
     for (const f of fans) {
-      if (f.bands && !f.format && f.bands.p90.every(v => Math.abs(v) < 0.5)) continue; // nothing to show (e.g. no mortgage)
+      if (f.bands && !f.format && f.bands.p90.every(v => Math.abs(v) < 0.5)) continue; // nothing to show
       const card = h('div', { class: 'fan' }, h('h3', {}, f.title), h('p', { class: 'sub' }, f.text));
-      host.append(card);
-      const c = chartIn(card, 200, f.title);
-      if (f.probability) {
-        c.set({ xs, yDomain: [0, 1], yFormat: v => `${Math.round(v * 100)}%`, lines: [{ label: 'Mortgage-free', color: '--s3', values: f.probability, area: true }], tooltip: i => ({ title: String(xs[i]), rows: [{ label: 'Mortgage-free by then', color: '--s3', shape: 'line', text: pct(f.probability[i]) }] }) });
-        continue;
-      }
-      c.set(fanConfig(xs, f.bands, { expected: f.expected, format: f.format, yFormat: f.yFormat, title: titleAt }));
+      grid.append(card);
+      chartIn(card, 190, f.title).set(fanConfig(xs, f.bands, { expected: f.expected, format: f.format, yFormat: f.yFormat, title: titleAt }));
     }
   }
 
@@ -1859,6 +1785,7 @@
     ['spending', 'Spending', () => plan().expenses.length + plan().events.length],
     ['cashflow', 'Cash flow & tax'],
     ['assumptions', 'Assumptions'],
+    ['history', 'Past reviews', () => ws.checkins.length],
   ];
   let moneyPage = 'portfolio';
   let wkPerson = 0;
@@ -1866,8 +1793,8 @@
 
   function renderMoneyNav() {
     $('#moneyNav').replaceChildren(...MONEY_PAGES.map(([k, l, count]) => h('a', {
-      href: `#money/${k}`, 'aria-current': k === moneyPage ? 'page' : null,
-      onclick: e => { e.preventDefault(); navigate(`money/${k}`); },
+      href: `#finances/${k}`, 'aria-current': k === moneyPage ? 'page' : null,
+      onclick: e => { e.preventDefault(); navigate(`finances/${k}`); },
     }, h('span', {}, l), count ? h('span', { class: 'count' }, String(count())) : null)));
   }
 
@@ -1897,9 +1824,9 @@
     ]);
   }
 
-  // The predictions under each Money page's inputs.
+  // The predictions under each Finances page's inputs.
   function renderMoneyPage() {
-    for (const el of $$('#view-money .money-page')) el.hidden = el.dataset.page !== moneyPage;
+    for (const el of $$('#view-finances .money-page')) el.hidden = el.dataset.page !== moneyPage;
     renderMoneyNav();
     renderAsOfBar();
     const fill = (id, fn) => { const body = $(id); body.replaceChildren(); fn(body); };
@@ -1907,7 +1834,14 @@
     if (moneyPage === 'income') { fill('#mpIncome', wkIncome); requestAnimationFrame(updateIncomeTrends); }
     if (moneyPage === 'spending') fill('#mpSpending', wkSpending);
     if (moneyPage === 'cashflow') { renderCashflow(); fill('#mpTax', wkTax); }
-    if (moneyPage === 'assumptions') fill('#mpAssumptions', wkAssumptions);
+    if (moneyPage === 'assumptions') {
+      fill('#mpAssumptions', wkAssumptions);
+      const fans = h('div'), hist = h('div');
+      $('#mpAssumptions').append(fans, hist);
+      renderFans(fans);
+      if (!plan().goals.some(g => g.type === 'retire')) setTimeout(() => renderHistory(hist), 30);
+    }
+    if (moneyPage === 'history') { renderReviewIntro(); renderProgress(); }
   }
 
   function wkCard(body, title, explain) {
@@ -1925,7 +1859,7 @@
       h('p', {}, `Prices rise ${a.inflation}% a year, so the price index for year t is (1 + ${a.inflation}%)^t. Values in today's money are future values divided by the price index.`),
       h('p', {}, `Tax thresholds stay frozen until April ${a.thresholdFreezeUntil}, then rise with prices (threshold factor). Investments move from ${a.stockPctNow}% to ${a.stockPctRetire}% stocks by retirement; the expected return is the mix of ${a.stockReturn}% for stocks and ${a.bondReturn}% for bonds.`),
     ]);
-    const c = chartIn(card, 220, 'Price index and tax threshold factor');
+    const c = chartIn(card, 220, 'Price index and tax threshold factor', { name: 'assumptions' });
     const xs = rows.map(r => r.year);
     c.set({
       xs,
@@ -1942,9 +1876,9 @@
     const lg = h('div', { class: 'legend' });
     card.append(lg);
     legend(lg, [{ label: 'Price index', color: '--s1', shape: 'line' }, { label: 'Tax threshold factor', color: '--s2', shape: 'line' }], c);
-    card.append(dataTable('assumptions', ['Year', 'Ages', 'Inflation', 'Price index', 'Tax threshold factor', 'Stocks', 'Expected return'],
+    tableOn(c, ['Year', 'Ages', 'Inflation', 'Price index', 'Tax threshold factor', 'Stocks', 'Expected return'],
       rows.map(r => [r.year, r.ages.join(' / '), r.inflation, r.deflator, r.thresholdFactor, r.stockWeight, r.expectedReturn]),
-      [String, String, pct1, v => v.toFixed(3), v => v.toFixed(3), pct, pct1]));
+      [String, String, pct1, v => v.toFixed(3), v => v.toFixed(3), pct, pct1]);
   }
 
   function wkIncome(body) {
@@ -1959,15 +1893,15 @@
     const lines = items.map((it, k) => ({ label: it.name, color: SERIES_COLORS[k % 8], values: rows.map((r, t) => D(E.incomeAfterCosts(it, p, t), t)) }));
     const sp = rows.map((r, t) => D(r.statePension, t));
     if (sp.some(v => v > 0)) lines.push({ label: 'State Pension', color: SERIES_COLORS[lines.length % 8], values: sp });
-    const c = chartIn(card, 260, 'Income streams over time');
+    const c = chartIn(card, 260, 'Income streams over time', { name: 'income' });
     c.set({ xs, lines, tooltip: i => ({ title: titleAt(i), rows: lines.filter(l => l.values[i] > 0.5).map(l => ({ label: l.label, color: l.color, shape: 'line', text: money(l.values[i]) })) }) });
     const lg = h('div', { class: 'legend' });
     card.append(lg);
     legend(lg, lines.map(l => ({ label: l.label, color: l.color, shape: 'line' })), c);
     const headers = ['Year', 'Ages', ...lines.map(l => l.label), 'Total'];
-    card.append(dataTable('income', headers,
+    tableOn(c, headers,
       rows.map((r, t) => { const vals = lines.map(l => l.values[t]); return [r.year, r.ages.join(' / '), ...vals, vals.reduce((x, y) => x + y, 0)]; }),
-      [String, String, ...lines.map(() => money), money]));
+      [String, String, ...lines.map(() => money), money]);
   }
 
   function wkSpending(body) {
@@ -1990,14 +1924,14 @@
     const adj = rows.map((r, t) => pre.expenses[t] - byItem.reduce((acc, arr) => acc + arr[t], 0));
     const oneOff = rows.map((r, t) => pre.eventsOut[t]);
     if (oneOff.some(v => v > 0)) bars.push({ label: 'One-off events', color: SERIES_COLORS[7], values: rows.map((r, t) => D(oneOff[t], t)) });
-    const c = chartIn(card, 260, 'Spending by item');
-    c.set({ xs, bars, tooltip: i => ({ title: titleAt(i), rows: bars.filter(b => b.values[i] > 0.5).map(b => ({ label: b.label, color: b.color, text: money(b.values[i]) })) }) });
+    const c = chartIn(card, 260, 'Spending by item', { name: 'spending' });
+    c.set({ xs, areas: bars, tooltip: i => ({ title: titleAt(i), rows: bars.filter(b => b.values[i] > 0.5).map(b => ({ label: b.label, color: b.color, text: money(b.values[i]) })) }) });
     const lg = h('div', { class: 'legend' });
     card.append(lg);
     legend(lg, bars.map(b => ({ label: b.label, color: b.color })), c);
-    card.append(dataTable('spending', ['Year', ...items.map(i => i.name), 'Adjustment', 'One-off', 'Total used'],
+    tableOn(c, ['Year', ...items.map(i => i.name), 'Adjustment', 'One-off', 'Total used'],
       rows.map((r, t) => [r.year, ...byItem.map(arr => D(arr[t], t)), D(adj[t], t), D(oneOff[t], t), D(r.spending, t)]),
-      [String, ...items.map(() => money), money, money, money]));
+      [String, ...items.map(() => money), money, money, money]);
   }
 
   function wkTax(body) {
@@ -2022,20 +1956,19 @@
       { label: 'National Insurance', color: '--s2', values: ni },
       { label: 'Capital gains tax (share)', color: '--s3', values: cgt },
     ].filter(b => b.values.some(v => v > 0.5));
-    const c = chartIn(card, 240, `${people()[i].name}'s tax by year`);
-    c.set({ xs, bars, tooltip: k => ({ title: titleAt(k), rows: bars.map(b => ({ label: b.label, color: b.color, text: money(b.values[k]) })) }) });
+    const c = chartIn(card, 240, `${people()[i].name}'s tax by year`, { name: `tax-${people()[i].name}` });
+    c.set({ xs, areas: bars, tooltip: k => ({ title: titleAt(k), rows: bars.map(b => ({ label: b.label, color: b.color, text: money(b.values[k]) })) }) });
     const lg = h('div', { class: 'legend' });
     card.append(lg);
     legend(lg, bars.map(b => ({ label: b.label, color: b.color })), c);
-    card.append(dataTable(`tax-${people()[i].name}`,
-      ['Year', 'Age', 'Gross salary', 'Your pension contributions', 'Other taxable', 'State Pension', 'Pension withdrawn', 'of which tax-free', 'Taxable income', 'Personal allowance', 'Higher-rate pension relief', 'Income tax (after relief)', 'NI', 'CGT (share)', 'Effective rate'],
+    tableOn(c, ['Year', 'Age', 'Gross salary', 'Your pension contributions', 'Other taxable', 'State Pension', 'Pension withdrawn', 'of which tax-free', 'Taxable income', 'Personal allowance', 'Higher-rate pension relief', 'Income tax (after relief)', 'NI', 'CGT (share)', 'Effective rate'],
       rows.map((r, t) => {
         const o = r.persons[i];
         const grossIncome = P.gross[t] + P.other[t] + P.statePension[t] + o.pensionDrawn;
         const tax = o.incomeTax + o.ni + r.cgt / n;
         return [r.year, r.ages[i], D(P.gross[t], t), D(P.employee[t], t), D(P.other[t], t), D(P.statePension[t], t), D(o.pensionDrawn, t), D(o.pensionTaxFree, t), D(o.taxable, t), D(o.allowance, t), D(o.relief || 0, t), D(o.incomeTax, t), D(o.ni, t), D(r.cgt / n, t), grossIncome > 0 ? tax / grossIncome : 0];
       }),
-      [String, String, money, money, money, money, money, money, money, money, money, money, money, money, pct1]));
+      [String, String, money, money, money, money, money, money, money, money, money, money, money, money, pct1]);
   }
 
   const WK_ACCOUNTS = {
@@ -2060,13 +1993,13 @@
     card.append(h('div', { class: 'chips' }, avail.map(k => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(k === wkAccount), onclick: () => { wkAccount = k; renderMoneyPage(); } }, WK_ACCOUNTS[k].label))));
     const flows = rows.slice(0, -1);
     const xs = rows.map(r => r.year);
-    const c = chartIn(card, 220, `${A.label} balance`);
+    const c = chartIn(card, 240, `${A.label} balance`, { name: `account-${wkAccount}` });
     const bal = rows.map((r, t) => D(r[A.bal], t));
-    c.set({ xs, lines: [{ label: `${A.label} balance`, color: TYPE_COLOR[wkAccount], values: bal }], tooltip: i => ({ title: titleAt(i), rows: [{ label: 'Balance at start of year', color: TYPE_COLOR[wkAccount], shape: 'line', text: money(bal[i]) }] }) });
+    c.set({ xs, lines: [{ label: `${A.label} balance`, color: TYPE_COLOR[wkAccount], values: bal, area: true }], tooltip: i => ({ title: titleAt(i), rows: [{ label: 'Balance at start of year', color: TYPE_COLOR[wkAccount], shape: 'line', text: money(bal[i]) }] }) });
     const isDebt = wkAccount === 'debt';
     const headers = ['Year', 'Start', A.growthLabel, isDebt ? 'Paid in' : 'Paid in', isDebt ? 'Payments & overpayments' : 'Taken out', 'End', 'Check'];
     if (isDebt) headers.splice(6, 0, 'Rate');
-    card.append(dataTable(`account-${wkAccount}`, headers,
+    tableOn(c, headers,
       flows.map((r, t) => {
         const start = r[A.bal], growth = r[A.growth], inn = A.inn(r), out = A.out(r), end = rows[t + 1][A.bal];
         const ok = Math.abs(start + growth + inn - out - end) < 1 ? '✓' : `off by ${money(start + growth + inn - out - end)}`;
@@ -2078,7 +2011,7 @@
         vals.push(ok);
         return vals;
       }),
-      [String, money, money, money, money, money, ...(isDebt ? [pct1] : []), String]));
+      [String, money, money, money, money, money, ...(isDebt ? [pct1] : []), String]);
   }
 
   // ------------------------------------------------------------------ scenarios
@@ -2252,7 +2185,7 @@
     ws.checkins.sort((a, b) => a.date.localeCompare(b.date));
     save();
     renderProgress();
-    renderWarnings();
+    renderNotifications();
   }
 
   // ------------------------------------------------------------------ yearly review
@@ -2417,7 +2350,7 @@
         nowLabel: e => `Now (${e.freq === 'month' ? 'a month' : 'a year'})`,
       }),
       actual,
-      h('p', { class: 'hint' }, 'For a walk-through with typical UK amounts for each category, run the Spending check-up (Money → Spending) after the review.'),
+      h('p', { class: 'hint' }, 'For a walk-through with typical UK amounts for each category, run the Spending check-up (Finances → Spending) after the review.'),
     ];
   }
 
@@ -2579,7 +2512,7 @@
       renderScenarioPicker();
       renderPlan();
       refresh();
-      navigate('review');
+      navigate('finances/history');
       toast(`${d.year} review saved: figures as at ${fmtDate(d.date)}, and every scenario now starts in ${d.year}. Invest ${money(model.monthly.invest)} a month this year. Save a copy to a file to keep it safe.`, { label: 'Save to a file', run: exportFile });
     };
     const btn = $('#rvSave');
@@ -2694,7 +2627,7 @@
     });
     $('#udBody').replaceChildren(
       h('label', { class: 'asof-label' }, h('strong', {}, 'Balances as at'), dateIn),
-      p.accounts.length ? h('div', { class: 'rv-rows' }, rows) : h('p', { class: 'sub' }, 'No accounts yet: add them in Money → Portfolio.'));
+      p.accounts.length ? h('div', { class: 'rv-rows' }, rows) : h('p', { class: 'sub' }, 'No accounts yet: add them in Finances → Portfolio.'));
     updateUpdateNote();
   }
 
@@ -2862,8 +2795,10 @@
   // Collapsible "More options" that stays open across re-renders.
   const openMore = new Set();
   function more(key, label, ...children) {
+    // Remember open/closed straight away (the toggle event comes later), so a redraw
+    // triggered by the next change keeps it open.
     const det = h('details', { class: 'more', open: openMore.has(key) },
-      h('summary', {}, label), h('div', { class: 'more-body' }, children));
+      h('summary', { onclick: () => { if (det.open) openMore.delete(key); else openMore.add(key); } }, label), h('div', { class: 'more-body' }, children));
     det.addEventListener('toggle', () => { if (det.open) openMore.add(key); else openMore.delete(key); });
     return det;
   }
@@ -2973,6 +2908,7 @@
   }
 
   const KIND_LABELS = [['salary', 'Salary'], ['rental', 'Rent'], ['other', 'Other income'], ['dbpension', 'Defined benefit pension (e.g. USS)']];
+  const kindLabel = k => (KIND_LABELS.find(x => x[0] === k) || [k, k])[1];
 
   function setKind(item, v) {
     item.kind = v;
@@ -3000,11 +2936,11 @@
     return h('div', { class: 'item', style: `--item-color:${cssVar('--s4')}` },
       h('div', { class: 'item-head' },
         h('input', { type: 'text', class: 'name', value: item.name, 'aria-label': 'Income name', oninput: e => { item.name = e.target.value; schedule(); } }),
+        h('span', { class: 'tag' }, 'Defined benefit pension'),
         h('span', { class: 'tag', 'data-net': item.id }, incomeTag(item, p)),
         deleteButton(`Remove ${item.name}`, () => removeFrom(p.income, item, 'income'))),
       h('div', { class: 'fields' },
         field('Whose', selectInput(ownerOptions(false), ...bind(item, 'owner'), { rerender: 'income' })),
-        field('Type', selectInput(KIND_LABELS, () => item.kind, v => setKind(item, v), { rerender: 'income' })),
         field('Built up so far (£ a year)', moneyInput(...bind(item, 'amount'), { label: 'Pension built up so far' }), 'From the latest benefit statement.'),
         field('Added each year you keep working', moneyInput(...bind(item, 'dbAccrual'), { label: 'Pension added each year' }), 'USS adds about 1/75 of salary a year.'),
         field('Paid from age', numInput(...bind(item, 'startAge'), { min: 50, max: 75, label: 'Pension age' }), `${person.name}'s State Pension age is ${person.statePensionAge}.`),
@@ -3070,12 +3006,12 @@
       return h('div', { class: 'item', style: `--item-color:${cssVar('--s1')}` },
         h('div', { class: 'item-head' },
           h('input', { type: 'text', class: 'name', value: item.name, 'aria-label': 'Income name', oninput: e => { item.name = e.target.value; schedule(); } }),
+          h('span', { class: 'tag' }, kindLabel(item.kind)),
           h('span', { class: 'tag', title: 'This year, after costs and any flat tax', 'data-net': item.id }, incomeTag(item, p)),
           deleteButton(`Remove ${item.name}`, () => removeFrom(p.income, item, 'income'))),
         h('div', { class: 'fields' },
           field('Whose', selectInput(ownerOptions(!isSalary), ...bind(item, 'owner'), { rerender: 'income' })),
-          field('Type', selectInput(KIND_LABELS, () => item.kind, v => setKind(item, v), { rerender: 'income' })),
-          field('Amount (today)', amountWithFreq(item, 'income')),
+            field('Amount (today)', amountWithFreq(item, 'income')),
           field('Tax', selectInput(taxOptions(item.kind), ...bind(item, 'tax'), { rerender: 'income' }), ignore && item.tax === 'uk' ? 'Tax is switched off for the household.' : null),
           item.tax === 'flat' ? field('Tax rate', numInput(...bind(item, 'taxRate'), { step: 1, min: 0, max: 100, suffix: '%' }), 'E.g. tax withheld abroad.') : null,
           item.kind === 'rental' ? costFields : null),
@@ -3103,9 +3039,15 @@
           h('p', { class: 'trend-caption sub' })));
     });
     return [
-      sectionHead('income', 'Income', 'Salaries, rent, gifts, side income. Enter today’s amount; it grows from now. Extra settings are under “More options”.',
-        h('button', { type: 'button', class: 'btn small', onclick: () => { p.income.push(E.normalizePlan({ ...p, income: [{ name: 'New income', owner: 'p1', kind: 'salary', tax: 'none', amount: 0, freq: 'month', growth: 3 }] }).income[0]); renderSection('income'); refresh(); } }, '+ Add income')),
+      sectionHead('income', 'Income', 'Salaries, rent, gifts, side income. Enter the amount as at the date above; it grows from there. Extra settings are under “More options”. Added the wrong kind? Remove it and add the right one.'),
       h('div', { class: 'items' }, items.length ? items : h('p', { class: 'sub' }, 'No income yet.')),
+      h('div', { class: 'add-row' }, KIND_LABELS.map(([kind, label]) => h('button', { type: 'button', class: 'btn small', onclick: () => {
+        const item = E.normalizePlan({ ...p, income: [{ name: kind === 'dbpension' ? 'Defined benefit pension' : kind === 'salary' ? 'Salary' : label, owner: 'p1', kind, tax: 'none', amount: 0, freq: kind === 'dbpension' ? 'year' : 'month', growth: kind === 'salary' ? 3 : 0, inflationLinked: kind !== 'salary' }] }).income[0];
+        setKind(item, kind);
+        p.income.push(item);
+        renderSection('income');
+        refresh();
+      } }, `+ ${kind === 'dbpension' ? 'Defined benefit pension' : label}`))),
     ];
   }
 
@@ -3202,7 +3144,7 @@
   function renderAccounts() {
     const p = plan();
     const items = p.accounts.map(a => {
-      const main = [field('Type', selectInput(Object.entries(ACCOUNT_LABELS), ...bind(a, 'type'), { rerender: 'accounts' }))];
+      const main = [];
       const extra = [];
       main.push(field(a.type === 'property' ? 'Value' : a.type === 'debt' ? 'Amount owed' : 'Balance', moneyInput(...bind(a, 'balance'))));
       if (E.OWNED_TYPES.includes(a.type)) main.push(field('Whose', selectInput(ownerOptions(false), ...bind(a, 'owner'))));
@@ -3350,6 +3292,8 @@
         h('li', {}, 'Not modelled: dividend and savings-interest tax, property income tax, inheritance tax (including pensions from April 2027), tapered annual allowance, the Pension Tax Allowance, and higher-rate relief on personal pension contributions.')),
     ];
   }
+
+  const renderScenarioList = () => renderSection('scenario');
 
   function renderScenarioSection() {
     const s = scenario();
@@ -3614,23 +3558,25 @@
     refresh();
   }
 
-  // ------------------------------------------------------------------ chrome: navigation, scenario picker, theme, files
+  // ------------------------------------------------------------------ chrome: navigation, notifications, theme, files
 
-  const TABS = ['home', 'goals', 'money', 'outlook', 'scenarios', 'review'];
-  // Addresses from before the sections were reorganised still work.
-  const LEGACY = { overview: 'home', plan: 'money/portfolio', cashflow: 'money/cashflow', workings: 'money/portfolio', montecarlo: 'outlook', progress: 'review' };
+  // Tabs: Home, one per goal, Finances, Scenarios. Addresses from earlier layouts still work.
+  const LEGACY = {
+    overview: 'home', goals: 'home', plan: 'finances/portfolio', cashflow: 'finances/cashflow', workings: 'finances/portfolio',
+    montecarlo: 'finances/assumptions', outlook: 'finances/assumptions', progress: 'finances/history', review: 'finances/history',
+  };
   let route = { tab: 'home', sub: null };
 
-  // "#goal/<id>" opens a goal's page; "#money/<page>" a Money page; otherwise a tab.
+  // "#goal/<id>" opens a goal's tab; "#finances/<page>" a Finances page; otherwise a tab.
   function parseRoute(hash) {
     let s = String(hash || '').replace(/^#/, '');
     if (LEGACY[s]) s = LEGACY[s];
     const [a, b] = s.split('/');
-    if (a === 'goal' && b) return { tab: 'goals', sub: decodeURIComponent(b) };
-    if (a === 'money') return { tab: 'money', sub: MONEY_PAGES.some(x => x[0] === b) ? b : moneyPage };
-    return { tab: TABS.includes(a) ? a : 'home', sub: null };
+    if (a === 'goal' && b) return { tab: 'goal', sub: decodeURIComponent(b) };
+    if (a === 'finances' || a === 'money') return { tab: 'finances', sub: MONEY_PAGES.some(x => x[0] === b) ? b : moneyPage };
+    return { tab: ['home', 'scenarios'].includes(a) ? a : 'home', sub: null };
   }
-  const routeHash = r => (r.tab === 'goals' && r.sub ? `goal/${encodeURIComponent(r.sub)}` : r.tab === 'money' ? `money/${r.sub}` : r.tab);
+  const routeHash = r => (r.tab === 'goal' ? `goal/${encodeURIComponent(r.sub)}` : r.tab === 'finances' ? `finances/${r.sub}` : r.tab);
 
   function navigate(hash) {
     const r = parseRoute(hash);
@@ -3641,46 +3587,115 @@
     applyRoute(r);
   }
 
+  // A short name for a goal's tab.
+  const goalTabName = g => g.name || ({ debtFree: 'Mortgage-free', retire: 'Retirement', emergency: 'Emergency fund', passiveIncome: 'Passive income' }[g.type]) || E.autoTitle(g, plan());
+
+  function renderTabs() {
+    const goals = plan().goals;
+    const tab = (key, label, extra = {}) => h('button', {
+      role: 'tab', type: 'button', 'data-tab': key, 'aria-selected': String(tabKey(route) === key), class: extra.cls || null, style: extra.style || null,
+      onclick: () => navigate(key),
+    }, extra.icon || null, label);
+    $('#tabList').replaceChildren(
+      tab('home', 'Home'),
+      ...goals.map(g => tab(`goal/${g.id}`, goalTabName(g), { cls: 'goal-tab', style: `--gc:${cssVar(goalColor(g))}`, icon: h('i', { class: 'tab-dot', 'aria-hidden': 'true' }) })),
+      h('button', { type: 'button', class: 'tab-add', title: 'Add a goal', 'aria-label': 'Add a goal', onclick: () => openGoalWizard() }, '+'),
+      tab(`finances/${moneyPage}`, 'Finances', { cls: 'tab-right' }),
+      tab('scenarios', 'Scenarios'));
+  }
+  const tabKey = r => (r.tab === 'goal' ? `goal/${r.sub}` : r.tab === 'finances' ? `finances/${moneyPage}` : r.tab);
+
   function routeChrome(r) {
     route = r;
-    if (r.tab === 'money') moneyPage = r.sub;
-    for (const b of $$('.tabs button')) b.setAttribute('aria-selected', String(b.dataset.tab === r.tab));
+    if (r.tab === 'finances') moneyPage = r.sub;
     for (const v of $$('main > .view')) v.hidden = v.id !== `view-${r.tab}`;
+    renderTabs();
   }
 
   function applyRoute(r) {
     const moved = route.tab !== r.tab || route.sub !== r.sub;
     routeChrome(r);
-    renderWarnings();
     renderView();
     scheduleDrivers();
     if (moved) window.scrollTo(0, 0);
     requestAnimationFrame(() => Object.values(charts).forEach(c => c.draw()));
   }
 
-  // Older name, kept for the tests and the console.
-  const showTab = (name, sub) => navigate(sub ? (name === 'goals' ? `goal/${sub}` : `${name}/${sub}`) : name);
+  // For the tests and the console.
+  const showTab = (name, sub) => navigate(sub ? (name === 'goal' ? `goal/${sub}` : `${name}/${sub}`) : name);
   const currentTab = () => route.tab;
 
   // Draw whatever is on screen.
   function renderView() {
     const r = route;
     if (r.tab === 'home') renderHome();
-    if (r.tab === 'goals') {
-      $('#goalsList').hidden = !!r.sub;
-      $('#goalPage').hidden = !r.sub;
-      if (r.sub) renderGoalPage(r.sub);
-      else { renderGoalList(); renderDriversCard(); renderTimeline(); }
+    if (r.tab === 'goal') renderGoalPage(r.sub);
+    if (r.tab === 'finances') renderMoneyPage();
+    if (r.tab === 'scenarios') { renderScenarioList(); renderDriversCard(); renderIdeas(); renderExplorer(); if (compareDirty) runCompare(); }
+    renderInflationSwitches();
+  }
+
+  // ---- "Adjust for inflation": future amounts in today's money (on) or in the pounds of
+  //      each year (off). Only charts that look ahead have it; today's figures are the same either way.
+
+  function renderInflationSwitches() {
+    for (const box of $$('[data-inflation]')) {
+      if (box.closest('[hidden]')) continue;
+      box.replaceChildren(h('label', { class: 'switch small', title: 'On: amounts in later years are shown in today’s money, so £1 buys what £1 buys today. Off: the actual pounds of each year, which grow with prices.' },
+        h('input', { type: 'checkbox', role: 'switch', checked: real(), 'aria-label': 'Adjust for inflation', onchange: e => { ws.settings.realDollars = e.target.checked; save(); compareDirty = true; renderResults(); } }),
+        'Adjust for inflation'));
     }
-    if (r.tab === 'money') renderMoneyPage();
-    if (r.tab === 'outlook') { renderMC(); renderHistory(); }
-    if (r.tab === 'scenarios') { renderIdeas(); renderExplorer(); if (compareDirty) runCompare(); }
-    if (r.tab === 'review') { renderReviewIntro(); renderProgress(); }
+  }
+
+  // ---- notifications: the yearly review, figures getting old, saving a copy, plan checks
+
+  function notifications() {
+    const out = [];
+    const due = RV.due(ws);
+    const est = model.est;
+    const lastUpdate = [est.asOf, ...Object.values(est.reading).map(r => r.date)].sort().pop();
+    const days = daysSince(lastUpdate);
+    if (due.due) {
+      out.push({ id: 'review', icon: 'review', tone: 'accent', title: due.reason === 'behind' ? `Your plan still starts in ${plan().startYear}: time for a yearly review` : `Time for your ${due.year} yearly review`,
+        text: 'Swap the estimates for real numbers, see how close last year’s plan was, and roll every scenario on a year.', actions: [['Start review', () => openReview()]] });
+    } else if (days >= 30) {
+      out.push({ id: 'update', icon: 'clock', tone: 'accent', title: `Your figures are ${days >= 60 ? `${Math.round(days / 30.4)} months` : `${Math.round(days / 7)} weeks`} old`,
+        text: `Last updated ${fmtDate(lastUpdate)}. Update a few balances from your banking apps, or do a full review.`,
+        actions: [['Update balances', openUpdate], ['Full review', () => openReview()]] });
+    }
+    const saved = ws.settings.lastSaved;
+    if (!saved || daysSince(saved) >= 30) {
+      out.push({ id: 'save', icon: 'tip', tone: 'soft', title: saved ? `Last saved to a file ${sinceText(daysSince(saved))}` : 'Keep a copy of your plan',
+        text: 'Your plan lives in this browser. Save it to a file to keep it safe or to carry on on another computer.', actions: [['Save to a file', exportFile]] });
+    }
+    for (const w of model.warnings) out.push({ id: `w:${w}`, icon: 'warn', tone: 'warn', title: 'Check your plan', text: w, actions: [] });
+    return out;
+  }
+
+  function renderNotifications() {
+    const list = notifications();
+    const urgent = list.filter(n => n.tone !== 'soft').length;
+    const count = $('#notifyCount');
+    count.hidden = !urgent;
+    count.textContent = String(urgent);
+    $('#notifyBtn').setAttribute('aria-label', urgent ? `Notifications: ${urgent}` : 'Notifications');
+    $('#notifyBtn').classList.toggle('has-news', urgent > 0);
+    $('#notifyPop').replaceChildren(
+      h('p', { class: 'notify-head' }, 'Notifications'),
+      list.length ? h('ul', { class: 'notify-list' }, list.map(n => h('li', { class: `notify-item ${n.tone}`, 'data-notify': n.id },
+        h('span', { class: 'ins-ico' }, glyph(n.icon)),
+        h('div', {}, h('strong', {}, n.title), h('p', {}, n.text),
+          n.actions.length ? h('div', { class: 'add-row' }, n.actions.map(([label, fn], i) => h('button', { type: 'button', class: `btn small${i === 0 ? ' primary' : ''}`, onclick: () => { $('#notifyMenu').open = false; fn(); } }, label))) : null))))
+        : h('p', { class: 'sub' }, 'Nothing needs doing. Horizon will remind you when your figures are a month old and when the yearly review comes round.'));
   }
 
   function renderScenarioPicker() {
     const sel = $('#scenarioSelect');
     sel.replaceChildren(...ws.scenarios.map(s => h('option', { value: s.id, selected: s.id === ws.activeId }, s.name)));
+    const pill = $('#scenarioPill');
+    pill.hidden = ws.scenarios.length < 2;
+    pill.replaceChildren(h('span', { class: 'rv-k' }, 'Scenario'), h('strong', {}, scenario().name));
+    pill.title = 'Showing this scenario. Switch or compare in Scenarios.';
   }
 
   function afterScenarioChange() {
@@ -3702,13 +3717,9 @@
     $('#themeBtn').title = labels[t][1];
     requestAnimationFrame(() => {
       Object.values(charts).forEach(c => c.draw());
-      if (route.tab === 'money') renderPlan(); // item colours come from tokens
+      if (route.tab === 'finances') renderPlan(); // item colours come from tokens
       if (model) renderResults();
     });
-  }
-
-  function renderMoneyToggle() {
-    for (const b of $$('.seg button')) b.setAttribute('aria-pressed', String((b.dataset.real === '1') === real()));
   }
 
   function renderSavedNote() {
@@ -3717,13 +3728,14 @@
   }
 
   function renderResults() {
-    renderWarnings();
+    renderTabs();
     renderView();
-    if (route.tab === 'money' && moneyPage === 'income') updateIncomeTrends();
+    if (route.tab === 'finances' && moneyPage === 'income') updateIncomeTrends();
     updateIncomeFigures();
     updateAccountFigures();
-    renderMoneyToggle();
     renderSavedNote();
+    renderNotifications();
+    renderScenarioPicker();
     scheduleDrivers();
   }
 
@@ -3739,7 +3751,8 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     renderSavedNote();
     if (route.tab === 'home') renderHomeYear();
-    if (route.tab === 'review') renderReviewIntro();
+    if (route.tab === 'finances' && moneyPage === 'history') renderReviewIntro();
+    renderNotifications();
     toast('Saved to your downloads. To carry on on another computer, open Horizon there and use Data → Open a saved file.');
   }
 
@@ -3792,7 +3805,7 @@
       if (name) { name.scrollIntoView({ block: 'center' }); name.focus(); name.select(); }
       toast('A copy of the plan. Rename it here, then change anything in it: every edit applies to this scenario only.');
     });
-    for (const b of $$('.seg button')) b.addEventListener('click', () => { ws.settings.realDollars = b.dataset.real === '1'; save(); compareDirty = true; renderResults(); });
+    $('#scenarioPill').addEventListener('click', () => navigate('scenarios'));
     $('#themeBtn').addEventListener('click', () => {
       const order = ['auto', 'light', 'dark'];
       ws.settings.theme = order[(order.indexOf(ws.settings.theme) + 1) % 3];
@@ -3805,7 +3818,6 @@
     $('#importBtn').addEventListener('click', () => { $('#dataMenu').open = false; $('#importFile').click(); });
     $('#importFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); });
     $('#ovAddGoal').addEventListener('click', () => openGoalWizard());
-    $('#ovManageGoals').addEventListener('click', () => navigate('goals'));
     $('#blankBtn').addEventListener('click', () => {
       $('#dataMenu').open = false;
       if (!confirm('Start a blank plan? This replaces everything in Horizon. Save to a file first if you want to keep your data.')) return;
@@ -3813,7 +3825,7 @@
       const blank = E.normalizePlan({ startYear: E.currentYear(), asOf: today(), household: { region: 'scotland', people: [{ name: 'You', age: 35, retireAge: 65 }] }, accounts: [], income: [], expenses: [], events: [], goals: [] });
       ws = E.normalizeWorkspace({ scenarios: [{ id, name: 'My plan', plan: blank }], activeId: id, checkins: [], settings: ws.settings });
       afterImport();
-      navigate('money/assumptions');
+      navigate('finances/assumptions');
       toast('A blank plan, with figures as at today. Start with who it is for, then add accounts, income and spending; then add goals on Home.');
     });
     $('#resetBtn').addEventListener('click', () => {
@@ -3822,10 +3834,8 @@
       ws = E.defaultWorkspace();
       afterImport();
     });
-    document.addEventListener('click', e => { const m = $('#dataMenu'); if (m.open && !m.contains(e.target)) m.open = false; });
+    document.addEventListener('click', e => { for (const m of [$('#dataMenu'), $('#notifyMenu')]) if (m.open && !m.contains(e.target)) m.open = false; });
 
-    $('#runsSelect').addEventListener('change', e => { ws.settings.runs = parseInt(e.target.value, 10); refresh(); });
-    $('#rerollBtn').addEventListener('click', () => { ws.settings.seed = Math.floor(Math.random() * 2 ** 31); refresh(); });
 
     renderSweepLevers();
     $('#sweepRun').addEventListener('click', runSweep);
@@ -3848,7 +3858,6 @@
     $('#wizClose').addEventListener('click', () => $('#wizard').close());
     $('#wizForm').addEventListener('submit', e => e.preventDefault());
 
-    $('#addGoalBtn').addEventListener('click', () => openGoalWizard());
     $('#lifeBtn').addEventListener('click', openLifeWizard);
     $('#lwNext').addEventListener('click', lifeNext);
     $('#lwBack').addEventListener('click', () => { if (lw.step > 0) { lw.step--; renderLifeWizard(); } });

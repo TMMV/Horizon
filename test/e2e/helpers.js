@@ -18,18 +18,18 @@ async function openApp(page, hash = '') {
   return { problems, external };
 }
 
-// A top-level section, by clicking its tab.
+// A top-level tab: 'home', 'finances', 'scenarios' (goals have their own, see openGoal).
 async function tab(page, name) {
-  await page.click(`.tabs button[data-tab="${name}"]`);
+  await page.click(name === 'finances' ? '.tab-list button[data-tab^="finances/"]' : `.tab-list button[data-tab="${name}"]`);
   await page.waitForTimeout(150);
 }
 
-// Any page by its address: "money/income", "goal/<id>", "outlook"...
+// Any page by its address: "finances/income", "goal/<id>", "scenarios"...
 async function go(page, route) {
   const [top, sub] = route.split('/');
-  if (top === 'money' && sub) {
-    if (!(await page.locator('#view-money').isVisible())) await tab(page, 'money');
-    await page.click(`#moneyNav a[href="#money/${sub}"]`);
+  if (top === 'finances' && sub) {
+    if (!(await page.locator('#view-finances').isVisible())) await tab(page, 'finances');
+    await page.click(`#moneyNav a[href="#finances/${sub}"]`);
     await page.waitForTimeout(150);
     return;
   }
@@ -37,11 +37,16 @@ async function go(page, route) {
   await page.waitForTimeout(150);
 }
 
-// Open a goal's own page from the Goals list.
+// Open a goal's own tab from its badge on Home.
 async function openGoal(page, text) {
-  await tab(page, 'goals');
-  await page.locator('#goalList .gl-row', { hasText: text }).first().click();
+  await tab(page, 'home');
+  await page.locator('#ovGoalStrip .goal-tile', { hasText: text }).first().click();
   await page.waitForTimeout(150);
+}
+
+// Show a chart's numbers (its Chart/Table switch).
+async function asTable(locator) {
+  await locator.locator('.chart-tools button:has-text("Table")').first().click();
 }
 
 // Wait for the debounced recompute after an edit.
@@ -49,4 +54,4 @@ async function settle(page) {
   await page.waitForTimeout(400);
 }
 
-module.exports = { APP_URL, openApp, tab, go, openGoal, settle };
+module.exports = { APP_URL, openApp, tab, go, openGoal, asTable, settle };

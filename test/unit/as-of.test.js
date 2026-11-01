@@ -140,3 +140,13 @@ test('each amount and emergency goal gets its own range in the simulations', () 
   }
   assert.equal(mc.goalBands[p.goals.find(x => x.type === 'retire').id], undefined);
 });
+
+test('the example plan’s figures are as at the most recent 1 September', () => {
+  assert.equal(E.lastSeptember(new Date(2026, 10, 1)), '2026-09-01');
+  assert.equal(E.lastSeptember(new Date(2027, 2, 15)), '2026-09-01');
+  assert.equal(E.lastSeptember(new Date(2027, 8, 1)), '2027-09-01');
+  const p = E.defaultPlan();
+  assert.equal(p.asOf, E.lastSeptember());
+  assert.equal(p.startYear, +p.asOf.slice(0, 4));
+  assert.equal(E.defaultPlan(2030).asOf, '2030-09-01');
+});
