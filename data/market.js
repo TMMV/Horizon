@@ -3,13 +3,13 @@
 // "suggested" values are long-run planning assumptions derived from the latest data,
 // not forecasts. The user chooses whether to apply them.
 window.MARKET_DATA = {
-  "asOf": "2026-11-01",
-  "updatedBy": "script",
+  "asOf": "2026-11-02",
+  "updatedBy": "github-actions",
   "series": {
     "bankRate": {
       "label": "Bank of England Bank Rate",
       "value": 3.75,
-      "date": "2026-10-29",
+      "date": "2026-10-30",
       "source": "https://www.bankofengland.co.uk/monetary-policy/the-interest-rate-bank-rate"
     },
     "cpi": {
@@ -20,8 +20,8 @@ window.MARKET_DATA = {
     },
     "gilt10y": {
       "label": "10-year gilt yield",
-      "value": 5.31,
-      "date": "2026-10-28",
+      "value": 5.26,
+      "date": "2026-10-29",
       "source": "https://www.bankofengland.co.uk/statistics/yield-curves"
     }
   },
