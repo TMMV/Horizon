@@ -16,10 +16,10 @@ You set the plan up once, then review it once a year.
 
 | Tab | What's there |
 |---|---|
-| **Home** | Your portfolio *today*: every account, estimated from your last figures (or a balance you updated since), with your estimated net worth and the change since your last update. Your goals as badges, where you're heading, what to invest each month this year, what's coming up, and suggestions worth a look. |
+| **Home** | Your portfolio *today*: a donut and every account, grouped by when the money can be used (available now, locked in pensions and Lifetime ISAs, property, owed), estimated from your last figures (or a balance you updated since), with your estimated net worth and the change since your last update. The chart of where you're heading shows each part growing and adding up to your net worth, by account or by access, up to an age you choose (85 by default; the plan itself runs to each person's end age). Your goals as badges, where you're heading, what to invest each month this year, what's coming up, and suggestions worth a look. |
 | **One tab per goal** | How it's tracking (its range of outcomes against the target), the chance by year, what moves it, what it would take, levers to try and how it does if history repeated. The retirement tab also replays the plan through every starting year since 1928. Add a goal with **+**. |
-| **Finances** | All your inputs, with their prediction alongside and a "What your changes do" panel that shows every goal's chance move as you edit: **Portfolio** (accounts and how each grows), **Income**, **Spending** (with **Future costs**: children, cars, home repairs, care), **Cash flow & tax**, **Assumptions** (household, saving strategy, markets, tax rules and how things vary in the simulations) and **Past reviews**. At the top: the date your figures are as at. |
-| **Scenarios** | Every scenario against every goal in one table (chance and expected year, compared with the one you have open), plus ready-made what-ifs to add. |
+| **Finances** | All your inputs, with their prediction alongside and a "What your changes do" panel that shows every goal's chance move as you edit: **Portfolio** (accounts and how each grows), **Income**, **Spending** (with **Future costs**: children, cars, home repairs, care), **Saving & investing** (your own monthly amounts for Lifetime ISAs, ISAs, a general account and extra pension, or automatic; a suggested UK order with amounts for your household; and where the money goes year by year), **Cash flow & tax**, **Assumptions** (household, markets, tax rules and how things vary in the simulations) and **Past reviews**. At the top: the date your figures are as at. |
+| **Scenarios** | Every scenario against every goal in one table (chance and expected year, compared with the one you have open), common choices compared side by side, and ready-made what-ifs to add. |
 
 The **bell** at the top reminds you when it's time for the yearly review and when your figures
 are a month old (update a few balances, or do a full review). Charts that look ahead have an **Adjust for inflation** switch: on, future amounts are in
@@ -73,8 +73,11 @@ app with its date; it shows on Home and feeds the next review.
   spreadsheet-style table: assumptions, income, spending, tax per person and each account's
   roll-forward (start + growth + in − out = end, checked on every
   row), each downloadable as CSV. Income items show their typical trend range.
-- **Scenarios.** Duplicate the plan and change anything, or run a range on one lever
-  (mortgage overpayment share, retirement age, spending, returns, inflation) and compare.
+- **Scenarios.** Duplicate the plan and change anything, or add a ready-made what-if.
+  "Compare two choices" works out common decisions on every goal without saving anything:
+  salary sacrifice or a Lifetime ISA (for the same take-home pay), pension or ISA, overpaying
+  the mortgage or investing, retiring earlier or later, weaker or stronger markets, and the
+  mortgage rate after a fix. Suggestions on Home link straight to the matching comparison.
 - **Yearly review (every October).** A guided walk through every balance, income and
   spending item, each prefilled with Horizon's estimate for the review date (or a balance you
   updated since) so you only correct what changed. The review date becomes the date your

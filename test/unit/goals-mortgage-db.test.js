@@ -73,7 +73,7 @@ test('defined benefit estimate from the scheme, year joined and salary', () => {
   near(e.perYear, 49323 / 75, 0.01);
   near(e.builtUp, 10 * 49323 / 75, 0.5);
   assert.equal(e.lumpMultiple, 3);
-  assert.equal(e.pensionAge, 65);
+  assert.equal(e.pensionAge, null, 'USS is paid from State Pension age');
   const g = E.estimateDb({ scheme: 'uss', joined: 2016, salary: 49323, startYear: 2026, realGrowth: 1 });
   assert.ok(g.builtUp < e.builtUp, 'earlier salaries were lower');
   const l = E.estimateDb({ scheme: 'lgps', joined: 2020, salary: 30000, startYear: 2026, partTime: 50 });
@@ -137,4 +137,66 @@ test('gilts held in an ISA pay back into the ISA without using allowance', () =>
   assert.equal(t, k);
   assert.ok(proj.rows[t + 1].isa > base.rows[t + 1].isa, 'more ends up sheltered');
   assert.ok(proj.rows[t + 1].gia < base.rows[t + 1].gia, 'less in the taxable account');
+});
+
+test('keeping the end date: the payment follows the rate, so the mortgage ends on time in every simulation', () => {
+  const p = E.clonePlan(E.defaultPlan(2026));
+  const d = p.accounts.find(a => a.type === 'debt');
+  Object.assign(d, { fixedUntil: 2027, afterFix: 'term', rateAfterFix: null });
+  const q = E.normalizePlan(p);
+  const end = E.debtFreeYear(E.project(q));
+  const mc = E.monteCarlo(q, 300, 3);
+  assert.equal(mc.debtFreeByYear[end - 2026], 1, 'paid off by the expected year in every run');
+  // Keeping the payment instead lets the end date move with rates.
+  d.afterFix = 'payment';
+  const mc2 = E.monteCarlo(E.normalizePlan(p), 300, 3);
+  assert.ok(mc2.debtFreeByYear[end - 2026] < 1);
+});
+
+test('a retirement goal can be about either person', () => {
+  const p = E.clonePlan(E.defaultPlan(2026));
+  p.goals.push({ type: 'retire', owner: 'p2', age: 60 });
+  const q = E.normalizePlan(p);
+  const g = q.goals.find(x => x.owner === 'p2');
+  assert.equal(E.goalTitle(g, q), 'Sam retires at 60');
+  assert.equal(q.goals.find(x => x.type === 'retire' && x.owner === 'p1').age, 55);
+  const proj = E.project(q);
+  const res = E.evaluateGoals(q, proj, E.monteCarlo(q, 200, 1), { runs: 200, seed: 1 }).find(r => r.goal.id === g.id);
+  assert.equal(res.expectedYear, 2026 + 60 - 36);
+  // Only Sam retires later for this goal: the same as shifting Sam alone.
+  const alone = E.successRate(E.shiftRetirement(q, 5, 'p2'), 200, 1);
+  assert.equal(res.probability, alone);
+  assert.equal(E.shiftRetirement(q, 5, 'p2').household.people[0].retireAge, 55);
+  // An unknown owner falls back to the first person.
+  assert.equal(E.normalizePlan({ ...q, goals: [{ type: 'retire', owner: 'p9' }] }).goals[0].owner, 'p1');
+});
+
+test('your own monthly ISA amount: the rest stays in cash', () => {
+  const p = E.clonePlan(E.defaultPlan(2026));
+  const base = E.monthlyPlan(E.project(E.normalizePlan(p)));
+  p.strategy.isaMonthly = 200;
+  p.strategy.giaMonthly = 0;
+  const m = E.monthlyPlan(E.project(E.normalizePlan(p)));
+  assert.ok(Math.abs(m.isa - 200) < 0.01);
+  assert.equal(m.gia, 0);
+  assert.ok(Math.abs(m.cash - (base.surplus - base.cash - 200) - base.cash) < 1, 'the rest goes to cash');
+  // Automatic again: the same as before.
+  assert.equal(E.normalizePlan({ ...p, strategy: { ...p.strategy, isaMonthly: '' } }).strategy.isaMonthly, null);
+});
+
+test('USS taken before its Normal Pension Age is cut by USS early retirement factors', () => {
+  const p = E.clonePlan(E.defaultPlan(2026));
+  p.household.people[1].statePensionAge = 68;
+  p.income.push({ name: 'USS', owner: 'p2', kind: 'dbpension', tax: 'uk', amount: 6000, dbAccrual: 600, startRef: 'age', startAge: 68, endRef: 'end', freq: 'year', lumpMultiple: 3, dbScheme: 'uss' });
+  const q = E.normalizePlan(p);
+  const db = q.income.find(i => i.kind === 'dbpension');
+  const sam = q.household.people[1];
+  assert.deepEqual(E.dbEarly(db, sam), { npa: 68, years: 0, factor: 1 });
+  assert.equal(E.dbEarly({ ...db, startAge: 60 }, sam).factor, 0.675);   // 8 years early
+  assert.equal(E.dbEarly({ ...db, startAge: 67 }, sam).factor, 0.948);
+  const full = E.dbPensionAt(db, q, 68 - sam.age);
+  const early = E.dbPensionAt({ ...db, startAge: 60 }, q, 68 - sam.age);
+  near(early / full, 0.675, 1e-9);
+  // Other schemes are not reduced here.
+  assert.equal(E.dbEarly({ ...db, dbScheme: 'lgps', startAge: 60 }, sam).factor, 1);
 });

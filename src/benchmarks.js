@@ -194,7 +194,7 @@
       const share = Math.min(1, Math.max(0, (top.ani - R.CHILD_BENEFIT.chargeFrom) / (R.CHILD_BENEFIT.chargeTo - R.CHILD_BENEFIT.chargeFrom)));
       const est = top.estimated ? ' (estimated from take-home pay)' : '';
       if (share <= 0) out.push({ id: 'child-benefit', tone: 'good', title: `Child Benefit: ${money(cb)} a year`, text: `Both incomes are under ${money(R.CHILD_BENEFIT.chargeFrom)}, so none of it is clawed back. Claim it if you don't already.` });
-      else if (share < 1) out.push({ id: 'child-benefit', tone: 'tip', title: `${Math.round(share * 100)}% of Child Benefit is clawed back`, text: `${top.name}'s income is about ${money(top.ani)}${est}. Each £1,000 paid into a pension (or by salary sacrifice) returns ${money(cb / 20)} of Child Benefit on top of the tax relief.`, action: 'explorer' });
+      else if (share < 1) out.push({ id: 'child-benefit', tone: 'tip', title: `${Math.round(share * 100)}% of Child Benefit is clawed back`, text: `${top.name}'s income is about ${money(top.ani)}${est}. Each £1,000 paid into a pension (or by salary sacrifice) returns ${money(cb / 20)} of Child Benefit on top of the tax relief.`, action: 'compare:pension-isa' });
       else out.push({ id: 'child-benefit', tone: 'tip', title: 'Child Benefit is fully clawed back', text: `${top.name}'s income is about ${money(top.ani)}${est}, over ${money(R.CHILD_BENEFIT.chargeTo)}. Still register: it protects State Pension credits for a parent with low earnings and gives the child a National Insurance number.` });
     }
     const tfcKids = kids.filter(a => a <= R.TAX_FREE_CHILDCARE.maxAge).length;
@@ -204,7 +204,7 @@
       const eligible = m.people.every(p => p.ani < R.TAX_FREE_CHILDCARE.incomeLimit);
       const gain = Math.min(childcare * R.TAX_FREE_CHILDCARE.topUp, R.TAX_FREE_CHILDCARE.capPerChild * tfcKids);
       if (eligible) out.push({ id: 'tfc', tone: 'tip', title: `Tax-Free Childcare could save about ${money(gain)} a year`, text: `On ${money(childcare)} a year of childcare and clubs, if the providers are registered: the government pays 20%, up to ${money(R.TAX_FREE_CHILDCARE.capPerChild)} per child under 12. Each parent must earn under ${money(R.TAX_FREE_CHILDCARE.incomeLimit)}.` });
-      else out.push({ id: 'tfc', tone: 'warn', title: 'Over £100k loses Tax-Free Childcare', text: `One income is over ${money(R.TAX_FREE_CHILDCARE.incomeLimit)}, which rules out up to ${money(gain)} a year of Tax-Free Childcare. Pension contributions that bring it back under £100k restore it.`, action: 'explorer' });
+      else out.push({ id: 'tfc', tone: 'warn', title: 'Over £100k loses Tax-Free Childcare', text: `One income is over ${money(R.TAX_FREE_CHILDCARE.incomeLimit)}, which rules out up to ${money(gain)} a year of Tax-Free Childcare. Pension contributions that bring it back under £100k restore it.`, action: 'compare:pension-isa' });
     } else if (!kids.length && plan.expenses.some(e => { const q = questionFor(e); return q && q.step === 'children'; }) && !(plan.life && plan.life.children)) {
       out.push({ id: 'kids-unknown', tone: 'tip', title: 'Tell Horizon about your children', text: 'With their ages, Future costs (in Spending) plans school, university and help with a first home, and the plan check can test Child Benefit and Tax-Free Childcare.', action: 'life' });
     }
@@ -213,7 +213,7 @@
     if (taxOn) {
       for (const p of m.people) {
         if (p.ani > R.PA_TAPER_START && p.ani < R.PA_TAPER_START + 2 * R.PERSONAL_ALLOWANCE) {
-          out.push({ id: `trap-${p.name}`, tone: 'warn', title: `${p.name} is in the £100k tax trap`, text: `Between £100,000 and £125,140 the personal allowance is withdrawn, so each extra £1 is taxed at over 60%. Paying about ${money(p.ani - R.PA_TAPER_START)} more into a pension would avoid it.`, action: 'explorer' });
+          out.push({ id: `trap-${p.name}`, tone: 'warn', title: `${p.name} is in the £100k tax trap`, text: `Between £100,000 and £125,140 the personal allowance is withdrawn, so each extra £1 is taxed at over 60%. Paying about ${money(p.ani - R.PA_TAPER_START)} more into a pension would avoid it.`, action: 'compare:pension-isa' });
         }
       }
     }
@@ -221,7 +221,7 @@
     // 5. ISA allowance
     const allowance = s.isaAllowance * plan.household.people.length;
     if (r0.toGia > 100) {
-      out.push({ id: 'isa-full', tone: 'tip', title: `${money(r0.toGia)} a year goes into a taxable account`, text: `Your ISAs are full (${money(allowance)}). Extra pension contributions get tax relief at your highest rate; a general account pays tax on gains when you sell.`, action: 'explorer' });
+      out.push({ id: 'isa-full', tone: 'tip', title: `${money(r0.toGia)} a year goes into a taxable account`, text: `Your ISAs are full (${money(allowance)}). Extra pension contributions get tax relief at your highest rate; a general account pays tax on gains when you sell.`, action: 'compare:pension-isa' });
     } else if (r0.gia > 1000 && r0.toIsa < allowance - 1000) {
       out.push({ id: 'bed-isa', tone: 'tip', title: 'Move the general account into ISAs', text: `You have ${money(r0.gia)} outside an ISA and unused allowance this year. "Bed and ISA" moves up to ${money(s.isaAllowance)} a person each tax year so future growth is tax-free.` });
     }
@@ -230,11 +230,11 @@
     const debt = plan.accounts.find(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
     if (debt) {
       const ret = proj.pre.econ.ret[0] * 100;
-      if (debt.rate >= ret - 1) out.push({ id: 'overpay', tone: 'tip', title: `Overpaying the mortgage earns a sure ${debt.rate}%`, text: `That is close to the ${ret.toFixed(1)}% expected from investing, without the risk. Try the overpayment slider on the Goals tab.`, action: 'explorer' });
-      else out.push({ id: 'overpay', tone: 'info', title: `Investing is expected to beat overpaying (${ret.toFixed(1)}% vs ${debt.rate}%)`, text: `Overpaying is a guaranteed ${debt.rate}% and clears the debt sooner. The Goals tab shows the trade-off on every goal.`, action: 'explorer' });
+      if (debt.rate >= ret - 1) out.push({ id: 'overpay', tone: 'tip', title: `Overpaying the mortgage earns a sure ${debt.rate}%`, text: `That is close to the ${ret.toFixed(1)}% expected from investing, without the risk. Scenarios compares the two on every goal.`, action: 'compare:overpay-invest' });
+      else out.push({ id: 'overpay', tone: 'info', title: `Investing is expected to beat overpaying (${ret.toFixed(1)}% vs ${debt.rate}%)`, text: `Overpaying is a guaranteed ${debt.rate}% and clears the debt sooner. Scenarios compares the two on every goal.`, action: 'compare:overpay-invest' });
       if (debt.fixedUntil && debt.fixedUntil <= plan.startYear + 1) {
         const after = debt.rateAfterFix === null ? `the same ${debt.rate}%` : `${debt.rateAfterFix}%`;
-        out.push({ id: `remortgage-${debt.fixedUntil}`, tone: 'tip', title: `Mortgage fix ends ${debt.fixedUntil}`, text: `The plan assumes ${after} afterwards. Compare deals about six months before to avoid the lender’s standard variable rate, and try other rates with the “Rate after the fix ends” slider or the Scenarios range.`, action: 'accounts' });
+        out.push({ id: `remortgage-${debt.fixedUntil}`, tone: 'tip', title: `Mortgage fix ends ${debt.fixedUntil}`, text: `The plan assumes ${after} afterwards. Compare deals about six months before to avoid the lender’s standard variable rate. Scenarios shows what a lower or higher rate does to each goal.`, action: 'compare:mortgage-rate' });
       }
     }
 
@@ -260,8 +260,8 @@
     const eligible = plan.household.people.filter(x => x.age < R.LISA.openBefore && !lisaOwners.has(x.id));
     if (eligible.length) {
       const house = plan.goals.some(g => g.icon === 'home');
-      out.push({ id: 'lisa', tone: 'tip', title: 'A Lifetime ISA adds a 25% bonus', action: 'accounts',
-        text: `${eligible.map(x => x.name).join(' and ')} can open one before turning 40: up to ${money(R.LISA.maxContribution)} a year (within the ISA allowance) gets ${money(R.LISA.maxContribution * R.LISA.bonus)} from the government, until 50. It can be used from 60, or ${house ? 'for your first home (up to £450,000)' : 'for a first home up to £450,000'}; other withdrawals lose 25%.` });
+      out.push({ id: 'lisa', tone: 'tip', title: 'A Lifetime ISA adds a 25% bonus', action: 'compare:sacrifice-lisa',
+        text: `${eligible.map(x => x.name).join(' and ')} can open one before turning 40: up to ${money(R.LISA.maxContribution)} a year (within the ISA allowance) gets ${money(R.LISA.maxContribution * R.LISA.bonus)} from the government, until 50. It can be used from 60, or ${house ? 'for your first home (up to £450,000)' : 'for a first home up to £450,000'}; other withdrawals lose 25%. Scenarios compares it with salary sacrifice into a pension.` });
     }
 
     // 10. Life check-up

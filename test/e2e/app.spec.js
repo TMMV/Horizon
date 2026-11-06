@@ -23,6 +23,13 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#homePortfolio .pf-keys')).toHaveCount(0);
     await expect(page.locator('#homePortfolio .src')).toHaveCount(0);
     await expect(page.locator('#homePortfolio')).toContainText('Estimated net worth today');
+    // A donut, and the accounts grouped by when the money can be used.
+    await expect(page.locator('#homePortfolio .pf-donut circle')).toHaveCount(6);
+    await expect(page.locator('#homePortfolio .pf-donut')).toContainText('Available now');
+    await expect(page.locator('#homePortfolio .pf-row.access')).toHaveCount(4);
+    await expect(page.locator('#homePortfolio .pf-row.access.now')).toContainText('% of what you own');
+    await expect(page.locator('#homePortfolio .pf-row.access.locked')).toContainText('Pensions from 57');
+    await expect(page.locator('#homePortfolio .pf-row.access.property')).toContainText('selling');
     await expect(page.locator('#homePortfolio')).toContainText('from your figures as at');
     await expect(page.locator('#ovGoalStrip .goal-tile:not(.add)')).toHaveCount(3);
     await expect(page.locator('#ovGoalStrip .goal-tile').first()).toContainText('%');
@@ -137,6 +144,8 @@ test.describe('Horizon app', () => {
       await tab(page, 'home');
       await page.click('#ovAddGoal');
       await noNull();
+      // Goals already set (mortgage-free) or covered by another (financial independence) are not offered.
+      if (!(await page.locator(`.goal-option:has-text("${kind}")`).count())) { await page.click('#gwClose'); continue; }
       await page.click(`.goal-option:has-text("${kind}")`);
       await page.waitForTimeout(400);
       await noNull();
@@ -202,7 +211,7 @@ test.describe('Horizon app', () => {
   });
 
   test('accepts amounts like 25k and formats them on blur', async ({ page }) => {
-    await go(page, 'finances/assumptions');
+    await go(page, 'finances/saving');
     const input = page.locator('#sec-strategy input').first();
     await input.fill('25k');
     await input.blur();
@@ -331,6 +340,7 @@ test.describe('Horizon app', () => {
 
   test('goal wizard: save trade-offs as a new scenario', async ({ page }) => {
     await tab(page, 'home');
+    await page.evaluate(() => { const p = window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan; p.goals = p.goals.filter(g => g.type !== 'debtFree'); window.__horizon.refresh(); });   // a mortgage goal is only offered when there isn't one
     await page.click('#ovAddGoal');
     await page.click('.goal-option:has-text("Mortgage-free")');
     await page.click('#gwNext');
@@ -342,7 +352,7 @@ test.describe('Horizon app', () => {
     const ws = await page.evaluate(() => window.__horizon.ws);
     expect(ws.scenarios[0].plan.strategy.overpayPct).toBe(0);
     expect(ws.scenarios[1].plan.strategy.overpayPct).toBe(50);
-    expect(ws.scenarios[1].plan.goals.length).toBe(4);
+    expect(ws.scenarios[1].plan.goals.length).toBe(3);
   });
 
   test('edit and remove a goal', async ({ page }) => {
@@ -372,11 +382,11 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#gpApply')).toBeDisabled();
   });
   test('money: every page has its inputs, a prediction and a table, and accounts add up', async ({ page }) => {
-    for (const [sub, box] of [['assumptions', '#mpAssumptions'], ['income', '#mpIncome'], ['spending', '#mpSpending'], ['cashflow', '#mpTax'], ['portfolio', '#mpPortfolio']]) {
+    for (const [sub, box] of [['assumptions', '#mpAssumptions'], ['income', '#mpIncome'], ['spending', '#mpSpending'], ['saving', '#mpSaving'], ['cashflow', '#mpTax'], ['portfolio', '#mpPortfolio']]) {
       await go(page, `finances/${sub}`);
       await asTable(page.locator(box));
       await expect(page.locator(`${box} .chart-table tbody tr`).first()).toBeVisible();
-      await expect(page.locator(`${box} .explain`)).toBeVisible();
+      await expect(page.locator(`${box} .explain`).first()).toBeVisible();
       await expect(page.locator('#asOfBar')).toContainText('Your figures are as at');
     }
     await expect(page.locator('#cfChart canvas')).toBeHidden();
@@ -557,7 +567,7 @@ test.describe('Horizon app', () => {
   });
 
   test('spare cash setting is in the saving strategy', async ({ page }) => {
-    await go(page, 'finances/assumptions');
+    await go(page, 'finances/saving');
     const sw = page.locator('#sec-strategy label.switch:has-text("Invest cash above the buffer") input');
     await expect(sw).toBeChecked();
     await sw.uncheck();
@@ -705,7 +715,9 @@ test.describe('Horizon app', () => {
     expect(p.household.people[0].retireAge).toBe(58);
     expect(p.strategy.retireSpending).toBe(43900);
     expect(p.expenses.find(e => e.key === 'life:travel').amount).toBe(5000);
-    expect(p.goals.some(g => g.type === 'retire' && g.age === 58)).toBe(true);
+    // Alex's retirement goal moves to 58; the new goal is Sam's.
+    expect(p.goals.some(g => g.type === 'retire' && g.owner === 'p1' && g.age === 58)).toBe(true);
+    expect(p.goals.some(g => g.type === 'retire' && g.owner === 'p2' && g.age === 55)).toBe(true);
   });
 
   test('emergency fund goal sets the cash buffer', async ({ page }) => {
@@ -768,7 +780,7 @@ test.describe('Horizon app', () => {
     expect(it.dbAccrual).toBe(600);
     expect(it.amount).toBeGreaterThan(5000);
     expect(it.lumpMultiple).toBe(3);
-    expect(it.startAge).toBe(65);
+    expect(it.startAge).toBe(68);   // USS pays from State Pension age
   });
 
   test('goals: own colours and badges on the home page, and what moves them', async ({ page }) => {
@@ -837,6 +849,96 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#compareResults .sc-table tbody tr.open')).toContainText('Market crash', { timeout: 30000 });
     await expect(page.locator('#compareResults')).not.toContainText('null');
   });
+
+  test('goal choices: nothing offered twice, and retirement shows what retiring early costs', async ({ page }) => {
+    await page.click('#ovAddGoal');
+    const opts = page.locator('#gwBody .goal-option');
+    await expect(opts.filter({ hasText: 'Mortgage-free' })).toHaveCount(0);        // already a goal
+    await expect(opts.filter({ hasText: 'Financial independence' })).toHaveCount(0); // retirement covers it
+    await expect(opts.filter({ hasText: 'Plan your retirement' })).toContainText('Sam’s retirement');
+    await expect(opts.filter({ hasText: 'Emergency fund' })).toHaveCount(1);
+    await page.click('#gwClose');
+    await openGoal(page, 'retires at');
+    await expect(page.locator('#gpTradeoffs')).toContainText('No State Pension for 13 years');
+    await expect(page.locator('#gpTradeoffs')).toContainText('can’t be drawn until 57');
+    await expect(page.locator('#gpFlows canvas')).toBeVisible();
+    await expect(page.locator('#gpFlows')).toContainText('ISAs last');
+  });
+
+  test('home chart: by account or by access, and how far ahead to show', async ({ page }) => {
+    await expect(page.locator('#ovGroup button[data-by="type"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.click('#ovGroup button[data-by="access"]');
+    await expect(page.locator('#ovLegend')).toContainText('Available now');
+    await expect(page.locator('#ovLegend')).toContainText('Pensions & Lifetime ISAs');
+    await expect(page.locator('#ovChartSub')).toContainText('add up to your net worth');
+    // Charts stop at 85 by default; the table still has every year.
+    const sel = page.locator('#view-home .show-to select');
+    await expect(sel).toHaveValue('85');
+    expect(await page.evaluate(() => { const p = window.__horizon.ws.scenarios[0].plan; return window.Chart.until - (p.startYear + 85 - p.household.people[0].age); })).toBe(0);
+    await sel.selectOption('0');
+    expect(await page.evaluate(() => window.Chart.until)).toBeNull();
+    expect(await page.evaluate(() => window.__horizon.ws.settings.showTo)).toBe(0);
+  });
+
+  test('saving & investing: set your own amounts, with suggestions beside them', async ({ page }) => {
+    await go(page, 'finances/saving');
+    await expect(page.locator('#sec-saving')).toContainText('a month is left over');
+    await expect(page.locator('#mpSaving .advice li').first()).toContainText('Emergency fund');
+    await expect(page.locator('#mpSaving .advice')).toContainText('Lifetime ISA');
+    await expect(page.locator('#mpSaving .advice')).toContainText('Pension for Alex');
+    await expect(page.locator('#mpSaving canvas')).toBeVisible();
+    // A set ISA amount: the rest goes to cash.
+    await page.locator('#sec-saving select[aria-label^="ISAs"]').selectOption('set');
+    const isa = page.locator('#sec-saving input[aria-label="ISAs a month"]');
+    await isa.fill('300');
+    await settle(page);
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.strategy.isaMonthly)).toBe(300);
+    await expect(page.locator('[data-flow="isaMonthly"]')).toContainText('£300 a month');
+    // The general account (still automatic) takes the rest; set it to nothing and the rest stays in cash.
+    await expect(page.locator('[data-flow="giaMonthly"]')).not.toContainText('£0 a month');
+    await page.locator('#sec-saving select[aria-label^="General investment"]').selectOption('set');
+    await page.locator('#sec-saving input[aria-label="General investment account a month"]').fill('0');
+    await settle(page);
+    await expect(page.locator('[data-flow="cash"]')).toContainText('goes to cash');
+    // A Lifetime ISA can be added from here.
+    await page.click('#sec-saving button:has-text("Lifetime ISA for Alex")');
+    await settle(page);
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.accounts.some(a => a.type === 'lisa' && a.owner === 'p1'))).toBe(true);
+    // A suggestion opens its comparison.
+    await page.locator('#mpSaving .advice button:has-text("Compare pension or ISA")').click();
+    await expect(page.locator('#cmpGrid [data-compare="pension-isa"]')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('scenarios: compare two choices, reached from a suggestion on Home', async ({ page }) => {
+    // The Lifetime ISA suggestion leads to the salary sacrifice comparison.
+    const more = page.locator('#ovInsights button:has-text("Show all")');
+    if (await more.count()) await more.click();
+    await page.locator('#ovInsights [data-insight="lisa"] button:has-text("Compare in Scenarios")').click();
+    await expect(page.locator('#view-scenarios')).toBeVisible();
+    await expect(page.locator('#cmpGrid [data-compare="sacrifice-lisa"]')).toHaveAttribute('aria-pressed', 'true');
+    const rows = page.locator('#cmpResult .cmp-table tbody tr');
+    await expect(rows).toHaveCount(3, { timeout: 30000 });
+    await expect(rows.nth(0)).toContainText('As now');
+    await expect(rows.nth(1)).toContainText('Lifetime ISA');
+    await expect(rows.nth(2)).toContainText('Salary sacrifice');
+    await expect(rows.nth(2)).toContainText('for £4,000 less take-home pay');
+    await expect(rows.nth(1)).toContainText('pts');
+    await expect(page.locator('#cmpResult thead')).toContainText('Savings & pensions when Alex retires');
+    // Nothing is saved until asked.
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios.length)).toBe(1);
+    await page.click('#cmpKeep');
+    await expect(page.locator('#cmpKeep')).toBeDisabled();
+    const names = await page.evaluate(() => window.__horizon.ws.scenarios.map(s => s.name));
+    expect(names).toEqual(['Base plan', 'Base plan: Lifetime ISA', 'Base plan: Salary sacrifice']);
+    await expect(page.locator('#compareResults .sc-table tbody tr')).toHaveCount(3, { timeout: 30000 });
+    // Another comparison; options that match the plan already are left out.
+    await page.click('#cmpGrid [data-compare="overpay-invest"]');
+    await expect(rows).toHaveCount(2, { timeout: 30000 });
+    await expect(rows.nth(1)).toContainText('Overpay with all of it');
+    await page.click('#cmpGrid [data-compare="overpay-invest"]');
+    await expect(page.locator('#cmpResult')).toBeEmpty();
+    await expect(page.locator('#view-scenarios')).not.toContainText('null');
+  });
   test('start a blank plan', async ({ page }) => {
     await page.click('#dataMenu summary');
     await page.click('#blankBtn');
@@ -883,7 +985,7 @@ test.describe('Horizon app', () => {
     await page.evaluate(() => { window.__horizon.ws.scenarios[0].plan.household.people[0].extraPension = 200; window.__horizon.refresh(); });
     const on = await page.evaluate(() => window.__horizon.model.proj.rows[0].pensionRelief);
     expect(on).toBeGreaterThan(0);
-    await go(page, 'finances/assumptions');
+    await go(page, 'finances/saving');
     await page.locator('#sec-strategy label.switch:has-text("Claim higher-rate relief") input').uncheck();
     await settle(page);
     expect(await page.evaluate(() => window.__horizon.model.proj.rows[0].pensionRelief)).toBe(0);
@@ -922,7 +1024,7 @@ test.describe('Horizon app', () => {
     await download.saveAs(file);
     const data = JSON.parse(fs.readFileSync(file, 'utf8'));
     expect(data.scenarios).toHaveLength(2);
-    expect(Object.keys(data.settings).sort()).toEqual(['confidence', 'lastSaved', 'realDollars', 'runs', 'seed', 'theme']);
+    expect(Object.keys(data.settings).sort()).toEqual(['confidence', 'lastSaved', 'realDollars', 'runs', 'seed', 'showTo', 'theme']);
     expect(data.settings.lastSaved).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     await expect(page.locator('#savedNote')).toContainText('Last saved to a file');
     await expect(page.locator('#view-home')).not.toContainText('Saved to a file');
@@ -1044,13 +1146,18 @@ test.describe('mobile layout', () => {
   test('every page fits a phone screen', async ({ page }) => {
     const tracker = await openApp(page);
     const goals = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.goals.map(g => g.id));
-    for (const name of ['home', ...goals.map(g => `goal/${g}`), 'finances/portfolio', 'finances/income', 'finances/spending', 'finances/cashflow', 'finances/assumptions', 'finances/history', 'scenarios']) {
+    for (const name of ['home', ...goals.map(g => `goal/${g}`), 'finances/portfolio', 'finances/income', 'finances/spending', 'finances/saving', 'finances/cashflow', 'finances/assumptions', 'finances/history', 'scenarios']) {
       await go(page, name);
       await page.waitForTimeout(500);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       expect(overflow, `${name} overflows by ${overflow}px`).toBeLessThanOrEqual(0);
       expect(await cropped(page), `${name}: cut off on the right`).toEqual([]);
     }
+    // A comparison open on Scenarios.
+    await page.click('#cmpGrid [data-compare="sacrifice-lisa"]');
+    await expect(page.locator('#cmpResult .cmp-table tbody tr')).toHaveCount(3, { timeout: 30000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+    expect(await cropped(page), 'comparison: cut off on the right').toEqual([]);
     expect(tracker.problems).toEqual([]);
   });
 

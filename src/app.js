@@ -232,6 +232,7 @@
   // The numbers behind a chart, shown by its Chart/Table switch (with a CSV download).
   function tableOn(c, headers, rows, formats) {
     c.cfg.table = () => ({ headers, rows, formats });
+    if (c.full) c.full.table = c.cfg.table;
     if (c.view === 'table') c.renderTable();
   }
 
@@ -365,6 +366,7 @@
     { key: 'isa', label: 'ISAs', color: '--s2' },
     { key: 'gia', label: 'General investment', color: '--s3' },
     { key: 'pension', label: 'Pensions', color: '--s4' },
+    { key: 'lisa', label: 'Lifetime ISAs', color: '--s2' },
     { key: 'bonds', label: 'Bonds & gilts', color: '--s5' },
     { key: 'property', label: 'Property', color: '--s6' },
     { key: 'debt', label: 'Mortgage & loans', color: '--s8' },
@@ -380,58 +382,74 @@
     // The last update: the figures date, or the latest balance read since.
     const lastUpdate = [est.asOf, ...Object.values(est.reading).map(r => r.date)].sort().pop();
     const delta = lastUpdate < today() ? est.netWorth - RV.estimateAt(p, lastUpdate, model.proj).netWorth : null;
-    const assets = PF_GROUPS.filter(g => g.key !== 'debt' && est.byType[g.key] > 0.5);
-    const totalAssets = assets.reduce((s, g) => s + est.byType[g.key], 0);
-    const debt = est.byType.debt || 0;
-    const scale = Math.max(1, totalAssets);
-    const bar = h('div', { class: 'pf-bar', role: 'img', 'aria-label': `Assets ${money(totalAssets)}, owed ${money(debt)}` },
-      h('div', { class: 'pf-track' }, assets.map(g => h('span', { style: `width:${(est.byType[g.key] / scale) * 100}%;--key:${cssVar(g.color)}`, title: `${g.label}: ${money(est.byType[g.key])}` }))),
-      debt > 0.5 ? h('div', { class: 'pf-track owed' }, h('span', { style: `width:${Math.min(100, (debt / scale) * 100)}%;--key:${cssVar('--s8')}`, title: `Mortgage & loans: ${money(debt)}` })) : null);
-    // Accounts under a header for each type (its colour matches the bar above, with its subtotal).
-    const typeOf = a => (a.type === 'lisa' ? 'isa' : a.type);
+    // Each type's total today: its accounts, plus money the plan expects where there is no account yet.
+    const typeTotal = key => p.accounts.filter(a => a.type === key && !a.excluded).reduce((acc, a) => acc + est.byId[a.id], 0)
+      + est.missing.filter(m => m.type === key).reduce((acc, m) => acc + m.value, 0);
+    const typeWas = key => p.accounts.filter(a => a.type === key && !a.excluded).reduce((acc, a) => acc + a.balance, 0);
+    const classes = accessClasses()
+      .map(c => ({ ...c, groups: c.types.map(k => PF_GROUPS.find(g => g.key === k)).filter(g => typeTotal(g.key) > 0.5 || p.accounts.some(a => a.type === g.key)) }))
+      .filter(c => c.groups.length);
+    const classTotal = c => c.groups.reduce((x, g) => x + typeTotal(g.key), 0);
+    const totalAssets = classes.filter(c => c.key !== 'owed').reduce((acc, c) => acc + classTotal(c), 0);
+    const avail = classes.find(c => c.key === 'now');
+    const ring = portfolioDonut(classes.filter(c => c.key !== 'owed').map(c => c.groups.map(g => ({ label: g.label, color: g.color, value: typeTotal(g.key) }))),
+      avail ? classTotal(avail) : 0, totalAssets);
+    // Accounts under their type, and types under when the money can be used.
     const owner = a => (a.owner === 'joint' ? 'Joint' : (people()[E.personIndex(p, a.owner)] || {}).name || '');
     const signed = (v, debtish) => `${debtish ? '−' : ''}${money(v)}`;
     const changeTag = (change, debtish) => (Math.abs(change) >= 1 ? h('small', { class: (change > 0) !== debtish ? 'pos' : 'neg' }, `${change > 0 ? '+' : '−'}${money(Math.abs(change))}`) : null);
-    const groups = PF_GROUPS.map(g => ({ ...g, accounts: p.accounts.filter(a => typeOf(a) === g.key) })).filter(g => g.accounts.length);
-    const list = h('div', { class: 'pf-list', role: 'table', 'aria-label': 'Accounts, estimated today' },
+    const updated = r => (r ? h('span', { class: 'src updated', title: `You entered ${money(r.value)} on ${fmtDate(r.date)}${r.date < today() ? '; moved on since as the plan expects' : ''}.` }, glyph('good'), r.date === today() ? 'Updated today' : `Updated ${fmtDate(r.date)}`) : null);
+    const typeRows = g => {
+      const debtish = g.key === 'debt';
+      const accounts = p.accounts.filter(a => a.type === g.key);
+      const was = typeWas(g.key), now = typeTotal(g.key);
+      // A type with one account is a single row: the type, with the account named under it.
+      if (accounts.length === 1) {
+        const a = accounts[0];
+        return h('div', { class: `pf-row group single${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, style: `--item-color:${cssVar(g.color)}` },
+          h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }),
+            h('span', { class: 'pf-two' }, h('span', {}, h('strong', {}, g.label), updated(est.reading[a.id])),
+              h('small', {}, [a.name, owner(a), a.excluded ? 'not counted' : ''].filter(Boolean).join(' · ')))),
+          h('span', { class: 'pf-was', role: 'cell' }, signed(a.balance, debtish)),
+          h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(est.byId[a.id], debtish)), changeTag(est.byId[a.id] - a.balance, debtish)));
+      }
+      const open = pfOpen.has(g.key);
+      const nUpdated = accounts.filter(a => est.reading[a.id]).length;
+      const toggle = () => { if (open) pfOpen.delete(g.key); else pfOpen.add(g.key); renderPortfolio(); };
+      return [
+        h('div', { class: `pf-row group${open ? ' open' : ''}`, role: 'row', style: `--item-color:${cssVar(g.color)}` },
+          h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }), h('strong', {}, g.label),
+            accounts.length
+              ? h('button', { type: 'button', class: 'pf-toggle', 'aria-expanded': String(open), 'aria-label': `${open ? 'Hide' : 'Show'} the ${accounts.length} ${g.label} accounts`, onclick: toggle },
+                `${accounts.length} accounts`, h('span', { class: 'chev', 'aria-hidden': 'true' }, '▸'))
+              : h('small', { class: 'muted' }, 'expected; no account yet'),
+            nUpdated ? h('span', { class: 'src updated' }, glyph('good'), `${nUpdated} updated`) : null),
+          h('span', { class: 'pf-was', role: 'cell' }, signed(was, debtish)),
+          h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(now, debtish)), changeTag(now - was, debtish))),
+        accounts.map(a => {
+          const v = est.byId[a.id];
+          const r = est.reading[a.id];
+          return h('div', { class: `pf-row acct${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, hidden: !open },
+            h('span', { class: 'pf-name', role: 'cell' }, h('span', {}, a.name, updated(r)),
+              h('small', {}, [owner(a), a.excluded ? 'not counted' : ''].filter(Boolean).join(' · '))),
+            h('span', { class: 'pf-was', role: 'cell' }, signed(a.balance, debtish)),
+            h('span', { class: 'pf-now', role: 'cell' }, signed(v, debtish), changeTag(v - a.balance, debtish)));
+        }),
+      ];
+    };
+    const list = h('div', { class: 'pf-list', role: 'table', 'aria-label': 'Accounts by when the money can be used, estimated today' },
       h('div', { class: 'pf-row head', role: 'row' }, h('span', { role: 'columnheader' }, 'Account'), h('span', { role: 'columnheader' }, `On ${fmtDate(est.asOf)}`),
         h('span', { role: 'columnheader' }, daysSince(est.asOf) <= 0 ? 'Today' : 'Today (estimated)')),
-      groups.map(g => {
-        const debtish = g.key === 'debt';
-        const counted = g.accounts.filter(a => !a.excluded);
-        const was = counted.reduce((acc, a) => acc + a.balance, 0);
-        const now = counted.reduce((acc, a) => acc + est.byId[a.id], 0);
-        const updated = r => (r ? h('span', { class: 'src updated', title: `You entered ${money(r.value)} on ${fmtDate(r.date)}${r.date < today() ? '; moved on since as the plan expects' : ''}.` }, glyph('good'), r.date === today() ? 'Updated today' : `Updated ${fmtDate(r.date)}`) : null);
-        // A type with one account is a single row: the type, with the account named under it.
-        if (g.accounts.length === 1) {
-          const a = g.accounts[0];
-          return h('div', { class: `pf-row group single${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, style: `--item-color:${cssVar(g.color)}` },
-            h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }),
-              h('span', { class: 'pf-two' }, h('span', {}, h('strong', {}, g.label), updated(est.reading[a.id])),
-                h('small', {}, [a.name, owner(a), a.type === 'lisa' ? 'Lifetime ISA' : '', a.excluded ? 'not counted' : ''].filter(Boolean).join(' · ')))),
-            h('span', { class: 'pf-was', role: 'cell' }, signed(a.balance, debtish)),
-            h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(est.byId[a.id], debtish)), changeTag(est.byId[a.id] - a.balance, debtish)));
-        }
-        const open = pfOpen.has(g.key);
-        const nUpdated = g.accounts.filter(a => est.reading[a.id]).length;
-        const toggle = () => { if (open) pfOpen.delete(g.key); else pfOpen.add(g.key); renderPortfolio(); };
+      classes.map(c => {
+        const owed = c.key === 'owed';
+        const now = classTotal(c), was = c.groups.reduce((x, g) => x + typeWas(g.key), 0);
         return [
-          h('div', { class: `pf-row group${open ? ' open' : ''}`, role: 'row', style: `--item-color:${cssVar(g.color)}` },
-            h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }), h('strong', {}, g.label),
-              h('button', { type: 'button', class: 'pf-toggle', 'aria-expanded': String(open), 'aria-label': `${open ? 'Hide' : 'Show'} the ${g.accounts.length} ${g.label} accounts`, onclick: toggle },
-                `${g.accounts.length} accounts`, h('span', { class: 'chev', 'aria-hidden': 'true' }, '▸')),
-              nUpdated ? h('span', { class: 'src updated' }, glyph('good'), `${nUpdated} updated`) : null),
-            h('span', { class: 'pf-was', role: 'cell' }, signed(was, debtish)),
-            h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(now, debtish)), changeTag(now - was, debtish))),
-          g.accounts.map(a => {
-            const v = est.byId[a.id];
-            const r = est.reading[a.id];
-            return h('div', { class: `pf-row acct${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, hidden: !open },
-              h('span', { class: 'pf-name', role: 'cell' }, h('span', {}, a.name, updated(r)),
-                h('small', {}, [owner(a), a.type === 'lisa' ? 'Lifetime ISA' : '', a.excluded ? 'not counted' : ''].filter(Boolean).join(' · '))),
-              h('span', { class: 'pf-was', role: 'cell' }, signed(a.balance, debtish)),
-              h('span', { class: 'pf-now', role: 'cell' }, signed(v, debtish), changeTag(v - a.balance, debtish)));
-          }),
+          h('div', { class: `pf-row access ${c.key}`, role: 'row', 'data-access': c.key },
+            h('span', { class: 'pf-name', role: 'cell' }, h('span', { class: 'pf-two' }, h('strong', {}, c.label), h('small', {}, c.note))),
+            h('span', { class: 'pf-was', role: 'cell' }, signed(was, owed)),
+            h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(now, owed)),
+              !owed && totalAssets > 0 ? h('small', { class: 'muted' }, `${Math.round((now / totalAssets) * 100)}% of what you own`) : null)),
+          c.groups.map(typeRows),
         ];
       }));
     const readings = Object.keys(est.reading).length;
@@ -449,10 +467,49 @@
           delta == null
             ? h('div', { class: 'delta flat' }, glyph('good'), 'Updated today')
             : h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your last update (${fmtDate(lastUpdate)})`)),
-        h('div', { class: 'pf-mix' }, bar)),
+        h('div', { class: 'pf-mix' }, ring)),
       list,
       readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null,
     ].filter(Boolean));
+  }
+
+  // The portfolio by when the money can be used.
+  function accessClasses() {
+    const ages = [...new Set(people().map(x => x.pensionAccessAge))].join(' / ');
+    const drawing = people().filter(x => x.age >= x.pensionAccessAge).map(x => x.name);
+    return [
+      { key: 'now', label: 'Available now', types: ['cash', 'isa', 'gia', 'bonds'], note: 'Cash, ISAs, investments and gilts: can be withdrawn or sold' },
+      { key: 'locked', label: 'Locked away for now', types: ['pension', 'lisa'],
+        note: `Pensions from ${ages}${drawing.length ? ` (${drawing.join(' and ')} can draw now)` : ''}; Lifetime ISAs from 60 or for a first home` },
+      { key: 'property', label: 'Property', types: ['property'], note: 'Only usable by selling or downsizing' },
+      { key: 'owed', label: 'Owed', types: ['debt'], note: 'Mortgage and loans' },
+    ];
+  }
+
+  // A donut of what you own: one ring of types, grouped (a wider gap) by when they can be used.
+  function portfolioDonut(groups, available, total) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const R = 52, W = 18, C = 2 * Math.PI * R;
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 140 140');
+    svg.setAttribute('class', 'pf-donut-svg');
+    svg.setAttribute('aria-hidden', 'true');
+    const items = groups.flatMap((g, gi) => g.filter(x => x.value > 0.5).map((x, i) => ({ ...x, gap: i === 0 && gi > 0 ? 6 : 2 })));
+    const gaps = items.length > 1 ? items.reduce((acc, x) => acc + x.gap, 0) : 0;
+    let at = 0;
+    for (const x of items) {
+      const len = Math.max(0.5, (x.value / Math.max(1, total)) * (C - gaps));
+      const c = document.createElementNS(NS, 'circle');
+      for (const [k, v] of [['cx', 70], ['cy', 70], ['r', R], ['fill', 'none'], ['stroke', cssVar(x.color)], ['stroke-width', W],
+        ['stroke-dasharray', `${len} ${C - len}`], ['stroke-dashoffset', -at], ['transform', 'rotate(-90 70 70)']]) c.setAttribute(k, String(v));
+      const t = document.createElementNS(NS, 'title');
+      t.textContent = `${x.label}: ${money(x.value)}`;
+      c.append(t);
+      svg.append(c);
+      at += len + (items.length > 1 ? x.gap : 0);
+    }
+    return h('div', { class: 'pf-donut', role: 'img', 'aria-label': `${money(available)} of the ${money(total)} you own is available now` }, svg,
+      h('div', { class: 'pf-donut-centre' }, h('small', {}, 'Available now'), h('strong', {}, fmtCompact(available)), h('small', {}, `of ${fmtCompact(total)}`)));
   }
 
   // ---- home: this year (what to do now and what is coming)
@@ -555,10 +612,13 @@
     if (a === 'spending') return openWizard();
     if (a === 'review') return openReview();
     if (a === 'emergency') return openGoalWizard(null, 'emergency');
-    if (a === 'explorer') { navigate('scenarios'); requestAnimationFrame(() => $('#explorer').scrollIntoView({ behavior: 'smooth', block: 'start' })); return; }
-    navigate(a === 'accounts' ? 'finances/portfolio' : 'finances/assumptions');
+    if (a.startsWith('compare:')) { openComparison(a.slice(8)); return; }
+    navigate(a === 'accounts' ? 'finances/portfolio' : a === 'strategy' ? 'finances/saving' : 'finances/assumptions');
     requestAnimationFrame(() => { const sec = $(`#sec-${a}`); if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   }
+
+  // A suggestion's button shows only when there is somewhere for it to go.
+  const actionFits = a => !!a && (!a.startsWith('compare:') || SI.comparisonsFor(plan()).some(c => c.id === a.slice(8)));
 
   function renderInsights() {
     const hidden = new Set(ws.dismissed);
@@ -579,7 +639,7 @@
         h('span', { class: 'ins-ico' }, glyph(i.tone)),
         h('div', { class: 'ins-body' }, h('span', { class: 'sr-only' }, `${toneLabel[i.tone]}: `), h('strong', {}, i.title), h('p', {}, i.text)),
         h('div', { class: 'ins-actions' },
-          i.action ? h('button', { type: 'button', class: 'btn small', onclick: () => insightAction(i.action) }, ACTION_LABEL[i.action]) : null,
+          actionFits(i.action) ? h('button', { type: 'button', class: 'btn small', onclick: () => insightAction(i.action) }, i.action.startsWith('compare:') ? 'Compare in Scenarios' : ACTION_LABEL[i.action]) : null,
           i.tone !== 'good' ? h('button', { type: 'button', class: 'btn small ghost', title: 'Already doing this, or not relevant: hide it', 'aria-label': `Hide: ${i.title}`, onclick: () => setHidden(i.id, true) }, 'Already sorted') : null)))),
       h('div', { class: 'add-row' },
         all.length > 4 ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => { insightsAll = !insightsAll; renderInsights(); } }, insightsAll ? 'Show fewer' : `Show all ${all.length}`) : null,
@@ -590,12 +650,24 @@
         h('div', { class: 'ins-actions' }, h('button', { type: 'button', class: 'btn small ghost', onclick: () => setHidden(i.id, false) }, 'Show again'))))) : null].filter(Boolean));
   }
 
-  // The projection by account type, with goal markers (home page).
+  // The projection by account type, or by when the money can be used, with goal markers (home page).
+  let homeBy = 'type';
+  const ACCESS_SERIES = [
+    { key: 'now', label: 'Available now', color: '--s1', of: r => r.cash + r.isa - (r.lisa || 0) + r.gia + r.bonds },
+    { key: 'locked', label: 'Pensions & Lifetime ISAs', color: '--s4', of: r => r.pension + (r.lisa || 0) },
+    { key: 'property', label: 'Property', color: '--s6', of: r => r.property },
+  ];
+
   function renderHomeChart() {
     const rows = model.proj.rows;
     const xs = model.proj.pre.years;
     const col = key => rows.map((r, t) => D(r[key], t));
-    const bars = ACCOUNT_SERIES.map(s => ({ ...s, values: col(s.key) })).filter(s => s.values.some(v => v > 0.5));
+    setKids($('#ovGroup'), h('div', { class: 'seg mini', role: 'group', 'aria-label': 'Group the chart by' },
+      [['type', 'By account'], ['access', 'By access']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(homeBy === k), 'data-by': k,
+        onclick: () => { homeBy = k; renderHomeChart(); } }, label))));
+    const bars = homeBy === 'access'
+      ? ACCESS_SERIES.map(s => ({ ...s, values: rows.map((r, t) => D(s.of(r), t)) })).filter(s => s.values.some(v => v > 0.5))
+      : ACCOUNT_SERIES.map(s => ({ ...s, values: col(s.key) })).filter(s => s.values.some(v => v > 0.5));
     if (rows.some(r => r.debt > 0.5)) bars.push({ key: 'debt', label: 'Mortgage & loans', color: '--s8', values: rows.map((r, t) => -D(r.debt, t)) });
     if (rows.some(r => r.shortfall > 0.5)) bars.push({ key: 'short', label: 'Unfunded spending', color: '--muted', values: rows.map((r, t) => -D(r.shortfall, t)) });
     const nw = col('netWorth');
@@ -619,13 +691,17 @@
           { label: 'Net worth', color: '--text', shape: 'line', text: money(nw[i]), strong: true },
         ],
       }),
-      table: () => ({
+      table: () => (homeBy === 'access' ? {
+        headers: ['Year', 'Ages', ...ACCESS_SERIES.map(a => a.label), 'Debt', 'Net worth'],
+        rows: rows.map((r, t) => [r.year, r.ages.join(' / '), ...ACCESS_SERIES.map(a => D(a.of(r), t)), -D(r.debt, t), D(r.netWorth, t)]),
+        formats: [String, String, money, money, money, money, money],
+      } : {
         headers: ['Year', 'Ages', 'Cash', 'ISAs', 'GIA', 'Pensions', 'Bonds', 'Property', 'Debt', 'Net worth'],
         rows: rows.map((r, t) => [r.year, r.ages.join(' / '), ...ovCols.map(k => D(r[k], t)), -D(r.debt, t), D(r.netWorth, t)]),
         formats: [String, String, money, money, money, money, money, money, money, money],
       }),
     });
-    $('#ovChartSub').textContent = `Net worth by account type on average returns, from your figures as at ${fmtDate(asOf())}, in ${unitLabel()}. Hover a year, click the legend to hide a series, or switch to Table for every number.`;
+    $('#ovChartSub').textContent = `${homeBy === 'access' ? 'What you own by when it can be used' : 'What you own by account type'}, on average returns, from your figures as at ${fmtDate(asOf())}, in ${unitLabel()}. The areas add up to your net worth (the line); debt sits below zero. Hover a year, or switch to Table for every number.`;
     legend($('#ovLegend'), [...bars.map(b => ({ label: b.label, color: b.color })), { label: 'Net worth', color: '--text', shape: 'line' }], charts.ovChart);
   }
 
@@ -750,10 +826,23 @@
   const GOAL_TYPE_LABEL = { netWorth: 'Reach an amount', debtFree: 'Mortgage-free', retire: 'Retire', passiveIncome: 'Passive income', emergency: 'Emergency fund' };
   let goalSolve = {};
 
+  // Goal types worth offering: one of each kind that only makes sense once, a retirement goal per
+  // person, and financial independence only without a retirement goal (they answer the same question).
+  function goalOffers(p) {
+    const has = t => p.goals.some(g => g.type === t);
+    const hasDebt = p.accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
+    return {
+      retire: p.household.people.some(x => !p.goals.some(g => g.type === 'retire' && E.retiree(p, g).id === x.id)),
+      emergency: !has('emergency'),
+      debtFree: hasDebt && !has('debtFree'),
+      fi: !has('retire') && !p.goals.some(g => g.type === 'netWorth' && g.name === 'Financial independence'),
+    };
+  }
+
   function goalEmpty() {
     const quick = (type, label) => h('button', { type: 'button', class: 'btn small', onclick: () => openGoalWizard(null, type) }, label);
     return h('div', { class: 'goal-empty' }, h('p', {}, 'No goals yet. Most people start with one of these:'),
-      h('div', { class: 'add-row' }, quick('retire', 'Plan your retirement'), quick('emergency', 'Emergency fund'), quick('debtFree', 'Mortgage-free'), quick('fi', 'Financial independence')));
+      h('div', { class: 'add-row' }, ...(o => [o.retire && quick('retire', 'Plan your retirement'), o.emergency && quick('emergency', 'Emergency fund'), o.debtFree && quick('debtFree', 'Mortgage-free'), o.fi && quick('fi', 'Financial independence')])(goalOffers(plan()))));
   }
 
   // The chance of a goal by year: reached by then, covered that year, or (retirement) still funded.
@@ -825,7 +914,7 @@
     const take = h('section', { class: 'card', id: 'gpTake' });
     const levers = h('section', { class: 'card', id: 'gpLevers' });
     const fullHistory = g.type === 'retire' ? h('div') : null;
-    setKids(box, ...[hero, goalYearCard(res), track, h('div', { class: 'grid-2' }, chance, hist), g.type === 'retire' ? retireSummary(res) : null, moves, take, levers, fullHistory].filter(Boolean));
+    setKids(box, ...[hero, goalYearCard(res), track, h('div', { class: 'grid-2' }, chance, hist), g.type === 'retire' ? retireSummary(res) : null, g.type === 'retire' ? retireTradeoffs(res) : null, g.type === 'retire' ? savingsFlowCard() : null, moves, take, levers, fullHistory].filter(Boolean));
     goalTrackChart(track, res);
     goalChanceChart(chance, res);
     renderGoalMoves(res);
@@ -864,7 +953,7 @@
     } else {
       bands = mc.series.liquid[view()];
       expected = rows.map((r, t) => D(r.liquid, t));
-      marker = { x: p0Year() + retireT(), label: 'Retire', color: col };
+      marker = { x: res.expectedYear, label: `${E.retiree(plan(), g).name} retires`, color: col };
       title = 'Savings, investments and pensions';
       sub = `They grow while you work and pay for retirement after. If they run out, retirement fails in that simulation. In ${unitLabel()}.`;
     }
@@ -906,7 +995,7 @@
     new Chart(host, { height: 200, label: `Chance of ${res.title} by year`, name: `goal-chance-${g.id}` }).set({
       xs, yDomain: [0, 1], yFormat: v => `${Math.round(v * 100)}%`,
       lines: [{ label: chanceLabel(g), color: goalColor(g), values: ys, area: true }],
-      markers: g.type === 'retire' ? [{ x: p0Year() + retireT(), label: 'Retire', color: goalColor(g) }] : [{ x: g.year, label: 'Target', color: goalColor(g) }],
+      markers: g.type === 'retire' ? [{ x: res.expectedYear, label: 'Retire', color: goalColor(g) }] : [{ x: g.year, label: 'Target', color: goalColor(g) }],
       tooltip: i => ({ title: titleAt(i), rows: [{ label: chanceLabel(g), color: goalColor(g), shape: 'line', text: pct(ys[i]) }] }),
     });
   }
@@ -999,12 +1088,102 @@
     $('#gpScenario').disabled = !changed.length;
   }
 
+  // What stopping work at the planned age costs or means, person by person.
+  function retireTradeoffs(res) {
+    const p = plan();
+    const rows = model.proj.rows;
+    const realAt = (v, t) => v / rows[Math.max(0, Math.min(rows.length - 1, t))].deflator;
+    const owner = E.retiree(p, res.goal);
+    const list = [owner, ...people().filter(x => x !== owner)];
+    const items = [];
+    for (const x of list) {
+      const who = people().length > 1 ? `${x.name}: ` : '';
+      const out = [];
+      if (x.retireAge < x.statePensionAge) out.push(`No State Pension for ${x.statePensionAge - x.retireAge} years after stopping work (it starts at ${x.statePensionAge}). A full State Pension needs 35 qualifying years of National Insurance: check the record at gov.uk/check-state-pension; voluntary contributions can fill gaps.`);
+      const dcPots = p.accounts.some(a => a.type === 'pension' && a.owner === x.id && !a.excluded);
+      if (dcPots) {
+        out.push(x.retireAge < x.pensionAccessAge
+          ? `Personal and workplace pensions can’t be drawn until ${x.pensionAccessAge}: ${x.pensionAccessAge - x.retireAge} years living on ISAs, savings and other income first.`
+          : `Personal and workplace pensions can be drawn from ${x.pensionAccessAge} with no penalty: a quarter tax-free, the rest taxed as income.`);
+      }
+      for (const db of p.income.filter(i => i.kind === 'dbpension' && i.owner === x.id)) {
+        const early = E.dbEarly(db, x);
+        const npa = early.npa || db.startAge;
+        const built = yrs => db.amount + db.dbAccrual * Math.max(0, yrs);
+        const lost = Math.max(0, npa - x.retireAge) * db.dbAccrual;
+        if (lost > 0.5) out.push(`${db.name}: stopping at ${x.retireAge} instead of ${npa} means ${npa - x.retireAge} fewer years building it, about ${money(lost)} a year less pension (today’s money).`);
+        if (early.npa) {
+          const full = built(Math.min(x.retireAge, npa) - x.age);
+          const at = age => {
+            const f = E.dbEarly({ ...db, startAge: age }, x).factor;
+            return `${money(full * f)} a year${f < 1 ? ` (${(f * 100).toFixed(1)}%)` : ''}${db.lumpMultiple ? ` + ${money(full * f * db.lumpMultiple)} lump sum` : ''}`;
+          };
+          out.push(db.startAge < npa
+            ? `${db.name} is taken at ${db.startAge}, ${npa - db.startAge} years before its Normal Pension Age of ${npa}, so it is cut to ${at(db.startAge)}. Waiting until ${npa}: ${at(npa)}.`
+            : `${db.name} is paid in full from ${npa}: ${at(npa)}. Taking it at ${x.retireAge} instead would cut it to ${at(Math.max(x.retireAge, 55))} (USS early retirement factors). Change “Paid from age” in Income to try it.`);
+        }
+      }
+      if (out.length) items.push(h('li', {}, h('strong', {}, `${who}retiring at ${x.retireAge} (${p.startYear + x.retireAge - x.age})`), h('ul', {}, out.map(t => h('li', {}, t)))));
+    }
+    // The years between the first person stopping work and the last State Pension starting.
+    const t0 = Math.min(...people().map(x => x.retireAge - x.age)), t1 = Math.max(...people().map(x => x.statePensionAge - x.age));
+    let bridge = 0, n = 0;
+    for (let t = Math.max(0, t0); t < Math.min(rows.length - 1, t1); t++) { bridge += realAt(rows[t].withdrawals, t); n++; }
+    return h('section', { class: 'card', id: 'gpTradeoffs' },
+      h('h2', {}, 'What retiring then means'),
+      n ? h('p', { class: 'sub' }, `From ${p.startYear + t0} to ${p.startYear + t1} (until the State Pensions start) your savings pay for about ${money(bridge / n)} a year of living costs on average, ${money(bridge)} in all, in today’s money.`) : null,
+      h('ul', { class: 'tradeoffs' }, items));
+  }
+
+  // Why savings grow or shrink each year: what is paid in, what investments earn, what is taken out.
+  function savingsFlowCard() {
+    const rows = model.proj.rows.slice(0, -1);
+    const xs = rows.map(r => r.year);
+    const v = f => rows.map((r, t) => D(f(r), t));
+    const paidIn = v(r => r.pensionIn + r.toCash + r.toIsa + r.toGia + r.toLisa + r.lisaBonus);
+    const growth = v(r => r.gCash + r.gIsa + r.gGia + r.gPension + r.gBonds);
+    const out = v(r => -(r.withdrawals + (r.lisaHome || 0)));
+    const net = xs.map((_, i) => paidIn[i] + growth[i] + out[i]);
+    const card = h('section', { class: 'card', id: 'gpFlows' },
+      h('h2', {}, 'Why your savings grow or shrink'),
+      h('p', { class: 'sub' }, `Each year: what goes in from pay and pensions, what investments earn, and what is taken out to live on, in ${unitLabel()}. Savings grow whenever earnings on them are bigger than what is taken out. Money is taken from cash, then pensions up to the tax-free allowance, then the general account, and ISAs last, so ISAs can keep growing while you draw on the rest.`));
+    const c = chartIn(card, 260, 'Savings: paid in, investment growth and taken out each year', { name: 'savings-flows' });
+    c.set({
+      xs,
+      bars: [
+        { label: 'Paid in from pay and pensions', color: '--s1', values: paidIn },
+        { label: 'Investment growth', color: '--s2', values: growth },
+        { label: 'Taken out to live on', color: '--s8', values: out },
+      ],
+      lines: [{ label: 'Change in savings', color: '--text', values: net }],
+      tooltip: i => ({ title: titleAt(i), rows: [
+        { label: 'Paid in', color: '--s1', text: money(paidIn[i]) },
+        { label: 'Investment growth', color: '--s2', text: money(growth[i]) },
+        { label: 'Taken out', color: '--s8', text: money(out[i]) },
+        { label: 'Change in savings', color: '--text', shape: 'line', text: money(net[i]), strong: true },
+      ] }),
+    });
+    const lg = h('div', { class: 'legend' });
+    card.append(lg);
+    legend(lg, [{ label: 'Paid in from pay and pensions', color: '--s1' }, { label: 'Investment growth', color: '--s2' }, { label: 'Taken out to live on', color: '--s8' }, { label: 'Change in savings', color: '--text', shape: 'line' }], c);
+    return card;
+  }
+
   function retireSummary(res) {
     const p = plan();
     const s = p.strategy;
     const travel = p.expenses.find(e => e.key === 'life:travel');
     const dbs = p.income.filter(i => i.kind === 'dbpension');
     const item = (k, v) => h('li', {}, h('span', {}, k), h('strong', {}, v));
+    // Savings when the last person stops work, against a year of spending then (today's money).
+    const rows = model.proj.rows;
+    const tr = Math.max(0, Math.min(rows.length - 2, Math.max(...people().map(x => x.retireAge - x.age))));
+    const real0 = (v, t) => v / rows[t].deflator;
+    const pot = real0(rows[tr].liquid, tr), spend = real0(rows[tr + 1].spending, tr + 1);
+    const rate = pot > 0 ? spend / pot : 0;
+    const lasting = h('p', { class: 'hint', id: 'gpDrawRate' }, pot > 0 ? (rate < 0.03
+      ? `When ${people().length > 1 ? 'you have both' : 'you have'} stopped work (${rows[tr].year}) the plan has about ${fmtCompact(pot)} in savings, investments and pensions (today’s money), and spends about ${money(spend)} a year: ${(rate * 100).toFixed(1)}% of it. That is well below the 3–4% usually thought sustainable, so on average returns the savings keep growing through retirement. You could retire earlier or spend more: try the levers below.`
+      : `When ${people().length > 1 ? 'you have both' : 'you have'} stopped work (${rows[tr].year}) the plan has about ${fmtCompact(pot)} in savings, investments and pensions (today’s money), and spends about ${money(spend)} a year: ${(rate * 100).toFixed(1)}% of it. 3–4% a year is usually thought sustainable.`) : '');
     return h('section', { class: 'card' },
       h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Your retirement plan'), h('p', { class: 'sub' }, 'What the chance above assumes. Change it with the retirement questionnaire.')),
         h('button', { type: 'button', class: 'btn small', onclick: () => openGoalWizard(res.goal) }, 'Edit retirement plan')),
@@ -1014,7 +1193,8 @@
         travel ? item('Extra in the early years', `${money(travel.amount)} a year to age ${travel.endAge}`) : null,
         s.slowDownAge ? item('Spending later on', `${s.slowDownPct}% from age ${s.slowDownAge}`) : null,
         people().map(x => item(`${x.name}'s State Pension`, `${money(x.statePension)} a year from ${x.statePensionAge}`)),
-        dbs.map(i => item(i.name, `${money(i.amount)} a year built up, paid from ${i.startAge}`))));
+        dbs.map(i => item(i.name, `${money(i.amount)} a year built up, paid from ${i.startAge}`))),
+      lasting);
   }
 
   function solveGoal(btn, res) {
@@ -1188,7 +1368,7 @@
       defaults: {
         netWorth: { type: 'netWorth', amount: 1000000, measure: 'all', basis: 'nominal', year: p.startYear + 10, age: p1.retireAge, confidence: 80 },
         debtFree: { type: 'debtFree', amount: 0, measure: 'all', basis: 'nominal', year: p.startYear + 10, age: p1.retireAge, confidence: 80 },
-        retire: { type: 'retire', amount: 0, measure: 'all', basis: 'nominal', year: p.startYear + (p1.retireAge - p1.age), age: p1.retireAge, confidence: 85 },
+        retire: { type: 'retire', amount: 0, measure: 'all', basis: 'nominal', year: p.startYear + (nextRetiree(p).retireAge - nextRetiree(p).age), age: nextRetiree(p).retireAge, owner: nextRetiree(p).id, confidence: 85 },
         savings: { type: 'netWorth', amount: 40000, measure: 'savings', basis: 'real', year: p.startYear + 10, age: p1.retireAge, confidence: 80 },
         passiveIncome: { type: 'passiveIncome', amount: 30000, measure: 'all', basis: 'real', year: p.startYear + 15, age: p1.retireAge, confidence: 80, withdrawalRate: 4, includePensions: true },
         emergency: { type: 'emergency', amount: 0, months: 6, measure: 'all', basis: 'nominal', year: p.startYear + 2, age: p1.retireAge, confidence: 80 },
@@ -1217,7 +1397,7 @@
   function draftPlan(withLevers) {
     const base = gwBase();
     const p = withLevers ? L.apply(base, gw.values) : base;
-    const g = E.normalizeGoal({ ...gw.goal, id: gw.goal.id || 'draft' }, p.startYear, p.household.people[0]);
+    const g = E.normalizeGoal({ ...gw.goal, id: gw.goal.id || 'draft' }, p.startYear, p.household.people[0], p.household.people);
     p.goals = p.goals.filter(x => x.id !== g.id).concat([g]);
     return { p, g };
   }
@@ -1239,11 +1419,15 @@
       const ICON_OF = { retire: 'retire', emergency: 'shield', debtFree: 'debt', netWorth: 'goal', savings: 'piggy', passiveIncome: 'sp', fi: 'star', house: 'home', education: 'cap', purchase: 'gift', legacy: 'heart' };
       const opt = (type, title, text) => h('button', { type: 'button', class: 'goal-option', onclick: () => { gw.goal = { ...gw.defaults[type] }; if (type === 'retire') initRetire(); gw.step = 1; renderGoalWizard(); } },
         h('span', { class: 'goal-option-head' }, goalBadge({ icon: ICON_OF[type], color: gw.defaults[type].color }, 'small'), h('strong', {}, title)), h('span', {}, text));
+      const offer = goalOffers(plan());
+      const retireText = people().length > 1 && plan().goals.some(x => x.type === 'retire')
+        ? `${nextRetiree(plan()).name}’s retirement: when, what you want to spend, and how likely the money is to last.`
+        : 'When you stop, what you want to spend, and how likely the money is to last.';
       setKids(body, h('div', { class: 'goal-options' },
-        opt('retire', 'Plan your retirement', 'When you stop, what you want to spend, and how likely the money is to last.'),
-        opt('emergency', 'Emergency fund', 'Months of spending kept in cash, or in cash and investments.'),
-        opt('debtFree', 'Mortgage-free by a year', 'Overpaying clears it sooner but leaves less to invest.'),
-        opt('fi', 'Financial independence', 'Savings and pensions worth 25 years of spending: work becomes optional.'),
+        offer.retire ? opt('retire', 'Plan your retirement', retireText) : null,
+        offer.emergency ? opt('emergency', 'Emergency fund', 'Months of spending kept in cash, or in cash and investments.') : null,
+        offer.debtFree ? opt('debtFree', 'Mortgage-free by a year', 'Overpaying clears it sooner but leaves less to invest.') : null,
+        offer.fi ? opt('fi', 'Financial independence', 'Savings and pensions worth 25 years of spending: work becomes optional.') : null,
         opt('passiveIncome', 'Passive income by a year', 'Enough investments and rent to pay £X a year without working.'),
         opt('savings', 'Save for something', 'A house deposit, university, a car or a wedding: an amount by a year, not counting your home or pensions.'),
         opt('netWorth', 'Reach an amount by a year', 'For example £1M of net worth by 2031, or what you leave to family.')));
@@ -1283,7 +1467,7 @@
         fields.push(field('What counts', h('select', { 'aria-label': 'What counts', onchange: e => { g.counts = e.target.value; gw.bufferTouched = false; renderGoalWizard(); } },
           [['cash', 'Cash only'], ['investments', 'Cash, ISAs and investments']].map(([v, l]) => h('option', { value: v, selected: g.counts === v }, l))),
           g.counts === 'investments' ? 'Investments can be sold within days but may be down when you need them; the chance below allows for that.' : 'Easy-access cash: there whatever markets do.'));
-        const sol = E.solveEmergency(plan(), E.normalizeGoal(g, plan().startYear, p1));
+        const sol = E.solveEmergency(plan(), E.normalizeGoal(g, plan().startYear, p1, people()));
         gw.bufferNeeded = sol.buffer;
         if (!gw.bufferTouched) gw.setBuffer = !sol.already;
         const r0 = model.proj.rows[0];
@@ -1315,7 +1499,7 @@
     if (gw.step === 2) {
       $('#gwIntro').textContent = 'The levers that can move this goal. Each one also moves your other goals: the table shows the trade-offs.';
       const base = gwBase();
-      const draftGoal = E.normalizeGoal({ ...g, id: g.id || 'draft' }, base.startYear, base.household.people[0]);
+      const draftGoal = E.normalizeGoal({ ...g, id: g.id || 'draft' }, base.startYear, base.household.people[0], base.household.people);
       const fits = d => L.leverFits(d, draftGoal, base);
       const groups = L.groupsForGoal(base, draftGoal);
       groups.forEach((k, i) => { if (gw.open[k] === undefined) gw.open[k] = i < 2 && k !== 'stress'; });
@@ -1355,7 +1539,7 @@
 
   // Name and colour for a goal (any type).
   function identityRow(g) {
-    const auto = E.autoTitle(E.normalizeGoal({ ...g, name: '' }, plan().startYear, people()[0]), plan());
+    const auto = E.autoTitle(E.normalizeGoal({ ...g, name: '' }, plan().startYear, people()[0], people()), plan());
     const swatches = SERIES_COLORS.map((c, i) => h('button', {
       type: 'button', class: 'swatch', style: `--sw:${cssVar(c)}`, 'aria-pressed': String(g.color === i), 'aria-label': `Colour ${i + 1}`,
       onclick: e => { g.color = i; for (const b of $$('.swatch', e.currentTarget.parentElement)) b.setAttribute('aria-pressed', String(b === e.currentTarget)); },
@@ -1375,6 +1559,9 @@
     comfortable: 'More freedom and some luxuries: three weeks in Europe, regular treats, theatre trips, a newer car.',
   };
 
+  // Whose retirement a new retirement goal is about: the first person without one yet.
+  const nextRetiree = p => p.household.people.find(x => !p.goals.some(g => g.type === 'retire' && g.owner === x.id)) || p.household.people[0];
+
   function initRetire() {
     const p = plan();
     const s = p.strategy;
@@ -1393,7 +1580,7 @@
       statePension: people().map(x => x.statePension),
       answers: null,
     };
-    if (gw.goal) gw.goal.age = p1.retireAge;
+    if (gw.goal) gw.goal.age = E.retiree(p, gw.goal).retireAge;
   }
 
   function retireSpendingOf(r) {
@@ -1403,7 +1590,12 @@
   function applyRetire(p) {
     const r = gw.retire;
     const pp = p.household.people;
-    pp.forEach((x, i) => { x.retireAge = r.ages[i]; x.statePension = r.statePension[i]; });
+    pp.forEach((x, i) => {
+      // A retirement goal that was about this person's planned age moves with it.
+      for (const g of p.goals) if (g.type === 'retire' && E.retiree(p, g).id === x.id && g.age === x.retireAge) g.age = r.ages[i];
+      x.retireAge = r.ages[i];
+      x.statePension = r.statePension[i];
+    });
     p.strategy.retireSpending = retireSpendingOf(r);
     p.strategy.slowDownAge = r.slowDownAge > 0 ? r.slowDownAge : 0;
     p.strategy.slowDownPct = r.slowDownAge > 0 ? r.slowDownPct : 100;
@@ -1416,7 +1608,7 @@
       });
     }
     if (p.life || r.travelExtra > 0 || r.slowDownAge > 0) p.life = { ...(p.life || {}), travelExtra: r.travelExtra, travelYears: r.travelYears, slowDownAge: r.slowDownAge, slowDownPct: r.slowDownPct };
-    if (gw.goal) gw.goal.age = r.ages[0];
+    if (gw.goal) gw.goal.age = r.ages[Math.max(0, pp.findIndex(x => x.id === E.retiree(p, gw.goal).id))];
     return E.normalizePlan(p);
   }
 
@@ -1466,6 +1658,9 @@
     return h('div', { class: 'rq' },
       h('div', { class: 'rq-questions' },
         sec(1, 'When do you want to stop working?',
+          people().length > 1 && gw.goal ? h('div', { class: 'field' }, h('span', {}, 'This goal is about'), h('div', { class: 'idea-chips', role: 'group', 'aria-label': 'Whose retirement' },
+            people().map(x => h('button', { type: 'button', class: 'idea-chip', 'data-owner': x.id, 'aria-pressed': String(E.retiree(p, gw.goal).id === x.id),
+              onclick: () => { gw.goal.owner = x.id; changed(); renderGoalWizard(); } }, `${x.name} retiring`)))) : null,
           h('div', { class: 'fields' }, people().map((x, i) => h('label', { class: 'field' }, h('span', {}, `${x.name} retires at`),
             num(() => r.ages[i], v => { r.ages[i] = Math.round(v); }, { min: x.age, max: 80, suffix: 'years', label: `${x.name} retirement age` })))),
           h('p', { class: 'hint' }, `Pensions can be drawn from ${people().map(x => `${x.pensionAccessAge}`).filter((v, i, a) => a.indexOf(v) === i).join(' / ')}; State Pension from ${people().map(x => `${x.name} ${x.statePensionAge}`).join(', ')}. Retiring before then means living on ISAs and savings.`)),
@@ -1589,7 +1784,7 @@
 
   function saveGoal(mode) {
     const p = gwBase();
-    const g = E.normalizeGoal({ ...gw.goal, id: gw.goal.id || E.uid() }, p.startYear, p.household.people[0]);
+    const g = E.normalizeGoal({ ...gw.goal, id: gw.goal.id || E.uid() }, p.startYear, p.household.people[0], p.household.people);
     if (mode === 'scenario') {
       const next = L.apply(p, gw.values);
       next.goals = E.assignGoalColours(next.goals.filter(x => x.id !== g.id).concat([g]));
@@ -1770,6 +1965,7 @@
     ['portfolio', 'Portfolio', () => plan().accounts.length],
     ['income', 'Income', () => plan().income.length],
     ['spending', 'Spending', () => plan().expenses.length + plan().events.length],
+    ['saving', 'Saving & investing'],
     ['cashflow', 'Cash flow & tax'],
     ['assumptions', 'Assumptions'],
     ['history', 'Past reviews', () => ws.checkins.length],
@@ -1856,6 +2052,7 @@
     if (moneyPage === 'portfolio') fill('#mpPortfolio', wkAccounts);
     if (moneyPage === 'income') { fill('#mpIncome', wkIncome); requestAnimationFrame(updateIncomeTrends); }
     if (moneyPage === 'spending') fill('#mpSpending', wkSpending);
+    if (moneyPage === 'saving') { fill('#mpSaving', wkSaving); updateSavingFigures(); }
     if (moneyPage === 'cashflow') { renderCashflow(); fill('#mpTax', wkTax); }
     if (moneyPage === 'assumptions') {
       fill('#mpAssumptions', wkAssumptions);
@@ -2041,6 +2238,18 @@
 
   let cmpCache = { key: null, items: null };
 
+  // One goal in a scenario: its chance, the change from `b` (the plan it is compared with) and when.
+  function scoreCell(r, b, c) {
+    if (!r) return h('td', { class: 'sc-cell none' }, h('span', { class: 'muted' }, 'Not a goal here'));
+    const pts = b ? Math.round((r.probability - b.probability) * 100) : 0;
+    return h('td', { class: 'sc-cell', style: `--gc:${cssVar(goalColor(c.goal))}` },
+      h('div', { class: 'sc-top' }, h('strong', {}, pct(r.probability)),
+        b && pts ? h('span', { class: `sc-delta ${pts > 0 ? 'pos' : 'neg'}` }, `${pts > 0 ? '▲' : '▼'} ${Math.abs(pts)} pts`) : null),
+      h('div', { class: 'sc-bar', role: 'img', 'aria-label': `${pct(r.probability)} chance` }, h('span', { style: `width:${r.probability * 100}%` })),
+      h('small', {}, goalWhen(r)));
+  }
+  const invest = it => (it.monthly.shortfall > 0 ? `−${money(it.monthly.shortfall)}` : money(it.monthly.invest));
+
   // Each scenario's goals (chance and expected year) and what it invests each month. The open
   // scenario uses the same numbers as everywhere else; the others are simulated alike.
   function compareScenarios() {
@@ -2059,6 +2268,7 @@
 
   function renderScenarios() {
     renderScenarioList();
+    renderComparisons();
     renderIdeas();
     const box = $('#compareResults');
     setKids(box, h('p', { class: 'sub working' }, `Working out ${ws.scenarios.length} scenario${ws.scenarios.length === 1 ? '' : 's'}…`));
@@ -2071,18 +2281,7 @@
       const same = (a, b) => a.goal.id === b.goal.id || a.title === b.title;
       for (const it of [base, ...items.filter(x => x !== base)]) for (const g of it.goals) if (!cols.some(c => same(c, g))) cols.push(g);
       const find = (it, c) => it.goals.find(g => same(g, c));
-      const cell = (it, c) => {
-        const r = find(it, c);
-        if (!r) return h('td', { class: 'sc-cell none' }, h('span', { class: 'muted' }, 'Not a goal here'));
-        const b = it === base ? null : find(base, c);
-        const pts = b ? Math.round((r.probability - b.probability) * 100) : 0;
-        return h('td', { class: 'sc-cell', style: `--gc:${cssVar(goalColor(c.goal))}` },
-          h('div', { class: 'sc-top' }, h('strong', {}, pct(r.probability)),
-            b && pts ? h('span', { class: `sc-delta ${pts > 0 ? 'pos' : 'neg'}` }, `${pts > 0 ? '▲' : '▼'} ${Math.abs(pts)} pts`) : null),
-          h('div', { class: 'sc-bar', role: 'img', 'aria-label': `${pct(r.probability)} chance` }, h('span', { style: `width:${r.probability * 100}%` })),
-          h('small', {}, goalWhen(r)));
-      };
-      const invest = it => (it.monthly.shortfall > 0 ? `−${money(it.monthly.shortfall)}` : money(it.monthly.invest));
+      const cell = (it, c) => scoreCell(find(it, c), it === base ? null : find(base, c), c);
       const rows = items.map(it => h('tr', { class: it === base ? 'open' : '', 'data-scenario': it.s.id },
         h('th', { scope: 'row' }, h('strong', {}, it.s.name), it === base ? h('span', { class: 'sc-open' }, 'Open now') : null),
         cols.map(c => cell(it, c)),
@@ -2127,6 +2326,77 @@
     btn.classList.add('added');
     renderScenarios();
     toast(`Added “${name}”. It is in the table above; open it to change anything in it.`);
+  }
+
+  // ---- comparisons: a common choice made two ways, next to the plan as it is (nothing saved)
+
+  let cmpPick = null;
+  let cmpRun = { key: null, rows: null };
+
+  function openComparison(id) {
+    cmpPick = id;
+    navigate('scenarios');
+    requestAnimationFrame(() => { const c = $('#compareCard'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  }
+
+  // How a plan does: goals, this year's investing, and savings and pensions when the first person retires.
+  function scorePlan(q, proj, goals) {
+    const p1 = q.household.people[0];
+    const t = Math.max(0, Math.min(proj.pre.N, p1.retireAge - p1.age));
+    const v = proj.rows[t].liquid;
+    return { goals, monthly: E.monthlyPlan(proj), atRetire: real() ? v / proj.pre.deflator[t] : v, retireYear: proj.rows[t].year };
+  }
+
+  function renderComparisons() {
+    const p = plan();
+    const list = SI.comparisonsFor(p);
+    if (cmpPick && !list.some(c => c.id === cmpPick)) cmpPick = null;
+    setKids($('#cmpGrid'), list.map(c => h('button', {
+      type: 'button', class: 'idea-chip', 'data-compare': c.id, 'aria-pressed': String(c.id === cmpPick),
+      onclick: () => { cmpPick = cmpPick === c.id ? null : c.id; renderComparisons(); },
+    }, h('span', { class: 'idea-ico' }, glyph(c.icon)), h('span', {}, c.title))));
+    const box = $('#cmpResult');
+    const c = list.find(x => x.id === cmpPick);
+    if (!c) { setKids(box); return; }
+    const head = h('p', { class: 'cmp-text' }, SI.textOf(c, p));
+    setKids(box, head, h('p', { class: 'sub working' }, 'Working it out…'));
+    const runs = ws.settings.runs, seed = ws.settings.seed;
+    const key = `${c.id}|${JSON.stringify(p)}|${runs}|${seed}|${real()}`;
+    setTimeout(() => {
+      if (route.tab !== 'scenarios' || cmpPick !== c.id) return;
+      if (cmpRun.key !== key) {
+        const base = { name: c.base || 'As now', text: 'Your plan as it is', ...scorePlan(p, model.proj, model.goals) };
+        cmpRun = { key, rows: [base, ...SI.optionsOf(c, p).map(o => {
+          const proj = E.project(o.plan);
+          return { ...o, ...scorePlan(o.plan, proj, E.evaluateGoals(o.plan, proj, E.monteCarlo(o.plan, runs, seed), { runs: 500, seed })) };
+        })] };
+      }
+      const [base, ...opts] = cmpRun.rows;
+      const cols = base.goals;
+      const find = (it, g) => it.goals.find(x => x.goal.id === g.goal.id);
+      const name = o => `${scenario().name}: ${o.name}`;
+      const kept = opts.every(o => ws.scenarios.some(s => s.name === name(o)));
+      const p1 = p.household.people[0];
+      const row = it => h('tr', { class: it === base ? 'open' : '' },
+        h('th', { scope: 'row' }, h('strong', {}, it.name), h('small', { class: 'cmp-what' }, it.text)),
+        cols.map(g => scoreCell(find(it, g), it === base ? null : find(base, g), g)),
+        h('td', { class: 'sc-invest' }, fmtCompact(it.atRetire), h('small', {}, `in ${it.retireYear}`)),
+        h('td', { class: 'sc-invest' }, invest(it), h('small', {}, 'a month now')));
+      setKids(box, head, h('div', { class: 'table-wrap sc-wrap' }, h('table', { class: 'data sc-table cmp-table' },
+        h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'Choice'),
+          cols.map(g => h('th', { scope: 'col', style: `--gc:${cssVar(goalColor(g.goal))}` }, h('span', { class: 'heat-goal' }, goalBadge(g.goal, 'small'), h('span', {}, g.title)))),
+          h('th', { scope: 'col' }, `Savings & pensions when ${p1.name} retires`), h('th', { scope: 'col' }, 'Invest'))),
+        h('tbody', {}, [base, ...opts].map(row)))),
+      h('div', { class: 'add-row' },
+        h('p', { class: 'hint' }, `Chance of each goal across simulated futures; ▲▼ compare with your plan as it is. Money in ${unitLabel()}.`),
+        h('button', { type: 'button', class: 'btn small', id: 'cmpKeep', disabled: kept, onclick: () => {
+          for (const o of opts) if (!ws.scenarios.some(s => s.name === name(o))) ws.scenarios.push({ id: E.uid(), name: name(o), plan: E.clonePlan(o.plan) });
+          save();
+          renderScenarioPicker();
+          renderScenarios();
+          toast(`Kept ${opts.length === 1 ? 'it' : `all ${opts.length}`} as scenarios in the table above.`);
+        } }, kept ? 'Kept as scenarios' : 'Keep as scenarios')));
+    }, 30);
   }
 
   // ------------------------------------------------------------------ progress (check-ins)
@@ -2750,6 +3020,134 @@
     refresh();
   }
 
+  // ------------------------------------------------------------------ saving & investing
+
+  // Your own monthly amounts, next to what the plan does with them this year.
+  function renderSaving() {
+    const p = plan();
+    const s = p.strategy;
+    const flow = (key, text) => h('span', { class: 'hint flow', 'data-flow': key }, text || '');
+    // "Everything left" or a set amount a month (today's money).
+    const autoOrSet = (key, label, autoText) => {
+      const set = s[key] !== null;
+      return h('div', { class: 'field' }, h('span', {}, label),
+        h('div', { class: 'auto-or-set' },
+          h('select', { 'aria-label': `${label}: automatic or a set amount`, onchange: e => {
+            s[key] = e.target.value === 'set' ? Math.round((key === 'isaMonthly' ? model.monthly.isa : model.monthly.gia) || 0) : null;
+            renderSection('saving'); schedule();
+          } }, h('option', { value: 'auto', selected: !set }, 'Automatic'), h('option', { value: 'set', selected: set }, 'Set amount')),
+          set ? moneyInput(...bind(s, key), { label: `${label} a month` }) : null),
+        flow(key), set ? null : h('span', { class: 'hint' }, autoText));
+    };
+    const lisas = p.accounts.filter(a => a.type === 'lisa' && !a.excluded);
+    const canOpen = people().filter(x => x.age >= 18 && x.age < R.LISA.openBefore && !lisas.some(a => a.owner === x.id));
+    return [
+      sectionHead('saving', 'Where your money goes each month', 'What is left after spending and mortgage payments is saved in this order. Set your own amounts, or leave them automatic. Amounts are in today’s money and rise with prices.'),
+      h('p', { class: 'saving-left', 'data-flow': 'surplus' }),
+      h('div', { class: 'fields' },
+        lisas.map(a => h('div', { class: 'field' }, h('span', {}, `${a.name} (Lifetime ISA)`),
+          moneyInput(() => Math.round(a.contribution / 12), v => { a.contribution = Math.min(R.LISA.maxContribution, Math.max(0, v * 12)); }, { label: `${a.name} a month` }),
+          h('span', { class: 'hint' }, `Up to ${money(R.LISA.maxContribution / 12)} a month (${money(R.LISA.maxContribution)} a year) gets the 25% bonus, until 50.`))),
+        autoOrSet('isaMonthly', 'ISAs', `Automatic: everything left, up to ${money(s.isaAllowance)} each a year.`),
+        autoOrSet('giaMonthly', 'General investment account', 'Automatic: whatever is left once the ISAs are full.'),
+        people().map(x => field(`Extra into ${x.name}’s pension`, moneyInput(...bind(x, 'extraPension'), { label: `Extra pension for ${x.name} a month` }),
+          'From take-home pay until retirement; 20% tax relief is added, and higher-rate relief is claimed back. Salary sacrifice (on the salary in Income) saves NI too.'))),
+      h('p', { class: 'hint', 'data-flow': 'cash' }),
+      canOpen.length ? h('div', { class: 'add-row' }, canOpen.map(x => h('button', { type: 'button', class: 'btn small', onclick: () => {
+        p.accounts.push({ id: E.uid(), name: `${x.name} Lifetime ISA`, type: 'lisa', owner: x.id, balance: 0, contribution: R.LISA.maxContribution, purpose: 'retirement' });
+        renderSection('accounts'); renderSection('saving'); schedule();
+      } }, `+ Lifetime ISA for ${x.name}`))) : null,
+    ];
+  }
+
+  // What the plan does this year with each amount (beside the inputs).
+  function updateSavingFigures() {
+    if (!model) return;
+    const m = model.monthly, r0 = model.proj.rows[0];
+    const set = (key, text) => { for (const el of $$(`[data-flow="${key}"]`)) el.textContent = text; };
+    const surplus = m.surplus;
+    set('surplus', m.shortfall > 0
+      ? `This year spending is ${money(m.shortfall)} a month more than comes in, so nothing is left to save.`
+      : `This year about ${money(surplus)} a month is left over after spending and mortgage payments.`);
+    set('isaMonthly', `This year: ${money(m.isa)} a month${(r0.sweepIsa || 0) > 0.5 ? `, plus ${money(r0.sweepIsa)} of spare cash` : ''}.`);
+    set('giaMonthly', `This year: ${money(m.gia)} a month.`);
+    set('cash', m.cash > 0.5 ? `${money(m.cash)} a month goes to cash this year (topping up the buffer, or what your set amounts leave over).` : '');
+  }
+
+  // Suggestions for this household, in the usual UK order.
+  function savingAdvice() {
+    const p = plan(), s = p.strategy, m = model.monthly, r0 = model.proj.rows[0];
+    const out = [];
+    const add = (title, amount, text, action) => out.push({ title, amount, text, action });
+    const monthlyOut = (r0.spending + r0.debtRegular) / 12;
+    const months = monthlyOut > 0 ? s.cashReserve / monthlyOut : 0;
+    add('1. Emergency fund', months >= 3 ? `${months.toFixed(1)} months` : `${money(3 * monthlyOut)}–${money(6 * monthlyOut)}`,
+      months >= 3 ? `Your cash buffer covers ${months.toFixed(1)} months of spending and mortgage payments (3–6 is the usual guide).` : `Keep 3–6 months of spending in easy-access cash before investing. Yours covers ${months.toFixed(1)} months.`,
+      months >= 3 ? null : ['Set the buffer', () => { s.cashReserve = Math.round(3 * monthlyOut / 100) * 100; renderSection('strategy'); schedule(); }]);
+    add('2. Workplace pension match', 'In full', 'Pay at least what your employer matches: their contribution is free money. Check your payslip or scheme rules.');
+    const lisaPeople = people().filter(x => x.age >= 18 && x.age < R.LISA.payUntil && (x.age < R.LISA.openBefore || p.accounts.some(a => a.type === 'lisa' && a.owner === x.id)));
+    if (lisaPeople.length) {
+      add('3. Lifetime ISA', `${money(R.LISA.maxContribution / 12)} a month each`, `${lisaPeople.map(x => x.name).join(' and ')} can get a 25% bonus (${money(R.LISA.maxContribution * R.LISA.bonus)} a year each) until 50, usable from 60 or for a first home. Good if you won’t need it before 60.`,
+        ['Compare with salary sacrifice', () => openComparison('sacrifice-lisa')]);
+    }
+    // Pension relief for anyone paying higher-rate tax: the pay above the higher-rate threshold.
+    const region = p.household.region;
+    for (const x of people()) {
+      const pay = p.income.filter(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 0) > 0);
+      if (!pay.length || p.household.ignoreTax || x.retireAge <= x.age) continue;
+      const gross = pay.reduce((acc, i) => acc + (i.tax === 'uk' ? E.incomeAfterCosts(i, p, 0) : i.tax === 'none' ? R.grossFromTakeHome(E.incomeAfterCosts(i, p, 0), region) : 0), 0);
+      const rate = v => R.incomeTax(v + 100, region) - R.incomeTax(v, region);
+      if (rate(gross) / 100 < 0.4) continue;
+      let lo = 0, hi = gross;
+      for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (rate(mid) / 100 >= 0.4) hi = mid; else lo = mid; }
+      const over = Math.max(0, gross - hi);
+      add(`${lisaPeople.length ? 4 : 3}. Pension for ${x.name}`, `up to ${money(over / 12)} a month`,
+        `${x.name} pays ${Math.round(rate(gross))}% tax on the top ${money(over)} of pay (estimated). Putting that into the pension gets the same relief now, and it is likely taxed at 20% or less when drawn. Salary sacrifice saves NI too.`,
+        ['Compare pension or ISA', () => openComparison('pension-isa')]);
+    }
+    const isaRoom = s.isaAllowance * people().length;
+    add(`${out.length + 1}. ISAs`, `up to ${money(isaRoom / 12)} a month`, `${money(s.isaAllowance)} each a year, tax-free for good and available any time. This year the plan puts in ${money(m.isa + m.lisa)} a month.`);
+    if (m.gia > 0.5 || r0.gia > 0.5) add(`${out.length + 1}. General investment account`, `${money(m.gia)} a month now`, 'Only once ISAs are full: gains above the allowance are taxed when you sell. Move it into ISAs each April ("Bed and ISA").');
+    const debt = p.accounts.find(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
+    if (debt) {
+      const ret = model.proj.pre.econ.ret[0] * 100;
+      add('Mortgage', debt.rate >= ret - 1 ? 'Worth overpaying' : 'Invest first',
+        debt.rate >= ret - 1 ? `Overpaying earns a sure ${debt.rate}%, close to the ${ret.toFixed(1)}% expected from investing.` : `Investing is expected to earn ${ret.toFixed(1)}% against the ${debt.rate}% the mortgage costs. Overpaying is the safer choice.`,
+        ['Compare', () => openComparison('overpay-invest')]);
+    }
+    return out;
+  }
+
+  function wkSaving(body) {
+    const card = wkCard(body, 'Suggested order', h('p', {}, 'The usual UK order for a household like yours. Rules of thumb, not advice.'));
+    card.append(h('ol', { class: 'advice' }, savingAdvice().map(a => h('li', {},
+      h('div', { class: 'adv-head' }, h('strong', {}, a.title.replace(/^\d+\.\s*/, '')), h('span', { class: 'adv-amt' }, a.amount)),
+      h('p', {}, a.text),
+      a.action ? h('button', { type: 'button', class: 'btn small', onclick: a.action[1] }, a.action[0]) : null))));
+    // Where the money goes, year by year, until retirement.
+    const rows = model.proj.rows;
+    const p1 = people()[0];
+    const n = Math.max(2, Math.min(rows.length - 1, Math.max(...people().map(x => x.retireAge - x.age)) + 1));
+    const xs = rows.slice(0, n).map(r => r.year);
+    const series = [
+      { label: 'Lifetime ISAs', color: '--s7', of: r => r.toLisa || 0 },
+      { label: 'ISAs', color: '--s2', of: r => r.toIsa + r.sweepIsa },
+      { label: 'General investment', color: '--s3', of: r => r.toGia + r.sweepGia },
+      { label: 'Extra pension', color: '--s4', of: r => r.extraPension || 0 },
+      { label: 'Mortgage overpayments', color: '--s8', of: r => r.overpay + r.lumpOverpay },
+      { label: 'Cash', color: '--s1', of: r => r.toCash },
+    ].map(x => ({ ...x, values: rows.slice(0, n).map((r, t) => D(x.of(r), t) / 12) })).filter(x => x.values.some(v => v > 0.5));
+    const c2 = wkCard(body, 'Where it goes, year by year', h('p', {}, `A month, until ${people().length > 1 ? 'you both retire' : 'you retire'}, in ${unitLabel()}. Pay rises, the mortgage ending and costs that stop all change it.`));
+    const ch = chartIn(c2, 240, 'Monthly saving by where it goes', { name: 'saving-by-year' });
+    ch.set({
+      xs, bars: series,
+      tooltip: i => ({ title: `${xs[i]} · ${p1.name} ${p1.age + i}`, rows: series.filter(x => x.values[i] > 0.5).map(x => ({ label: x.label, color: x.color, text: `${money(x.values[i])} a month` })) }),
+    });
+    const lg = h('div', { class: 'legend' });
+    c2.append(lg);
+    legend(lg, series.map(x => ({ label: x.label, color: x.color })), ch);
+  }
+
   // ------------------------------------------------------------------ plan editor sections
 
   const SECTIONS = [
@@ -2758,6 +3156,7 @@
     { id: 'expenses', title: 'Spending', render: renderExpenses, count: () => plan().expenses.length },
     { id: 'events', title: 'One-off events', render: renderEvents, count: () => plan().events.length },
     { id: 'accounts', title: 'Accounts', render: renderAccounts, count: () => plan().accounts.length },
+    { id: 'saving', title: 'Saving & investing', render: renderSaving },
     { id: 'strategy', title: 'Saving strategy', render: renderStrategy },
     { id: 'market', title: 'Markets & inflation', render: renderMarket },
     { id: 'tax', title: 'Tax rules', render: renderTax },
@@ -2831,8 +3230,7 @@
           field('Plan until age', numInput(...bind(p, 'endAge'), { min: 50, max: 120 })),
           field('State Pension (£/year, today)', moneyInput(...bind(p, 'statePension')), `Full new State Pension is ${money(R.STATE_PENSION_FULL)}. Forecast at gov.uk/check-state-pension.`),
           field('State Pension age', numInput(...bind(p, 'statePensionAge'), { min: 60, max: 75 }), `Born ${plan().startYear - p.age}: ${R.statePensionAge(plan().startYear - p.age)} under current law.`),
-          field('Can access pension from', numInput(...bind(p, 'pensionAccessAge'), { min: 50, max: 75 }), 'Minimum pension age is 57 from April 2028.'),
-          field('Extra pension saving (£/month)', moneyInput(...bind(p, 'extraPension')), 'Paid from take-home pay until retirement; 20% tax relief is added, and higher-rate relief is claimed back (Saving strategy).')))));
+          field('Can access pension from', numInput(...bind(p, 'pensionAccessAge'), { min: 50, max: 75 }), 'Minimum pension age is 57 from April 2028.')))));
     return [
       sectionHead('household', 'Household', 'Who the plan is for.',
         hh.people.length < 2 ? h('button', { type: 'button', class: 'btn small', onclick: addPartner }, '+ Add partner') : null),
@@ -2931,7 +3329,9 @@
     const person = people()[E.personIndex(p, item.owner)];
     const atStart = E.incomeAfterCosts(item, p, Math.max(0, item.startAge - person.age));
     const today = atStart / Math.pow(1 + p.assumptions.inflation / 100, Math.max(0, item.startAge - person.age));
-    return `${money(item.amount)} + ${money(item.dbAccrual)} × ${Math.max(0, Math.min(person.retireAge, item.startAge) - person.age)} more years of work = ${money(today)} a year in today's money from age ${item.startAge}, rising with prices${item.lumpMultiple > 0 ? `, plus a ${money(today * item.lumpMultiple)} lump sum` : ''}.`;
+    const early = E.dbEarly(item, person);
+    const cut = early.years > 0 ? ` × ${(early.factor * 100).toFixed(1)}% for taking it ${+early.years.toFixed(1)} year${early.years === 1 ? '' : 's'} before the Normal Pension Age of ${early.npa}` : '';
+    return `(${money(item.amount)} + ${money(item.dbAccrual)} × ${Math.max(0, Math.min(person.retireAge, item.startAge) - person.age)} more years of work)${cut} = ${money(today)} a year in today's money from age ${item.startAge}, rising with prices${item.lumpMultiple > 0 ? `, plus a ${money(today * item.lumpMultiple)} lump sum` : ''}.`;
   }
 
   function renderDbPension(item, p) {
@@ -2946,7 +3346,7 @@
         field('Whose', selectInput(ownerOptions(false), ...bind(item, 'owner'), { rerender: 'income' })),
         field('Built up so far (£ a year)', moneyInput(...bind(item, 'amount'), { label: 'Pension built up so far' }), 'From the latest benefit statement.'),
         field('Added each year you keep working', moneyInput(...bind(item, 'dbAccrual'), { label: 'Pension added each year' }), 'USS adds about 1/75 of salary a year.'),
-        field('Paid from age', numInput(...bind(item, 'startAge'), { min: 50, max: 75, label: 'Pension age' }), `${person.name}'s State Pension age is ${person.statePensionAge}.`),
+        field('Paid from age', numInput(...bind(item, 'startAge'), { min: 50, max: 75, label: 'Pension age' }), `${person.name}'s State Pension age is ${person.statePensionAge}. USS pays in full from its Normal Pension Age (State Pension age); taken earlier it is cut by USS’s early retirement factors (e.g. 90% two years early, 67.5% eight years early).`),
         field('Tax-free lump sum', numInput(...bind(item, 'lumpMultiple'), { min: 0, max: 10, step: 0.5, suffix: '× pension', label: 'Lump sum multiple' }), 'USS pays 3× the pension as cash; 0 if none.'),
         field('Tax', selectInput(taxOptions(item.kind), ...bind(item, 'tax'), { rerender: 'income' }))),
       h('p', { class: 'hint calc', 'data-calc': item.id }, dbWorking(item, p)),
@@ -3208,7 +3608,7 @@
   function renderStrategy() {
     const s = plan().strategy;
     return [
-      sectionHead('strategy', 'Saving strategy', 'What happens to money left over each year: first the cash buffer, then mortgage overpayments, then ISAs, then a general investment account.'),
+      sectionHead('strategy', 'Saving strategy', 'The order money left over goes in: the cash buffer, mortgage overpayments, Lifetime ISAs, ISAs, then a general investment account.'),
       h('div', { class: 'fields' },
         field('Cash buffer to keep', moneyInput(...bind(s, 'cashReserve')), 'Topped up first; spent last in retirement.'),
         field('Overpay mortgage with', numInput(...bind(s, 'overpayPct'), { min: 0, max: 100, step: 5, suffix: '%' }), 'Share of the surplus. Try a range in Scenarios.'),
@@ -3653,8 +4053,21 @@
       if (box.closest('[hidden]')) continue;
       setKids(box, h('label', { class: 'switch small', title: 'On: amounts in later years are shown in today’s money, so £1 buys what £1 buys today. Off: the actual pounds of each year, which grow with prices.' },
         h('input', { type: 'checkbox', role: 'switch', checked: real(), 'aria-label': 'Adjust for inflation', onchange: e => { ws.settings.realDollars = e.target.checked; save(); compareDirty = true; renderResults(); } }),
-        'Adjust for inflation'));
+        'Adjust for inflation'),
+        showToSelect());
     }
+  }
+
+  // How far ahead the charts go. The plan itself always runs to the end age.
+  function showToSelect() {
+    const p1 = people()[0];
+    const ages = [70, 80, 85, 90].filter(a => a > p1.age + 5 && a < p1.endAge);
+    const opts = [...ages.map(a => [a, `Up to age ${a} (${plan().startYear + a - p1.age})`]), [0, `Whole plan, to ${p1.endAge} (${plan().startYear + p1.endAge - p1.age})`]];
+    const cur = opts.some(o => o[0] === ws.settings.showTo) ? ws.settings.showTo : 0;
+    return h('label', { class: 'show-to', title: `Charts stop here. The plan still runs to ${p1.endAge}, so the chances that money lasts are unchanged.` },
+      h('span', { class: 'sr-only' }, 'Show charts'),
+      h('select', { 'aria-label': 'Show charts up to', onchange: e => { ws.settings.showTo = +e.target.value; save(); renderResults(); } },
+        opts.map(([v, label]) => h('option', { value: String(v), selected: v === cur }, label))));
   }
 
   // ---- notifications: the yearly review, figures getting old, saving a copy, plan checks
@@ -3732,12 +4145,20 @@
     $('#savedNote').textContent = `${d ? `Last saved to a file on ${fmtDate(d)}.` : 'Not saved to a file yet.'} A saved file keeps a copy and lets you carry on on another computer.`;
   }
 
+  // Charts over time stop when the first person reaches the "Show up to" age.
+  function applyShowTo() {
+    const to = ws.settings.showTo, p1 = people()[0];
+    Chart.until = to && to < p1.endAge ? plan().startYear + (to - p1.age) : null;
+  }
+
   function renderResults() {
+    applyShowTo();
     renderTabs();
     renderView();
     if (route.tab === 'finances' && moneyPage === 'income') updateIncomeTrends();
     updateIncomeFigures();
     updateAccountFigures();
+    updateSavingFigures();
     renderSavedNote();
     renderNotifications();
     renderScenarioPicker();

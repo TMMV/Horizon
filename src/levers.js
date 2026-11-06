@@ -94,8 +94,9 @@
         label: `${p.name} retires at`, min: Math.max(p.age, 40), max: 75, step: 1,
         get: pl => pl.household.people[i].retireAge,
         set: (pl, v) => {
-          // The first person's retirement goal moves with their retirement age.
-          if (i === 0) for (const g of pl.goals) if (g.type === 'retire' && g.age === pl.household.people[0].retireAge) g.age = v;
+          // This person's retirement goal moves with their retirement age.
+          const who = pl.household.people[i];
+          for (const g of pl.goals) if (g.type === 'retire' && (g.owner || pl.household.people[0].id) === who.id && g.age === who.retireAge) g.age = v;
           pl.household.people[i].retireAge = v;
         },
         hint: i === 0 ? 'Salaries stop at retirement; pensions can be drawn from the access age.' : null,

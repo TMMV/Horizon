@@ -150,3 +150,21 @@ test('the example plan’s figures are as at the most recent 1 September', () =>
   assert.equal(p.startYear, +p.asOf.slice(0, 4));
   assert.equal(E.defaultPlan(2030).asOf, '2030-09-01');
 });
+
+test('charts over years stop at the chosen year; tables keep every year', () => {
+  const { Chart } = require('../../src/chart');
+  const xs = [2026, 2027, 2028, 2029, 2030];
+  const cfg = { xs, lines: [{ label: 'a', values: [1, 2, 3, 4, 5] }], bands: [{ lower: [0, 0, 0, 0, 0], upper: [9, 9, 9, 9, 9] }] };
+  Chart.until = 2028;
+  const t = Chart.trim(cfg);
+  assert.deepEqual(t.xs, [2026, 2027, 2028]);
+  assert.deepEqual(t.lines[0].values, [1, 2, 3]);
+  assert.deepEqual(t.bands[0].upper, [9, 9, 9]);
+  assert.deepEqual(Chart.trim({ ...cfg, fullRange: true }).xs, xs);
+  assert.deepEqual(Chart.trim({ xs: [1, 2, 3, 4], lines: [] }).xs, [1, 2, 3, 4], 'not years: untouched');
+  Chart.until = null;
+  assert.deepEqual(Chart.trim(cfg).xs, xs);
+  const ws = E.normalizeWorkspace(E.defaultWorkspace());
+  assert.equal(ws.settings.showTo, 85);
+  assert.equal(E.normalizeWorkspace({ ...ws, settings: { ...ws.settings, showTo: 0 } }).settings.showTo, 0);
+});

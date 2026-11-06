@@ -68,8 +68,13 @@
 
   // Defined benefit (career average) schemes: pension added per year = salary / accrual,
   // an automatic lump sum of `lump` × the pension, and the normal pension age.
+  // USS early retirement: % of the pension (and its lump sum) kept when taken 0, 1, 2… full years
+  // before Normal Pension Age (factors from 1 October 2024, uss.co.uk "Factors used by USS").
+  const USS_EARLY = [100, 94.8, 90, 85.5, 81.4, 77.5, 74, 70.6, 67.5, 64.6, 61.8, 59.3, 56.8, 54.5, 52.4, 50.3, 48.4];
+
   const DB_SCHEMES = {
-    uss: { label: 'USS (universities)', accrual: 75, lump: 3, age: 65 },
+    // USS Normal Pension Age follows State Pension age (66 in 2026; uss.co.uk glossary).
+    uss: { label: 'USS (universities)', accrual: 75, lump: 3, age: 'spa', early: USS_EARLY },
     saul: { label: 'SAUL (university staff)', accrual: 75, lump: 3, age: 65 },
     lgps: { label: 'Local Government (LGPS Scotland)', accrual: 49, lump: 0, age: 'spa' },
     teachers: { label: 'Scottish Teachers (STPS)', accrual: 57, lump: 0, age: 'spa' },
@@ -159,7 +164,7 @@
     TAX_YEAR, PERSONAL_ALLOWANCE, PA_TAPER_START, INCOME_TAX, NI, CGT,
     ISA_ALLOWANCE, STATE_PENSION_FULL, LUMP_SUM_ALLOWANCE, PENSION_TAX_FREE_SHARE,
     MIN_PENSION_AGE, PENSION_ANNUAL_ALLOWANCE, FREEZE_UNTIL, SACRIFICE_NI_CAP, SACRIFICE_NI_CAP_FROM,
-    CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, DB_SCHEMES, LISA,
+    CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, DB_SCHEMES, USS_EARLY, LISA,
     statePensionAge, grossFromTakeHome, personalAllowance, incomeTax, marginalRate, nationalInsurance,
     capitalGainsTax, bandTable,
   };

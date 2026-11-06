@@ -65,6 +65,7 @@
           </div>
           <div class="controls" data-inflation></div>
         </div>
+        <div class="chart-group" id="ovGroup"></div>
         <div class="chart" id="ovChart"></div>
         <div class="legend" id="ovLegend"></div>
       </section>
@@ -97,6 +98,13 @@
         </div>
         <aside class="io-preview stack"><div class="io-impact card" data-impact></div><div class="stack" id="mpSpending"></div></aside>
       </div>
+      <div class="money-page io" data-page="saving" hidden>
+        <div class="io-inputs stack">
+          <section class="card" id="sec-saving" aria-labelledby="h-saving"></section>
+          <section class="card" id="sec-strategy" aria-labelledby="h-strategy"></section>
+        </div>
+        <aside class="io-preview stack"><div class="io-impact card" data-impact></div><div class="stack" id="mpSaving"></div></aside>
+      </div>
       <div class="money-page stack" data-page="cashflow" hidden>
         <section class="card">
           <div class="card-head">
@@ -114,7 +122,6 @@
       <div class="money-page io" data-page="assumptions" hidden>
         <div class="io-inputs stack">
           <section class="card" id="sec-household" aria-labelledby="h-household"></section>
-          <section class="card" id="sec-strategy" aria-labelledby="h-strategy"></section>
           <section class="card" id="sec-market" aria-labelledby="h-market"></section>
           <section class="card" id="sec-tax" aria-labelledby="h-tax"></section>
         </div>
@@ -167,6 +174,12 @@
         </div>
         <div id="compareResults"></div>
         <div class="scenario-edit" id="sec-scenario"></div>
+      </div>
+      <div class="card" id="compareCard">
+        <h2>Compare two choices</h2>
+        <p class="sub">Common decisions, worked out on the plan you have open. Nothing is saved unless you keep them as scenarios.</p>
+        <div class="idea-chips" id="cmpGrid"></div>
+        <div id="cmpResult"></div>
       </div>
       <div class="card">
         <h2>Add a what-if</h2>

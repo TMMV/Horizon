@@ -159,13 +159,33 @@
     //        table() -> {headers, rows, formats}, tooltip(i) -> {title, rows:[{label,color,shape,text}]} }
     set(cfg) {
       const prev = this.disp;
-      this.cfg = cfg;
+      this.full = cfg;
+      this.cfg = cfg = Chart.trim(cfg);
       if (prev && this.revealed && !reducedMotion() && this.compatible(prev, cfg)) {
         this.anim = { kind: 'tween', start: now(), dur: 420, from: prev };
       }
       if (this.view === 'table') this.renderTable();
       this.draw();
       if (this.hover >= 0) this.showTip(this.lastPointer);
+    }
+
+    // Charts over years stop at Chart.until (a year) unless they ask for the whole range.
+    // Only the end is cut, so index i still means the same year for tooltips and tables.
+    static trim(cfg) {
+      const until = Chart.until;
+      const xs = cfg.xs || [];
+      if (!until || cfg.fullRange || xs.length < 3 || !(xs[0] > 1900) || xs[xs.length - 1] <= until) return cfg;
+      const n = xs.findIndex(x => x > until);
+      if (n < 2) return cfg;
+      const cut = a => (a ? a.slice(0, n) : a);
+      return {
+        ...cfg,
+        xs: xs.slice(0, n),
+        bars: (cfg.bars || []).map(b => ({ ...b, values: cut(b.values) })),
+        areas: (cfg.areas || []).map(b => ({ ...b, values: cut(b.values) })),
+        lines: (cfg.lines || []).map(b => ({ ...b, values: cut(b.values) })),
+        bands: (cfg.bands || []).map(b => ({ ...b, lower: cut(b.lower), upper: cut(b.upper) })),
+      };
     }
 
     compatible(prev, cfg) {
@@ -196,7 +216,7 @@
 
     // Numbers behind the chart: the caller's own table, or one column per series.
     tableData() {
-      const cfg = this.cfg;
+      const cfg = this.full || this.cfg;   // every year, even past where the chart stops
       if (!cfg) return null;
       if (cfg.table) return cfg.table();
       const fmtV = cfg.tableFormat || (cfg.yFormat ? cfg.yFormat : fmtMoney);

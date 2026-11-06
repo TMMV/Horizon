@@ -87,3 +87,70 @@ test('retiring earlier or later moves the retirement goal with it', () => {
   v.retireAge0 = p.household.people[0].retireAge + 4;
   assert.equal(L.apply(p, v).goals.find(g => g.type === 'retire').age, goal.age + 4);
 });
+
+test('comparisons: salary sacrifice or Lifetime ISA costs the same take-home pay', () => {
+  const p = E.defaultPlan(2026);
+  const ids = SI.comparisonsFor(p).map(c => c.id);
+  assert.deepEqual(ids, ['sacrifice-lisa', 'pension-isa', 'overpay-invest', 'retire-when', 'markets', 'mortgage-rate']);
+  const c = SI.COMPARISONS.find(x => x.id === 'sacrifice-lisa');
+  const [lisa, sac] = SI.optionsOf(c, p);
+  assert.equal(lisa.name, 'Lifetime ISA');
+  const l = lisa.plan.accounts.find(a => a.type === 'lisa');
+  assert.equal(l.owner, 'p1');
+  assert.equal(l.contribution, E.R.LISA.maxContribution);
+  // Salary sacrifice: no Lifetime ISA, and the pension costs £4,000 of take-home pay until 50.
+  assert.equal(sac.plan.accounts.some(a => a.type === 'lisa'), false);
+  assert.ok(Math.abs(SI.takeHome(p, 0) - SI.takeHome(sac.plan, 0) - E.R.LISA.maxContribution) < 15);
+  const pay = sac.plan.income.filter(i => i.owner === 'p1' && i.kind === 'salary');
+  assert.equal(pay.length, 2);
+  assert.equal(pay[0].endAge, 50);
+  assert.equal(pay[1].startAge, 50);
+  assert.equal(pay[1].employeePension, p.income[0].employeePension);
+  assert.ok(pay[0].employeePension > p.income[0].employeePension);
+  // Both pay the same into the ISAs each month now (the Lifetime ISA comes out of the surplus).
+  const m = q => E.monthlyPlan(E.project(q));
+  assert.ok(Math.abs(m(lisa.plan).invest - m(p).invest) < 1);
+  assert.ok(m(lisa.plan).lisa > 300);
+});
+
+test('comparisons: options that change nothing are left out, and some need a mortgage or a salary', () => {
+  const p = E.defaultPlan(2026);
+  const c = SI.COMPARISONS.find(x => x.id === 'overpay-invest');
+  assert.deepEqual(SI.optionsOf(c, p).map(o => o.name), ['Overpay with all of it']);   // already invests it
+  const q = E.clonePlan(p);
+  q.accounts = q.accounts.filter(a => a.type !== 'debt');
+  q.household.ignoreTax = true;   // no taxed pay, so no salary sacrifice
+  const ids = SI.comparisonsFor(E.normalizePlan(q)).map(x => x.id);
+  assert.deepEqual(ids, ['retire-when', 'markets']);
+  // Over 40 without a Lifetime ISA: pension or ISA, but no Lifetime ISA.
+  const r = E.clonePlan(p);
+  r.household.people.forEach(x => { x.age += 5; });
+  assert.deepEqual(SI.comparisonsFor(E.normalizePlan(r)).map(x => x.id).slice(0, 2), ['pension-isa', 'overpay-invest']);
+});
+
+test('a Lifetime ISA grows once: ISA balances add up year by year', () => {
+  const p = E.clonePlan(E.defaultPlan(2026));
+  p.accounts.push({ id: 'l1', name: 'LISA', type: 'lisa', owner: 'p1', balance: 10000, contribution: 4000, purpose: 'retirement' });
+  const rows = E.project(E.normalizePlan(p)).rows;
+  for (let t = 0; t < rows.length - 1; t++) {
+    const r = rows[t];
+    const inn = r.toIsa + r.sweepIsa + r.bondsToIsa + r.toLisa + r.lisaBonus;
+    const out = r.wIsa + r.wLisa + r.lisaHome;
+    assert.ok(Math.abs(r.isa + r.gIsa + inn - out - rows[t + 1].isa) < 1, `year ${r.year}`);
+  }
+});
+
+test('comparisons: salary sacrifice also works on pay entered as take-home', () => {
+  const p = E.clonePlan(E.defaultPlan(2026));
+  Object.assign(p.income[0], { tax: 'none', amount: 3800, freq: 'month', pensionMode: 'fixed', employeePension: 300, employerPension: 300, sacrifice: false });
+  const q = E.normalizePlan(p);
+  const c = SI.COMPARISONS.find(x => x.id === 'sacrifice-lisa');
+  const sac = SI.optionsOf(c, q).find(o => o.name === 'Salary sacrifice');
+  assert.match(sac.text, /tax estimated from take-home pay/);
+  const pay = sac.plan.income.filter(i => i.owner === 'p1' && i.kind === 'salary');
+  const net0 = E.incomeAfterCosts(q.income[0], q, 0), net1 = E.incomeAfterCosts(pay[0], sac.plan, 0);
+  assert.ok(Math.abs(net0 - net1 - E.R.LISA.maxContribution) < 10);   // the sacrifice is rounded to £10
+  const extra = (pay[0].employeePension - 300) * 12;
+  assert.ok(extra > 5000 && extra < 8000, String(extra));   // tax and NI relief on top
+  assert.equal(pay[1].amount, 3800);   // from 50 the pay is back to normal
+});

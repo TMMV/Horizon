@@ -112,6 +112,10 @@
       slowDownAge: 0,        // from this age (first person) spending is scaled by slowDownPct; 0 = never
       slowDownPct: 100,
       claimRelief: true,     // claim higher-rate relief on personal pension contributions (self-assessment)
+      // Your own amounts a month (today's money); null = automatic (everything left, in order).
+      // Whatever your amounts leave over stays in cash.
+      isaMonthly: null,
+      giaMonthly: null,
     };
   }
 
@@ -184,7 +188,7 @@
       scenarios: [{ id, name: 'Base plan', plan: defaultPlan() }],
       checkins: [],
       dismissed: [],
-      settings: { realDollars: true, runs: 1000, seed: 42, theme: 'light', confidence: 90, lastSaved: null },
+      settings: { realDollars: true, runs: 1000, seed: 42, theme: 'light', confidence: 90, lastSaved: null, showTo: 85 },
     };
   }
 
@@ -250,8 +254,11 @@
     return goals;
   }
 
-  function normalizeGoal(g, startYear, p1) {
+  function normalizeGoal(g, startYear, p1, people = [p1]) {
     const type = oneOf(g.type, GOAL_TYPES, 'netWorth');
+    // A retirement goal is about one person retiring (the first person unless it says otherwise).
+    const owner = type === 'retire' ? oneOf(g.owner, people.map(x => x.id), p1.id) : null;
+    const who = people.find(x => x.id === owner) || p1;
     const colour = Math.round(num(g.color, -1));
     return {
       id: str(g.id, uid()),
@@ -263,7 +270,8 @@
       measure: oneOf(g.measure, Object.keys(GOAL_MEASURES), 'all'),
       basis: oneOf(g.basis, ['nominal', 'real'], 'nominal'),
       year: Math.round(num(g.year, startYear + 10)),
-      age: Math.round(num(g.age, p1.retireAge)),
+      age: Math.round(num(g.age, who.retireAge)),
+      owner,
       confidence: Math.min(99, Math.max(50, num(g.confidence, 80))),
       withdrawalRate: Math.min(10, Math.max(1, num(g.withdrawalRate, 4))),
       includePensions: g.includePensions !== undefined ? !!g.includePensions : true,
@@ -362,7 +370,7 @@
     }));
 
     let goals;
-    if (Array.isArray(p.goals)) goals = arr(p.goals).map(g => normalizeGoal(g, startYear, people[0]));
+    if (Array.isArray(p.goals)) goals = arr(p.goals).map(g => normalizeGoal(g, startYear, people[0], people));
     else if (p.goal && typeof p.goal === 'object') goals = [normalizeGoal({ ...p.goal, type: 'netWorth', year: startYear + 10 }, startYear, people[0])];
     else goals = defaultGoals(startYear, people[0]).map(g => normalizeGoal(g, startYear, people[0]));
     assignGoalColours(goals);
@@ -466,6 +474,8 @@
         theme: (num(w.version, 0) < 5 && st.theme === 'auto') ? 'light' : oneOf(st.theme, ['auto', 'light', 'dark'], 'light'),
         confidence: Math.min(99, Math.max(50, num(st.confidence, ds.confidence))),
         lastSaved: isDate(st.lastSaved) ? st.lastSaved : null,   // when the plan was last saved to a file
+        // Charts over time stop when the first person reaches this age (0 = the whole plan).
+        showTo: st.showTo === 0 ? 0 : Math.min(120, Math.max(50, Math.round(num(st.showTo, ds.showTo)))),
       },
     };
   }
@@ -565,7 +575,20 @@
     if (age < item.startAge) return 0;
     const years = Math.max(0, Math.min(person.retireAge, item.startAge) - person.age);
     const price = econ ? econ.price[t] : Math.pow(1 + plan.assumptions.inflation / 100, t);
-    return (item.amount + item.dbAccrual * years) * price;
+    return (item.amount + item.dbAccrual * years) * price * dbEarly(item, person).factor;
+  }
+
+  // A defined benefit pension taken before the scheme's Normal Pension Age is reduced (USS
+  // publishes its factors; other schemes are not reduced here). Years early, and the share kept.
+  function dbEarly(item, person) {
+    const s = R.DB_SCHEMES[item.dbScheme];
+    if (!s || !s.early) return { npa: null, years: 0, factor: 1 };
+    const npa = s.age === 'spa' ? person.statePensionAge : s.age;
+    const years = Math.max(0, npa - item.startAge);
+    const i = Math.min(s.early.length - 1, Math.floor(years));
+    const j = Math.min(s.early.length - 1, i + 1);
+    const pctKept = s.early[i] + (s.early[j] - s.early[i]) * (years - Math.floor(years));
+    return { npa, years, factor: pctKept / 100 };
   }
 
   // Income after currency conversion and costs, in pounds, for year t.
@@ -829,6 +852,7 @@
         pension: new Float64Array(N + 1), relief: new Float64Array(N + 1),
       }));
       out.debts = [];
+      out.lisa = new Float64Array(N + 1);   // Lifetime ISAs (also counted in isa)
     }
     return out;
   }
@@ -934,7 +958,9 @@
 
     const sum = xs => xs.reduce((acc, v) => acc + v, 0);
     const record = t => {
-      out.cash[t] = cash; out.isa[t] = isa + lisas.reduce((acc, l) => acc + l.bal, 0); out.gia[t] = gia; out.pension[t] = sum(pension);
+      const lisaBal = lisas.reduce((acc, l) => acc + l.bal, 0);
+      if (out.lisa) out.lisa[t] = lisaBal;
+      out.cash[t] = cash; out.isa[t] = isa + lisaBal; out.gia[t] = gia; out.pension[t] = sum(pension);
       out.bonds[t] = bonds.reduce((acc, b) => acc + b.bal, 0);
       out.property[t] = props.reduce((acc, p) => acc + p.val, 0);
       out.debt[t] = debts.reduce((acc, d) => acc + d.bal, 0);
@@ -956,13 +982,15 @@
       // Optional fixed average returns keep each run's market surprise but move its centre.
       const rInv = (invOverride === null ? r : r - econ.mean[t] + invOverride) - fee;
       const rPen = (penOverride === null ? r : r - econ.mean[t] + penOverride) - fee;
+      // gIsa reports ISA growth including Lifetime ISAs; each balance grows once.
       let gIsa = isa * rInv;
+      isa += gIsa;
       for (const l of lisas) { const x = l.bal * rInv; l.bal += x; gIsa += x; }
       // A Lifetime ISA saved for a first home is paid out in the year of the purchase.
       let lisaHome = 0;
       for (const l of lisas) if (t === l.home && l.bal > 0) { cash += l.bal; lisaHome += l.bal; l.bal = 0; }
       const gCash = cash * cashRate, gGia = gia * rInv;
-      cash += gCash; isa += gIsa; gia += gGia;
+      cash += gCash; gia += gGia;
       let gPension = 0;
       for (let i = 0; i < n; i++) { const x = pension[i] * rPen; pension[i] += x; gPension += x; }
       let gBonds = 0, bondsMatured = 0, bondsToIsa = 0;
@@ -999,8 +1027,13 @@
       const debtStart = debts.map(d => d.bal);
       debts.forEach((d, k) => {
         const rate = t >= d.varFrom ? Math.max(0, d.after + dr) : d.rate;
-        // On renewal, optionally reset the payment so the mortgage still ends when it would have.
-        if (t === d.varFrom && d.keepTerm && d.bal > 0) d.pay = renewalPayment(d.bal, d.rate, d.pay, rate);
+        // On renewal, optionally reset the payment so the mortgage still ends when it would have;
+        // after that it is reset whenever the rate moves (a new deal), keeping the same end date.
+        if (d.keepTerm && t >= d.varFrom && d.bal > 0) {
+          const was = t === d.varFrom ? d.rate : d.last;
+          if (Math.abs(rate - was) > 1e-9) d.pay = renewalPayment(d.bal, was, d.pay, rate);
+        }
+        d.last = rate;
         if (detail) out.debts[k].rate[t] = rate;
         const interest = d.bal * rate;
         const p = Math.min(d.pay, d.bal + interest);
@@ -1065,20 +1098,24 @@
           left -= x;
           allowance -= x;
         }
-        toIsa = Math.min(left, allowance);
+        const capIsa = s.isaMonthly === null ? Infinity : Math.max(0, s.isaMonthly) * 12 * f;
+        const capGia = s.giaMonthly === null ? Infinity : Math.max(0, s.giaMonthly) * 12 * f;
+        toIsa = Math.min(left, allowance, capIsa);
         isa += toIsa;
-        toGia = left - toIsa;
+        toGia = Math.min(left - toIsa, capGia);
         gia += toGia;
         basis += toGia;
-        // Cash above the buffer (e.g. matured gilts) is invested too.
+        const rest = left - toIsa - toGia;   // left over by your own amounts: kept as cash
+        if (rest > 0) { cash += rest; toCash += rest; }
+        // Cash above the buffer (e.g. matured gilts) is invested too, within your own amounts.
         const excess = cash - s.cashReserve * f;
         if (s.sweepCash && excess > 0.5) {
-          sweepIsa = Math.min(excess, Math.max(0, s.isaAllowance * g * n - toLisa - toIsa));
-          sweepGia = excess - sweepIsa;
+          sweepIsa = Math.min(excess, Math.max(0, s.isaAllowance * g * n - toLisa - toIsa), Math.max(0, capIsa - toIsa));
+          sweepGia = Math.min(excess - sweepIsa, Math.max(0, capGia - toGia));
           isa += sweepIsa;
           gia += sweepGia;
           basis += sweepGia;
-          cash -= excess;
+          cash -= sweepIsa + sweepGia;
         }
       } else {
         let need = -net;
@@ -1247,6 +1284,7 @@
         cash: out.cash[t], isa: out.isa[t], gia: out.gia[t], pension: out.pension[t], bonds: out.bonds[t],
         property: out.property[t], debt: out.debt[t], shortfall: out.short[t],
         liquid, netWorth: liquid + out.property[t] - out.debt[t],
+        lisa: out.lisa ? out.lisa[t] : 0,
       };
       for (const k of FLOW_KEYS) row[k] = t < pre.N ? out[k][t] : 0;
       row.persons = out.persons.map(o => {
@@ -1386,8 +1424,9 @@
     const base = pass(plan, goalCheck);
     // Retirement goals at a different age from the plan: run that version of the plan too.
     for (const g of plan.goals) {
-      if (g.type !== 'retire' || g.age === p1.retireAge) continue;
-      const shifted = pass(shiftRetirement(plan, g.age - p1.retireAge));
+      const who = g.type === 'retire' ? retiree(plan, g) : null;
+      if (!who || g.age === who.retireAge) continue;
+      const shifted = pass(shiftRetirement(plan, g.age - who.retireAge, who.id));
       shifted.forEach((x, i) => { base[i].goals[g.id] = x.success; });
     }
 
@@ -1494,7 +1533,7 @@
   function autoTitle(goal, plan) {
     const p1 = plan.household.people[0];
     if (goal.type === 'debtFree') return `Mortgage-free by ${goal.year}`;
-    if (goal.type === 'retire') return `${plan.household.people.length > 1 ? `${p1.name} retires` : 'Retire'} at ${goal.age}`;
+    if (goal.type === 'retire') return `${plan.household.people.length > 1 ? `${retiree(plan, goal).name} retires` : 'Retire'} at ${goal.age}`;
     if (goal.type === 'emergency') return `Emergency fund: ${goal.months} months by ${goal.year}`;
     const amt = goal.amount >= 1e6 ? `£${+(goal.amount / 1e6).toFixed(2)}M` : `£${Math.round(goal.amount / 1000)}K`;
     if (goal.type === 'passiveIncome') return `${amt} a year passive income by ${goal.year}`;
@@ -1533,11 +1572,12 @@
         res.byYear = mc.debtFreeByYear;
         res.summary = res.expectedYear ? `Expected to be paid off in ${res.expectedYear}.` : 'Not paid off within the plan.';
       } else {
-        const delta = goal.age - p1.retireAge;
-        const variant = delta === 0 ? null : shiftRetirement(plan, delta);
+        const who = retiree(plan, goal);
+        const delta = goal.age - who.retireAge;
+        const variant = delta === 0 ? null : shiftRetirement(plan, delta, who.id);
         res.probability = variant ? successRate(variant, runs, seed) : mc.successRate;
-        res.expectedYear = plan.startYear + (goal.age - p1.age);
-        res.summary = `Chance the money lasts to the end of the plan if ${p1.name} retires at ${goal.age}${delta === 0 ? ' (as planned)' : ''}.`;
+        res.expectedYear = plan.startYear + (goal.age - who.age);
+        res.summary = `Chance the money lasts to the end of the plan if ${who.name} retires at ${goal.age}${delta === 0 ? ' (as planned)' : ''}.`;
       }
       res.status = statusOf(res.probability);
       return res;
@@ -1720,11 +1760,15 @@
 
   const clonePlan = p => JSON.parse(JSON.stringify(p));
 
-  function shiftRetirement(plan, delta) {
+  // Everyone retires `delta` years later (earlier if negative), or only `owner`.
+  function shiftRetirement(plan, delta, owner) {
     const p = clonePlan(plan);
-    for (const person of p.household.people) person.retireAge += delta;
+    for (const person of p.household.people) if (!owner || person.id === owner) person.retireAge += delta;
     return p;
   }
+
+  // The person a retirement goal is about.
+  const retiree = (plan, goal) => plan.household.people.find(x => x.id === goal.owner) || plan.household.people[0];
 
   // Smallest shift (years, applied to everyone) to retirement ages reaching `target`.
   // Same seed for every candidate (common random numbers) keeps success near-monotonic.
@@ -1954,7 +1998,7 @@
 
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
-    incomeAfterCosts, taxOf, dbPensionAt, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
+    incomeAfterCosts, taxOf, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     streamAt, streamWindow, isActive, growthFactor, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
@@ -1962,7 +2006,7 @@
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,
     solveRetirement, solveSpending, solveRetirementSpending, solveDebtFree, solveNetWorth,
-    shiftRetirement, scaleSpending, variant, summarize, sweep,
+    shiftRetirement, retiree, scaleSpending, variant, summarize, sweep,
     makeCheckin, checkinReview, rollForward,
     mulberry32, makeNormal, lognormal, percentile, clonePlan, grossUp,
   };

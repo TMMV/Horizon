@@ -6,7 +6,7 @@ const path = require('path');
 const { openApp, tab, go } = require('./helpers');
 
 const OUT = path.resolve(__dirname, '../../screenshots');
-const VIEWS = ['home', 'goal', 'retirement', 'finances/portfolio', 'finances/income', 'finances/spending', 'finances/cashflow', 'finances/assumptions', 'finances/history', 'scenarios'];
+const VIEWS = ['home', 'goal', 'retirement', 'finances/portfolio', 'finances/income', 'finances/spending', 'finances/saving', 'finances/cashflow', 'finances/assumptions', 'finances/history', 'scenarios'];
 
 async function prepare(page) {
   // A check-in history so the Review tab has something to show, figures from a few months
@@ -47,6 +47,9 @@ for (const scheme of ['light', 'dark']) {
           await page.locator('#ideaGrid .idea-chip').nth(0).click();
           await page.locator('#ideaGrid .idea-chip').nth(1).click();
           await expect(page.locator('#compareResults .sc-table tbody tr')).toHaveCount(3, { timeout: 30000 });
+          // And a comparison open.
+          await page.locator('#cmpGrid .idea-chip').first().click();
+          await expect(page.locator('#cmpResult .cmp-table tbody tr')).not.toHaveCount(0, { timeout: 30000 });
         }
         if (name === 'home') {
           await expect(page.locator('#ovGoalStrip .gt-driver').first()).not.toHaveClass(/muted/, { timeout: 30000 });
@@ -71,6 +74,7 @@ for (const scheme of ['light', 'dark']) {
       await page.screenshot({ path: path.join(OUT, `${scheme}-wizard.png`) });
       await page.click('#wizClose');
       await go(page, 'home');
+      await page.evaluate(() => { const p = window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan; p.goals = p.goals.filter(g => g.type !== 'debtFree'); window.__horizon.refresh(); });
       await page.click('#ovAddGoal');
       await page.click('.goal-option:has-text("Mortgage-free")');
       await page.click('#gwNext');
