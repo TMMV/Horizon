@@ -454,6 +454,14 @@
       }));
     const readings = Object.keys(est.reading).length;
     const days = daysSince(est.asOf);
+    // The balances you updated, against what the plan expected on those days.
+    let vsPlan = 0;
+    for (const a of p.accounts) {
+      const r = est.reading[a.id];
+      if (!r) continue;
+      const e = RV.expectedBalances(p, RV.yearsBetween(est.asOf, r.date), model.proj).byId[a.id];
+      vsPlan += (a.type === 'debt' ? -1 : 1) * (r.value - (e === undefined ? a.balance : e));
+    }
     setKids(box, ...[
       h('div', { class: 'card-head' },
         h('div', {}, h('p', { class: 'eyebrow' }, `Today · ${agesAt(0)}`), h('h2', { id: 'pfTitle' }, 'Your portfolio'),
@@ -466,7 +474,9 @@
           h('div', { class: 'hero-value' }, money(est.netWorth)),
           delta == null
             ? h('div', { class: 'delta flat' }, glyph('good'), 'Updated today')
-            : h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your last update (${fmtDate(lastUpdate)})`)),
+            : h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your last update (${fmtDate(lastUpdate)})`),
+          readings && Math.abs(vsPlan) >= 1 ? h('div', { class: `delta vs-plan ${vsPlan >= 0 ? 'pos' : 'neg'}`, id: 'pfVsPlan' }, glyph(vsPlan >= 0 ? 'good' : 'warn'),
+            `${money(Math.abs(vsPlan))} ${vsPlan >= 0 ? 'ahead of' : 'behind'} the plan on the ${readings} balance${readings === 1 ? '' : 's'} you updated`) : null),
         h('div', { class: 'pf-mix' }, ring)),
       list,
       readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null,
@@ -604,8 +614,6 @@
   }
 
   const ACTION_LABEL = { life: 'Future costs', strategy: 'Saving strategy', explorer: 'Try changes', accounts: 'Accounts', spending: 'Spending check-up', review: 'Start review', emergency: 'Add a goal' };
-  let insightsAll = false;
-  let insightsHidden = false;
 
   function insightAction(a) {
     if (a === 'life') return openLifeWizard();
@@ -619,36 +627,6 @@
 
   // A suggestion's button shows only when there is somewhere for it to go.
   const actionFits = a => !!a && (!a.startsWith('compare:') || SI.comparisonsFor(plan()).some(c => c.id === a.slice(8)));
-
-  function renderInsights() {
-    const hidden = new Set(ws.dismissed);
-    const every = B.insights(plan(), model.proj);
-    const all = every.filter(i => !hidden.has(i.id));
-    const gone = every.filter(i => hidden.has(i.id));
-    const shown = insightsAll ? all : all.slice(0, 4);
-    const toneLabel = { warn: 'Needs attention', tip: 'Tip', good: 'Looks good', info: 'For information' };
-    const setHidden = (id, on) => {
-      ws.dismissed = on ? [...new Set(ws.dismissed.concat([id]))] : ws.dismissed.filter(x => x !== id);
-      save();
-      renderInsights();
-    };
-    setKids($('#ovInsights'), ...[
-      h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Worth a look'),
-        h('p', { class: 'sub' }, `A quick check against common UK rules of thumb and ${R.TAX_YEAR} rules. A starting point for your own research, not financial advice.`))),
-      h('ul', { class: 'insights' }, shown.map(i => h('li', { class: `insight ${i.tone}`, 'data-insight': i.id },
-        h('span', { class: 'ins-ico' }, glyph(i.tone)),
-        h('div', { class: 'ins-body' }, h('span', { class: 'sr-only' }, `${toneLabel[i.tone]}: `), h('strong', {}, i.title), h('p', {}, i.text)),
-        h('div', { class: 'ins-actions' },
-          actionFits(i.action) ? h('button', { type: 'button', class: 'btn small', onclick: () => insightAction(i.action) }, i.action.startsWith('compare:') ? 'Compare in Scenarios' : ACTION_LABEL[i.action]) : null,
-          i.tone !== 'good' ? h('button', { type: 'button', class: 'btn small ghost', title: 'Already doing this, or not relevant: hide it', 'aria-label': `Hide: ${i.title}`, onclick: () => setHidden(i.id, true) }, 'Already sorted') : null)))),
-      h('div', { class: 'add-row' },
-        all.length > 4 ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => { insightsAll = !insightsAll; renderInsights(); } }, insightsAll ? 'Show fewer' : `Show all ${all.length}`) : null,
-        gone.length ? h('button', { type: 'button', class: 'btn small ghost', 'aria-expanded': String(insightsHidden), onclick: () => { insightsHidden = !insightsHidden; renderInsights(); } }, insightsHidden ? 'Hide sorted items' : `${gone.length} marked as sorted`) : null),
-      insightsHidden && gone.length ? h('ul', { class: 'insights sorted' }, gone.map(i => h('li', { class: 'insight sorted' },
-        h('span', { class: 'ins-ico' }, glyph('good')),
-        h('div', { class: 'ins-body' }, h('strong', {}, i.title), h('p', {}, i.text)),
-        h('div', { class: 'ins-actions' }, h('button', { type: 'button', class: 'btn small ghost', onclick: () => setHidden(i.id, false) }, 'Show again'))))) : null].filter(Boolean));
-  }
 
   // The projection by account type, or by when the money can be used, with goal markers (home page).
   let homeBy = 'type';
@@ -708,8 +686,10 @@
   function renderHome() {
     renderPortfolio();
     renderGoalStrip();
+    renderMonthlyPlan();
     renderHomeChart();
-    renderInsights();
+    renderInOut();
+    renderSuggestions();
   }
 
   // ---- goals on the Overview: one tile each, in the goal's colour
@@ -763,7 +743,7 @@
             h('span', {}, `${fmtCompact(prog.cur)} of ${fmtCompact(prog.target)}${prog.perYear ? ' a year' : ''} today`)) : null)),
       (() => { const a = goalActions(res).find(x => x.main); return a ? h('p', { class: 'gt-action' }, h('span', {}, 'This year'), h('strong', {}, `${a.label} ${a.value}`)) : null; })(),
       driverLine(g.id));
-    }), h('button', { type: 'button', class: 'goal-tile add', onclick: () => openGoalWizard() }, h('span', { class: 'plus' }, '+'), h('span', {}, 'Add a goal')));
+    }), h('button', { type: 'button', class: 'goal-tile add', id: 'ovAddGoal', onclick: () => openGoalWizard() }, h('span', { class: 'plus' }, '+'), h('span', {}, 'Add a goal')));
   }
 
   // ---- what moves your goals: each typical change simulated against every goal
@@ -1088,6 +1068,34 @@
     $('#gpScenario').disabled = !changed.length;
   }
 
+  // What stopping work at their planned age means for one person, in plan `p`.
+  function retireConsequences(p, x) {
+    const out = [];
+    if (x.retireAge < x.statePensionAge) out.push(`No State Pension for ${x.statePensionAge - x.retireAge} years after stopping work (it starts at ${x.statePensionAge}). A full State Pension needs 35 qualifying years of National Insurance: check the record at gov.uk/check-state-pension; voluntary contributions can fill gaps.`);
+    if (p.accounts.some(a => a.type === 'pension' && a.owner === x.id && !a.excluded)) {
+      out.push(x.retireAge < x.pensionAccessAge
+        ? `Personal and workplace pensions can’t be drawn until ${x.pensionAccessAge}: ${x.pensionAccessAge - x.retireAge} years living on ISAs, savings and other income first.`
+        : `Personal and workplace pensions can be drawn from ${x.pensionAccessAge} with no penalty: a quarter tax-free, the rest taxed as income.`);
+    }
+    for (const db of p.income.filter(i => i.kind === 'dbpension' && i.owner === x.id)) {
+      const early = E.dbEarly(db, x);
+      const npa = early.npa || db.startAge;
+      const built = db.amount + db.dbAccrual * Math.max(0, Math.min(x.retireAge, npa) - x.age);
+      const lost = Math.max(0, npa - x.retireAge) * db.dbAccrual;
+      if (lost > 0.5) out.push(`${db.name}: stopping at ${x.retireAge} instead of ${npa} means ${npa - x.retireAge} fewer years building it, about ${money(lost)} a year less pension (today’s money).`);
+      if (early.npa) {
+        const at = age => {
+          const f = E.dbEarly({ ...db, startAge: age }, x).factor;
+          return `${money(built * f)} a year${f < 1 ? ` (${(f * 100).toFixed(1)}%)` : ''}${db.lumpMultiple ? ` + ${money(built * f * db.lumpMultiple)} lump sum` : ''}`;
+        };
+        out.push(db.startAge < npa
+          ? `${db.name} is taken at ${db.startAge}, ${npa - db.startAge} years before its Normal Pension Age of ${npa}, so it is cut to ${at(db.startAge)}. Waiting until ${npa}: ${at(npa)}.`
+          : `${db.name} is paid in full from ${npa}: ${at(npa)}. Taking it at ${Math.max(x.retireAge, x.pensionAccessAge)} instead would cut it to ${at(Math.max(x.retireAge, x.pensionAccessAge))} (USS early retirement factors).`);
+      }
+    }
+    return out;
+  }
+
   // What stopping work at the planned age costs or means, person by person.
   function retireTradeoffs(res) {
     const p = plan();
@@ -1095,42 +1103,17 @@
     const realAt = (v, t) => v / rows[Math.max(0, Math.min(rows.length - 1, t))].deflator;
     const owner = E.retiree(p, res.goal);
     const list = [owner, ...people().filter(x => x !== owner)];
-    const items = [];
-    for (const x of list) {
-      const who = people().length > 1 ? `${x.name}: ` : '';
-      const out = [];
-      if (x.retireAge < x.statePensionAge) out.push(`No State Pension for ${x.statePensionAge - x.retireAge} years after stopping work (it starts at ${x.statePensionAge}). A full State Pension needs 35 qualifying years of National Insurance: check the record at gov.uk/check-state-pension; voluntary contributions can fill gaps.`);
-      const dcPots = p.accounts.some(a => a.type === 'pension' && a.owner === x.id && !a.excluded);
-      if (dcPots) {
-        out.push(x.retireAge < x.pensionAccessAge
-          ? `Personal and workplace pensions can’t be drawn until ${x.pensionAccessAge}: ${x.pensionAccessAge - x.retireAge} years living on ISAs, savings and other income first.`
-          : `Personal and workplace pensions can be drawn from ${x.pensionAccessAge} with no penalty: a quarter tax-free, the rest taxed as income.`);
-      }
-      for (const db of p.income.filter(i => i.kind === 'dbpension' && i.owner === x.id)) {
-        const early = E.dbEarly(db, x);
-        const npa = early.npa || db.startAge;
-        const built = yrs => db.amount + db.dbAccrual * Math.max(0, yrs);
-        const lost = Math.max(0, npa - x.retireAge) * db.dbAccrual;
-        if (lost > 0.5) out.push(`${db.name}: stopping at ${x.retireAge} instead of ${npa} means ${npa - x.retireAge} fewer years building it, about ${money(lost)} a year less pension (today’s money).`);
-        if (early.npa) {
-          const full = built(Math.min(x.retireAge, npa) - x.age);
-          const at = age => {
-            const f = E.dbEarly({ ...db, startAge: age }, x).factor;
-            return `${money(full * f)} a year${f < 1 ? ` (${(f * 100).toFixed(1)}%)` : ''}${db.lumpMultiple ? ` + ${money(full * f * db.lumpMultiple)} lump sum` : ''}`;
-          };
-          out.push(db.startAge < npa
-            ? `${db.name} is taken at ${db.startAge}, ${npa - db.startAge} years before its Normal Pension Age of ${npa}, so it is cut to ${at(db.startAge)}. Waiting until ${npa}: ${at(npa)}.`
-            : `${db.name} is paid in full from ${npa}: ${at(npa)}. Taking it at ${x.retireAge} instead would cut it to ${at(Math.max(x.retireAge, 55))} (USS early retirement factors). Change “Paid from age” in Income to try it.`);
-        }
-      }
-      if (out.length) items.push(h('li', {}, h('strong', {}, `${who}retiring at ${x.retireAge} (${p.startYear + x.retireAge - x.age})`), h('ul', {}, out.map(t => h('li', {}, t)))));
-    }
+    const items = list.map(x => {
+      const out = retireConsequences(p, x);
+      return out.length ? h('li', {}, h('strong', {}, `${people().length > 1 ? `${x.name}: ` : ''}retiring at ${x.retireAge} (${p.startYear + x.retireAge - x.age})`), h('ul', {}, out.map(t => h('li', {}, t)))) : null;
+    });
     // The years between the first person stopping work and the last State Pension starting.
     const t0 = Math.min(...people().map(x => x.retireAge - x.age)), t1 = Math.max(...people().map(x => x.statePensionAge - x.age));
     let bridge = 0, n = 0;
     for (let t = Math.max(0, t0); t < Math.min(rows.length - 1, t1); t++) { bridge += realAt(rows[t].withdrawals, t); n++; }
     return h('section', { class: 'card', id: 'gpTradeoffs' },
-      h('h2', {}, 'What retiring then means'),
+      h('div', { class: 'card-head' }, h('h2', {}, 'What retiring then means'),
+        h('button', { type: 'button', class: 'btn small', onclick: () => openGuide('retire', { who: owner.id }) }, 'Try another age')),
       n ? h('p', { class: 'sub' }, `From ${p.startYear + t0} to ${p.startYear + t1} (until the State Pensions start) your savings pay for about ${money(bridge / n)} a year of living costs on average, ${money(bridge)} in all, in today’s money.`) : null,
       h('ul', { class: 'tradeoffs' }, items));
   }
@@ -3020,6 +3003,116 @@
     refresh();
   }
 
+  // Money coming in and going out, year by year (expected path, nominal; D() for the view).
+  function inOutSeries() {
+    const p = plan();
+    const rows = model.proj.rows.slice(0, -1);
+    const infl = p.assumptions.inflation / 100;
+    return rows.map((r, t) => {
+      const employee = Math.max(0, r.saved - (r.extraPension || 0) - r.toCash - r.toIsa - r.toGia - (r.toLisa || 0));
+      const inn = r.earnings + r.otherIncome + r.statePension - r.taxes - employee - (r.extraPension || 0);
+      const oneOff = p.events.filter(e => e.kind === 'expense' && e.year === r.year).reduce((acc, e) => acc + e.amount * Math.pow(1 + infl, t), 0);
+      const listed = Math.max(0, r.spending - oneOff);
+      const life = Math.min(listed, p.expenses.filter(e => (e.key || '').startsWith('life:')).reduce((acc, e) => acc + E.streamAt(e, p, t), 0));
+      return { year: r.year, t, inn, everyday: listed - life, future: life, oneOff, mortgage: r.debtRegular + r.lumpOverpay, left: inn - r.spending - r.debtRegular - r.lumpOverpay };
+    });
+  }
+
+  function renderInOut() {
+    const box = $('#ovInOut');
+    if (!box) return;
+    const s = inOutSeries();
+    const now = s[0];
+    const xs = s.map(x => x.year);
+    const v = f => s.map(x => D(f(x), x.t));
+    const areas = [
+      { label: 'Everyday spending', color: '--s5', values: v(x => x.everyday) },
+      { label: 'Future costs', color: '--s7', values: v(x => x.future) },
+      { label: 'One-off costs', color: '--s3', values: v(x => x.oneOff) },
+      { label: 'Mortgage', color: '--s8', values: v(x => x.mortgage) },
+    ].filter(a => a.values.some(y => y > 0.5));
+    const inn = v(x => x.inn);
+    const p = plan();
+    const markers = p.events.filter(e => e.kind === 'expense' && e.year >= xs[0] && e.year <= xs[xs.length - 1]).map(e => ({ x: e.year, label: e.name, color: '--s3' }));
+    const debtEnd = s.find((x, i) => i > 0 && s[0].mortgage > 0.5 && x.mortgage <= 0.5);
+    if (debtEnd) markers.push({ x: debtEnd.year, label: 'Mortgage paid off', color: '--s8' });
+    for (const x of people()) { const y = p.startYear + x.retireAge - x.age; if (y <= xs[xs.length - 1]) markers.push({ x: y, label: `${people().length > 1 ? `${x.name} retires` : 'Retire'}`, color: '--muted' }); }
+    const m = x => money(x / 12);
+    const out0 = now.everyday + now.future + now.oneOff + now.mortgage;
+    const host = h('div', { class: 'chart', id: 'ovInOutChart' });
+    setKids(box,
+      h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Money in and out'),
+        h('p', { class: 'sub' }, `Coming in after tax and pension contributions (the line) against what goes out (the stack), on average, in ${unitLabel()}. Above the stack is what is left to save; below it, savings pay the difference.`))),
+      h('div', { class: 'io-sum' },
+        h('div', { class: 'io-fig in' }, h('span', {}, 'Coming in'), h('strong', {}, m(now.inn)), h('small', {}, 'a month this year')),
+        h('div', { class: 'io-fig out' }, h('span', {}, 'Going out'), h('strong', {}, m(out0)), h('small', {}, [now.mortgage > 0.5 ? `incl. ${m(now.mortgage)} mortgage` : null, now.oneOff > 0.5 ? `${m(now.oneOff)} one-offs` : null].filter(Boolean).join(', ') || 'spending')),
+        h('div', { class: `io-fig left ${now.left >= 0 ? 'pos' : 'neg'}` }, h('span', {}, now.left >= 0 ? 'Left to save' : 'From savings'), h('strong', {}, m(Math.abs(now.left))), h('small', {}, 'a month'))),
+      host,
+      h('div', { class: 'legend', id: 'ovInOutLegend' }));
+    const c = new Chart(host, { height: 260, label: 'Money coming in and going out by year', name: 'money-in-out' });
+    c.set({
+      xs, areas, markers,
+      lines: [{ label: 'Coming in', color: '--text', values: inn }],
+      tooltip: i => ({
+        title: titleAt(i),
+        rows: [
+          { label: 'Coming in', color: '--text', shape: 'line', text: `${money(inn[i] / 12)} a month`, strong: true },
+          ...areas.filter(a => a.values[i] > 0.5).map(a => ({ label: a.label, color: a.color, text: `${money(a.values[i] / 12)} a month` })),
+          { label: s[i].left >= 0 ? 'Left to save' : 'From savings', text: `${money(Math.abs(D(s[i].left, s[i].t)) / 12)} a month` },
+        ],
+      }),
+      table: () => ({
+        headers: ['Year', 'Coming in', 'Everyday spending', 'Future costs', 'One-off costs', 'Mortgage', 'Left (− from savings)'],
+        rows: s.map(x => [x.year, D(x.inn, x.t), D(x.everyday, x.t), D(x.future, x.t), D(x.oneOff, x.t), D(x.mortgage, x.t), D(x.left, x.t)]),
+        formats: [String, money, money, money, money, money, money],
+      }),
+    });
+    legend($('#ovInOutLegend'), [{ label: 'Coming in', color: '--text', shape: 'line' }, ...areas.map(a => ({ label: a.label, color: a.color }))], c);
+  }
+
+  // ---- Finances: each item as a plain line; edit one at a time
+
+  const editing = new Set();
+  function openEdit(id, sectionId) { editing.add(id); renderSection(sectionId); requestAnimationFrame(() => { const el = document.querySelector(`[data-editing="${id}"] input, [data-editing="${id}"] select`); if (el) el.focus(); }); }
+  function closeEdit(id, sectionId) { editing.delete(id); renderSection(sectionId); }
+
+  // The line shown for an item, or its editor while it is being edited.
+  function viewOrEdit(id, sectionId, color, line, editor) {
+    if (editing.has(id)) {
+      return h('div', { class: 'edit-wrap', 'data-editing': id, style: `--item-color:${cssVar(color)}` }, editor(),
+        h('div', { class: 'edit-done' }, h('button', { type: 'button', class: 'btn small primary', onclick: () => closeEdit(id, sectionId) }, 'Done')));
+    }
+    return h('button', { type: 'button', class: 'sum-row', 'data-item': id, style: `--item-color:${cssVar(color)}`, 'aria-label': `Edit ${line.name}`, onclick: () => openEdit(id, sectionId) },
+      h('i', { class: 'key square', style: `--key:${cssVar(color)}` }),
+      h('span', { class: 'sum-name' }, h('strong', {}, line.name), line.sub ? h('small', {}, line.sub) : null),
+      h('span', { class: 'sum-val' }, h('strong', {}, line.value), line.valueSub ? h('small', {}, line.valueSub) : null),
+      h('span', { class: 'sum-edit', 'aria-hidden': 'true' }, glyph('edit')));
+  }
+
+  // A short summary strip at the top of a Finances section; it keeps up with edits on its own.
+  const summaries = new Map();
+  function sectionSummary(key, figs) {
+    summaries.set(key, figs);
+    const box = h('div', { class: 'sec-sum', id: `sum-${key}` });
+    fillSummary(box, figs);
+    return box;
+  }
+  function fillSummary(box, figs) {
+    if (!model) return;
+    setKids(box, ...figs().filter(Boolean).map(([label, value, sub]) => h('div', {}, h('span', {}, label), h('strong', {}, value), sub ? h('small', {}, sub) : null)));
+  }
+  function updateSummaries() {
+    for (const [key, figs] of summaries) { const box = $(`#sum-${key}`); if (box) fillSummary(box, figs); }
+  }
+
+  const ownerName = (p, owner) => (owner === 'joint' ? 'Joint' : (p.household.people.find(x => x.id === owner) || {}).name || '');
+  const untilText = (item, p) => {
+    const person = p.household.people[E.personIndex(p, item.owner === 'joint' ? 'p1' : item.owner)];
+    const end = item.endRef === 'retire' ? 'until retirement' : item.endRef === 'end' ? 'for good' : `until ${person ? `${person.name.split(' ')[0]} is ` : 'age '}${item.endAge}`;
+    const start = item.startRef === 'age' ? `from ${person ? `${person.name.split(' ')[0]} at ` : 'age '}${item.startAge}, ` : item.startRef === 'retire' ? 'from retirement, ' : '';
+    return start + end;
+  };
+
   // ------------------------------------------------------------------ saving & investing
 
   // Your own monthly amounts, next to what the plan does with them this year.
@@ -3387,6 +3480,40 @@
         refresh();
       } }, 'Use this estimate')));
   }
+  // How pay grows: yearly rises until an age, then a slower rate, plus promotions at given ages.
+  function payProgression(item, owner) {
+    const p = plan();
+    const infl = p.assumptions.inflation;
+    const real = item.inflationLinked ? 0 : item.growth - infl;
+    const at = age => {
+      const t = age - owner.age;
+      if (t < 0 || t > E.horizon(p)) return null;
+      return E.streamAt({ ...item, startRef: 'now', endRef: 'end' }, p, t) / Math.pow(1 + infl / 100, t);
+    };
+    const ages = [owner.age + 5, owner.age + 10, Math.min(owner.retireAge - 1, owner.age + 20)].filter((a, i, l) => a > owner.age && a < owner.retireAge && l.indexOf(a) === i);
+    const freq = item.freq === 'month' ? 12 : 1;
+    const raiseRow = r => h('div', { class: 'raise-row' },
+      field('At age', numInput(() => r.age, v => { r.age = Math.round(v); }, { min: owner.age + 1, max: 80, label: 'Promotion age' })),
+      field('Pay rises by', numInput(() => r.pct, v => { r.pct = v; }, { step: 1, suffix: '%', label: 'Promotion rise' })),
+      h('button', { type: 'button', class: 'btn small ghost danger', 'aria-label': 'Remove this promotion', onclick: () => { item.raises = item.raises.filter(x => x !== r); renderSection('income'); schedule(); } }, 'Remove'));
+    return h('div', { class: 'sub-fields pay-prog' },
+      h('h3', {}, 'Pay progression'),
+      h('div', { class: 'fields', style: 'margin-top:8px' },
+        h('div', { class: 'field' }, h('span', {}, 'Pay rises'),
+          switchInput('Only with prices', ...bind(item, 'inflationLinked'), { rerender: 'income' }),
+          item.inflationLinked ? null : numInput(...bind(item, 'growth'), { step: 0.1, suffix: '%/yr', label: 'Pay rise per year' }),
+          h('span', { class: 'hint' }, `Prices are assumed to rise ${infl}% a year. UK pay has grown about 1–1.5% a year more than prices over the long run, mostly before the mid-40s.`)),
+        item.inflationLinked ? null : field('Rising like that until age', numInput(...bind(item, 'growthUntilAge'), { min: 0, max: 80, label: 'Pay rises until age', rerender: 'income' }), '0 = until retirement. Pay often levels off in your 40s or 50s, at the top of a pay grade.'),
+        item.inflationLinked || !item.growthUntilAge ? null : field('Then rises', numInput(...bind(item, 'growthAfter'), { step: 0.1, suffix: '%/yr', label: 'Pay rise after that age' }), `${infl}% = in line with prices.`)),
+      (item.raises || []).map(raiseRow),
+      h('div', { class: 'add-row' }, h('button', { type: 'button', class: 'btn small', onclick: () => {
+        item.raises = (item.raises || []).concat([{ age: Math.min(owner.retireAge - 1, owner.age + 3), pct: 10 }]);
+        renderSection('income'); schedule();
+      } }, '+ Add a promotion or new job')),
+      !item.inflationLinked && real > 2 && !item.growthUntilAge ? h('p', { class: 'hint warn-hint' }, `${item.growth}% a year is ${real.toFixed(1)} points above prices every year until ${owner.name} retires: pay grows ${(Math.pow(1 + real / 100, owner.retireAge - owner.age)).toFixed(1)}× in real terms. That is optimistic for a whole career; try a lower rate after your 40s.`) : null,
+      ages.length ? h('p', { class: 'hint calc' }, `Pay in today’s money: now ${money(at(owner.age) / freq)}${freq === 12 ? ' a month' : ' a year'}; ` + ages.map(a => `at ${a}: ${money(at(a) / freq)}`).join('; ') + '.') : null);
+  }
+
   function taxOptions(kind) {
     return kind === 'salary'
       ? [['uk', 'Before tax (work out tax & NI)'], ['none', 'Take-home (already taxed)'], ['flat', 'Flat tax rate']]
@@ -3396,7 +3523,7 @@
   function renderIncome() {
     const p = plan();
     const ignore = p.household.ignoreTax;
-    const items = p.income.map(item => {
+    const editorOf = item => {
       if (item.kind === 'dbpension') return renderDbPension(item, p);
       const isSalary = item.kind === 'salary';
       const owner = item.owner === 'joint' ? people()[0] : people()[E.personIndex(p, item.owner)];
@@ -3419,9 +3546,10 @@
           item.tax === 'flat' ? field('Tax rate', numInput(...bind(item, 'taxRate'), { step: 1, min: 0, max: 100, suffix: '%' }), 'E.g. tax withheld abroad.') : null,
           item.kind === 'rental' ? costFields : null),
         item.kind === 'rental' && hasCosts ? h('p', { class: 'hint calc', 'data-calc': item.id }, incomeWorking(item, p)) : null,
+        isSalary ? payProgression(item, owner) : null,
         more(`income-${item.id}`, 'More options',
           h('div', { class: 'fields' },
-            growthControl(item, 'income'),
+            isSalary ? null : growthControl(item, 'income'),
             field(`Starts (${owner.name}'s age)`, timingControl(item, 'start', 'income')),
             field('Ends', timingControl(item, 'end', 'income')),
             item.kind !== 'rental' ? costFields : null),
@@ -3440,14 +3568,27 @@
           h('p', { class: 'hint' }, `Dashed: the expected path. Shaded: where 50% and 80% of simulations land, with ${isSalary ? 'salary and ' : ''}inflation surprises. In ${unitLabel()}, after costs.`),
           h('div', { class: 'chart mini', 'data-trend': item.id }),
           h('p', { class: 'trend-caption sub' })));
-    });
+    };
+    const line = item => {
+      const grow = item.kind === 'dbpension' ? `paid from ${item.startAge}` : item.inflationLinked ? 'rises with prices' : `rises ${item.growth}% a year${item.growthUntilAge ? ` to ${item.growthUntilAge}, then ${item.growthAfter}%` : ''}${(item.raises || []).length ? `, ${item.raises.length} promotion${item.raises.length === 1 ? '' : 's'}` : ''}`;
+      const db = item.kind === 'dbpension' ? (() => { const x = people()[E.personIndex(p, item.owner)]; const t = Math.max(0, item.startAge - x.age); return E.incomeAfterCosts(item, p, t) / Math.pow(1 + p.assumptions.inflation / 100, t); })() : 0;
+      return {
+        name: item.name,
+        sub: [kindLabel(item.kind), ownerName(p, item.owner), item.kind === 'dbpension' ? null : untilText(item, p), grow].filter(Boolean).join(' · '),
+        value: item.kind === 'dbpension' ? `${money(db)} a year` : incomeTag(item, p).replace('/month now', ' a month'),
+        valueSub: item.kind === 'dbpension' ? `from ${item.startAge}, today’s money` : item.tax === 'none' ? 'take-home' : item.tax === 'uk' ? 'before tax' : `after ${item.taxRate}% tax`,
+      };
+    };
+    const items = p.income.map(item => viewOrEdit(item.id, 'income', item.kind === 'dbpension' ? '--s4' : '--s1', line(item), () => editorOf(item)));
     return [
-      sectionHead('income', 'Income', 'Salaries, rent, gifts, side income. Enter the amount as at the date above; it grows from there. Extra settings are under “More options”. Added the wrong kind? Remove it and add the right one.'),
-      h('div', { class: 'items' }, items.length ? items : h('p', { class: 'sub' }, 'No income yet.')),
+      sectionHead('income', 'Income', 'Salaries, rent, gifts and pensions, as at the date above; each grows from there. Click one to change it.'),
+      sectionSummary('income', () => [['Coming in this year', `${money(inOutSeries()[0].inn / 12)} a month`, 'after tax and pension contributions'], ['From work', `${money(p.income.filter(i => i.kind === 'salary').reduce((acc, i) => acc + E.incomeAfterCosts(i, p, 0), 0) / 12)} a month`, 'as entered'], ['Other income', `${money(p.income.filter(i => i.kind !== 'salary').reduce((acc, i) => acc + E.incomeAfterCosts(i, p, 0), 0) / 12)} a month`, 'rent, gifts, pensions now']]),
+      h('div', { class: 'sum-list' }, items.length ? items : h('p', { class: 'sub' }, 'No income yet.')),
       h('div', { class: 'add-row' }, KIND_LABELS.map(([kind, label]) => h('button', { type: 'button', class: 'btn small', onclick: () => {
         const item = E.normalizePlan({ ...p, income: [{ name: kind === 'dbpension' ? 'Defined benefit pension' : kind === 'salary' ? 'Salary' : label, owner: 'p1', kind, tax: 'none', amount: 0, freq: kind === 'dbpension' ? 'year' : 'month', growth: kind === 'salary' ? 3 : 0, inflationLinked: kind !== 'salary' }] }).income[0];
         setKind(item, kind);
         p.income.push(item);
+        editing.add(item.id);
         renderSection('income');
         refresh();
       } }, `+ ${kind === 'dbpension' ? 'Defined benefit pension' : label}`))),
@@ -3483,7 +3624,7 @@
   function renderExpenses() {
     const p = plan();
     const now = p.expenses.reduce((acc, e) => acc + E.streamAt(e, p, 0), 0);
-    const rows = p.expenses.map(item => {
+    const rowOf = item => {
       const amt = E.streamAt(item, p, 0);
       const more = h('details', {},
         h('summary', { class: 'btn small ghost', 'aria-label': `More options for ${item.name}` }, 'More'));
@@ -3504,7 +3645,16 @@
           more,
           deleteButton(`Remove ${item.name}`, () => removeFrom(p.expenses, item, 'expenses'))),
         panel);
+    };
+    const rows = p.expenses.map(item => {
+      const amt = E.streamAt(item, p, 0);
+      return viewOrEdit(item.id, 'expenses', (item.key || '').startsWith('life:') ? '--s7' : '--s5', {
+        name: item.name,
+        sub: [item.category, untilText(item, p), item.inflationLinked ? null : `rises ${item.growth}% a year`, amt <= 0 ? 'not this year' : null].filter(Boolean).join(' · '),
+        value: `${money(item.amount)} a ${item.freq === 'month' ? 'month' : 'year'}`,
+      }, () => h('div', { class: 'rows' }, rowOf(item)));
     });
+
     const s = p.strategy;
     const adjust = [];
     if (s.spendNowPct !== 100) adjust.push(`scaled to ${s.spendNowPct}% before retirement`);
@@ -3513,28 +3663,37 @@
       sectionHead('expenses', 'Spending', null,
         h('button', { type: 'button', class: 'btn small primary', onclick: openWizard }, 'Spending check-up'),
         h('button', { type: 'button', class: 'btn small', id: 'lifeBtn', onclick: openLifeWizard, title: 'Children, cars, home repairs, retirement travel and care: big costs that come later, added as dated spending items' }, 'Future costs'),
-        h('button', { type: 'button', class: 'btn small', onclick: () => { p.expenses.push(E.normalizePlan({ ...p, expenses: [{ name: 'New expense', amount: 0, freq: 'month', inflationLinked: true }] }).expenses[0]); renderSection('expenses'); refresh(); } }, '+ Add expense')),
-      h('p', { class: 'total sub', style: 'margin:-6px 0 12px' }, 'This year: ', h('strong', {}, `${money(now / 12)} a month`), ` · ${money(now)} a year. Amounts are today's prices and rise with inflation unless you change it under More. Mortgage payments are under Accounts.${adjust.length ? ` Your saving strategy has this list ${adjust.join(' and ')}.` : ''}`),
+        h('button', { type: 'button', class: 'btn small', onclick: () => { const e = E.normalizePlan({ ...p, expenses: [{ name: 'New expense', amount: 0, freq: 'month', inflationLinked: true }] }).expenses[0]; p.expenses.push(e); editing.add(e.id); renderSection('expenses'); refresh(); } }, '+ Add expense')),
+      sectionSummary('expenses', () => {
+        const q = plan();
+        const now2 = q.expenses.reduce((acc, e) => acc + E.streamAt(e, q, 0), 0);
+        const life2 = q.expenses.filter(e => (e.key || '').startsWith('life:')).reduce((acc, e) => acc + E.streamAt(e, q, 0), 0);
+        const later2 = q.expenses.filter(e => E.streamAt(e, q, 0) <= 0).length;
+        return [['Spending this year', `${money(now2 / 12)} a month`, `${money(now2)} a year`], life2 > 0.5 ? ['Of which future costs', `${money(life2 / 12)} a month`, 'from Future costs'] : null, later2 ? ['Starting later', `${later2} item${later2 === 1 ? '' : 's'}`, 'not paid this year'] : null];
+      }),
+      h('p', { class: 'hint', style: 'margin:0 0 10px' }, `Today’s prices, rising with inflation unless an item says otherwise. Mortgage payments are under Accounts.${adjust.length ? ` Your saving strategy has this list ${adjust.join(' and ')}.` : ''} Click an item to change it.`),
       rows.length
-        ? h('div', { class: 'rows' }, h('div', { class: 'row-head', 'aria-hidden': 'true' }, h('span', {}, 'What'), h('span', {}, 'Amount'), h('span', {}, 'How often'), h('span', {}, 'Until'), h('span'), h('span')), rows)
+        ? h('div', { class: 'sum-list' }, rows)
         : h('p', { class: 'sub' }, 'No spending yet. The check-up walks you through it.'),
     ];
   }
 
   function renderEvents() {
     const p = plan();
-    const rows = p.events.map(ev => h('div', { class: 'row-item', style: `--item-color:${cssVar(ev.kind === 'income' ? '--s3' : ev.kind === 'overpay' ? '--s8' : '--s7')}` },
+    const KIND = { expense: 'Spend', income: 'Receive', overpay: 'Pay off mortgage' };
+    const rows = p.events.slice().sort((a, b) => a.year - b.year).map(ev => viewOrEdit(ev.id, 'events', ev.kind === 'income' ? '--s3' : ev.kind === 'overpay' ? '--s8' : '--s7',
+      { name: ev.name, sub: KIND[ev.kind], value: `${ev.kind === 'income' ? '+' : '−'}${money(ev.amount)}`, valueSub: `in ${ev.year}, today’s money` }, () => h('div', { class: 'rows events' }, h('div', { class: 'row-item', style: `--item-color:${cssVar(ev.kind === 'income' ? '--s3' : ev.kind === 'overpay' ? '--s8' : '--s7')}` },
       h('div', { class: 'row-main' },
         h('div', { class: 'name-cell' }, h('input', { type: 'text', class: 'name', value: ev.name, 'aria-label': 'Event name', oninput: e => { ev.name = e.target.value; schedule(); } })),
         selectInput([['expense', 'Spend'], ['income', 'Receive'], ['overpay', 'Pay off mortgage']], ...bind(ev, 'kind'), { rerender: 'events', label: 'Kind' }),
         numInput(...bind(ev, 'year'), { min: p.startYear, max: p.startYear + 80, label: 'Year' }),
         moneyInput(...bind(ev, 'amount'), { label: `${ev.name} amount` }),
-        deleteButton(`Remove ${ev.name}`, () => removeFrom(p.events, ev, 'events')))));
+        deleteButton(`Remove ${ev.name}`, () => removeFrom(p.events, ev, 'events')))))));
     return [
       sectionHead('events', 'One-off events', "A new car, a wedding, an inheritance, a lump-sum mortgage overpayment. Amounts are in today's money and rise with inflation to the year they happen.",
-        h('button', { type: 'button', class: 'btn small', onclick: () => { p.events.push(E.normalizePlan({ ...p, events: [{ name: 'New event', kind: 'expense', year: p.startYear + 1, amount: 0 }] }).events[0]); renderSection('events'); refresh(); } }, '+ Add event')),
+        h('button', { type: 'button', class: 'btn small', onclick: () => { const ev = E.normalizePlan({ ...p, events: [{ name: 'New event', kind: 'expense', year: p.startYear + 1, amount: 0 }] }).events[0]; p.events.push(ev); editing.add(ev.id); renderSection('events'); refresh(); } }, '+ Add event')),
       rows.length
-        ? h('div', { class: 'rows events' }, h('div', { class: 'row-head', 'aria-hidden': 'true' }, h('span', {}, 'What'), h('span', {}, 'Kind'), h('span', {}, 'Year'), h('span', {}, 'Amount'), h('span')), rows)
+        ? h('div', { class: 'sum-list' }, rows)
         : h('p', { class: 'sub' }, 'No events.'),
     ];
   }
@@ -3583,25 +3742,38 @@
       extra.push(h('div', { class: 'field' }, h('span', {}, 'In the plan'),
         switchInput('Count this account', () => !a.excluded, v => { a.excluded = !v; }, { rerender: 'accounts' }),
         h('span', { class: 'hint' }, 'Turn off for something you want to list but not count, e.g. a home owned by family.')));
-      return h('div', { class: 'item' + (a.excluded ? ' excluded' : ''), style: `--item-color:${cssVar(TYPE_COLOR[a.type])}` },
+      return viewOrEdit(a.id, 'accounts', TYPE_COLOR[a.type], {
+        name: a.name,
+        sub: [ACCOUNT_LABELS[a.type], E.OWNED_TYPES.includes(a.type) || a.owner !== 'joint' ? ownerName(p, a.owner) : 'Joint', a.type === 'debt' ? `${a.rate}%${a.fixedUntil ? ` fixed to ${a.fixedUntil}` : ''}` : null, a.excluded ? 'not counted' : null].filter(Boolean).join(' · '),
+        value: `${a.type === 'debt' ? '−' : ''}${money(a.balance)}`,
+        valueSub: h('span', { 'data-est': a.id }),
+      }, () => h('div', { class: 'item' + (a.excluded ? ' excluded' : ''), style: `--item-color:${cssVar(TYPE_COLOR[a.type])}` },
         h('div', { class: 'item-head' },
           h('input', { type: 'text', class: 'name', value: a.name, 'aria-label': 'Account name', oninput: e => { a.name = e.target.value; schedule(); } }),
           h('span', { class: 'tag' }, a.excluded ? 'Not counted' : ACCOUNT_LABELS[a.type]),
           h('span', { class: 'tag est', 'data-est': a.id, title: 'Estimated value today, moved on from this figure the way the plan expects' }),
           deleteButton(`Remove ${a.name}`, () => removeFrom(p.accounts, a, 'accounts'))),
         h('div', { class: 'fields' }, main),
-        more(`account-${a.id}`, 'More options', h('div', { class: 'fields' }, extra)));
+        more(`account-${a.id}`, 'More options', h('div', { class: 'fields' }, extra))));
     });
+
     const add = type => h('button', { type: 'button', class: 'btn small', onclick: () => {
-      p.accounts.push(E.normalizePlan({ ...p, accounts: [{ name: ACCOUNT_LABELS[type], type, owner: 'p1', balance: 0 }] }).accounts[0]);
+      const acc = E.normalizePlan({ ...p, accounts: [{ name: ACCOUNT_LABELS[type], type, owner: 'p1', balance: 0 }] }).accounts[0];
+      p.accounts.push(acc);
+      editing.add(acc.id);
       explorerValues = null;
       renderSection('accounts');
       refresh();
     } }, `+ ${ACCOUNT_LABELS[type]}`);
     return [
       sectionHead('accounts', 'Accounts', `What you had and owed on ${fmtDate(asOf())}. The yearly review brings them up to date; for a quick update between reviews, use Update balances on Home.`),
-      h('div', { class: 'items' }, items),
-      h('div', { class: 'add-row' }, Object.keys(ACCOUNT_LABELS).map(add)),
+      sectionSummary('accounts', () => {
+        const c = plan().accounts.filter(a => !a.excluded);
+        const o1 = c.filter(a => a.type !== 'debt').reduce((acc, a) => acc + a.balance, 0), o2 = c.filter(a => a.type === 'debt').reduce((acc, a) => acc + a.balance, 0);
+        return [['You own', money(o1), `on ${fmtDate(asOf())}`], ['You owe', money(o2), 'mortgage and loans'], ['Net worth', money(o1 - o2), `today about ${money(model.est.netWorth)}`]];
+      }),
+      h('div', { class: 'sum-list' }, items),
+      more('accounts-add', '+ Add an account', h('div', { class: 'add-row' }, Object.keys(ACCOUNT_LABELS).map(add))),
     ];
   }
 
@@ -3851,6 +4023,7 @@
       return;
     }
     plan().expenses = E.normalizePlan({ ...plan(), expenses: W.applyAnswers(plan(), wiz.answers, { keepOthers: wiz.keepOthers }) }).expenses;
+    markGuide('spending');
     $('#wizard').close();
     renderSection('expenses');
     refresh();
@@ -3955,10 +4128,464 @@
   function lifeNext() {
     if (lw.step < LW.STEPS.length) { lw.step++; renderLifeWizard(); return; }
     scenario().plan = LW.apply(plan(), lw.a);
+    markGuide('life');
     $('#lifeWiz').close();
     explorerValues = null;
     renderPlan();
     refresh();
+  }
+
+  // Home: how much to put away each month, where it goes, and what could be better.
+  function renderMonthlyPlan() {
+    const m = model.monthly, rows = model.proj.rows, r0 = rows[0];
+    const parts = [
+      ['Lifetime ISAs', m.lisa, '--s7', 'with the 25% bonus'],
+      ['ISAs', m.isa, '--s2', 'tax-free, available any time'],
+      ['General investment account', m.gia, '--s3', 'once ISAs are full'],
+      ['Pensions', m.pension, '--s4', 'through payroll: you and your employer'],
+      ['Mortgage overpayments', m.overpay, '--s8', null],
+      ['Cash buffer', m.cash, '--s1', 'topping up your emergency cash'],
+    ].filter(x => x[1] > 0.5);
+    const total = parts.reduce((acc, x) => acc + x[1], 0);
+    // When the mortgage ends, what was going on payments is free to save.
+    const debtEnd = rows.findIndex((r, t) => t > 0 && r0.debt > 0.5 && r.debt <= 0.5);
+    const later = debtEnd > 0 && debtEnd < rows.length - 1 ? rows[debtEnd + 0] : null;
+    const laterInvest = later ? (later.toIsa + later.toGia + (later.toLisa || 0) + later.overpay + later.toCash) / 12 / later.deflator : 0;
+    setKids($('#ovMonthly'),
+      h('div', { class: 'card-head' },
+        h('div', {}, h('h2', {}, 'What to put away each month'), h('p', { class: 'sub' }, `This year, from what is left after spending and mortgage payments, plus pensions through payroll.`)),
+        h('button', { type: 'button', class: 'btn small', onclick: () => navigate('finances/saving') }, 'Set your amounts')),
+      m.shortfall > 0
+        ? h('p', { class: 'mp-short' }, `Spending is ${money(m.shortfall)} a month more than comes in this year, so savings pay the difference.`)
+        : h('div', { class: 'mp-grid' },
+          h('div', { class: 'mp-total' }, h('span', { class: 'hero-label' }, 'In all'), h('strong', { class: 'hero-value' }, `${money(total)}`), h('small', {}, 'a month'),
+            later && laterInvest > 0.5 ? h('p', { class: 'hint' }, `From ${later.year}, with the mortgage paid off: about ${money(laterInvest)} a month to save, in today’s money.`) : null),
+          h('ul', { class: 'mp-parts' }, parts.map(([label, v, color, note]) => h('li', {},
+            h('i', { class: 'key square', style: `--key:${cssVar(color)}` }),
+            h('span', {}, h('strong', {}, label), note ? h('small', {}, note) : null),
+            h('span', { class: 'mp-amt' }, `${money(v)}`))))));
+  }
+
+  // A row of cards you swipe or step through, one or a few at a time (scroll-snap, arrows, dots).
+  function carousel(slides, label) {
+    const n = slides.length;
+    const track = h('div', { class: 'car-track', tabindex: '0', 'aria-label': label }, slides.map((s, i) => h('div', { class: 'car-slide', role: 'group', 'aria-roledescription': 'slide', 'aria-label': `${i + 1} of ${n}` }, s)));
+    const goTo = i => { const el = track.children[Math.max(0, Math.min(n - 1, i))]; if (el) track.scrollTo({ left: el.offsetLeft - track.offsetLeft, behavior: 'smooth' }); };
+    const at = () => { let best = 0, d = Infinity; [...track.children].forEach((el, i) => { const x = Math.abs(el.offsetLeft - track.offsetLeft - track.scrollLeft); if (x < d) { d = x; best = i; } }); return best; };
+    const prev = h('button', { type: 'button', class: 'car-btn', 'aria-label': 'Previous', onclick: () => goTo(at() - 1) }, '‹');
+    const next = h('button', { type: 'button', class: 'car-btn', 'aria-label': 'Next', onclick: () => goTo(at() + 1) }, '›');
+    // Dots for a few cards; past eight, a "3 of 15" count instead.
+    const many = n > 8;
+    const dots = many ? h('div', { class: 'car-count', 'aria-live': 'polite' }, `1 of ${n}`)
+      : h('div', { class: 'car-dots', 'aria-hidden': 'true' }, slides.map((_, i) => h('span', { class: i === 0 ? 'on' : '', onclick: () => goTo(i) })));
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const i = at();
+      if (many) dots.textContent = `${i + 1} of ${n}`;
+      else [...dots.children].forEach((d, j) => d.classList.toggle('on', j === i));
+      prev.disabled = track.scrollLeft < 4;
+      next.disabled = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
+    };
+    track.addEventListener('scroll', () => { if (!raf) raf = requestAnimationFrame(update); });
+    track.addEventListener('keydown', e => { if (e.key === 'ArrowRight') { e.preventDefault(); goTo(at() + 1); } if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(at() - 1); } });
+    requestAnimationFrame(update);
+    new ResizeObserver(update).observe(track);
+    return h('div', { class: 'carousel', role: 'region', 'aria-roledescription': 'carousel', 'aria-label': label },
+      track, n > 1 ? h('div', { class: 'car-nav' }, prev, dots, next) : null);
+  }
+
+  // Everything worth doing next, as one row of cards: plan checks, saving ideas and guides not done.
+  function suggestionSlides() {
+    const hidden = new Set(ws.dismissed);
+    const out = [];
+    const toneLabel = { warn: 'Needs attention', tip: 'Idea', info: 'Good to know' };
+    for (const i of B.insights(plan(), model.proj)) {
+      if (i.tone === 'good' || hidden.has(i.id)) continue;
+      out.push({ id: i.id, tone: i.tone, icon: i.tone, eyebrow: toneLabel[i.tone], title: i.title, text: i.text,
+        action: actionFits(i.action) ? [i.action.startsWith('compare:') ? 'Compare the options' : ACTION_LABEL[i.action], () => insightAction(i.action)] : null, rank: i.tone === 'warn' ? 0 : i.tone === 'tip' ? 1 : 3 });
+    }
+    for (const a of savingAdvice()) {
+      if (!/^\d+\.\s*Pension for/.test(a.title)) continue;
+      const id = `adv-${a.title.replace(/^\d+\.\s*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+      if (hidden.has(id)) continue;
+      out.push({ id, tone: 'tip', icon: 'pension', eyebrow: 'Saving idea', title: `${a.title.replace(/^\d+\.\s*/, '')}: ${a.amount}`, text: a.text, action: a.action, rank: 1 });
+    }
+    const g = ws.guides;
+    const guideSlide = (id, icon, title, text, open, show) => {
+      if (!show || hidden.has(`guide-${id}`)) return;
+      out.push({ id: `guide-${id}`, tone: 'guide', icon, eyebrow: 'Guide · a few minutes', title, text, action: ['Start', open], rank: 2 });
+    };
+    const due = RV.due(ws);
+    guideSlide('review', 'review', 'Time for your yearly review', 'Swap the estimates for real numbers and see how close the plan was.', () => openReview(), due.due);
+    const month = new Date().getMonth();
+    const taxLeft = taxChecks().filter(c => !((g[taxGuideId()] || {}).answers || {})[c.id]).length;
+    guideSlide('tax', 'review', `Before 5 April: ${taxLeft} allowance${taxLeft === 1 ? '' : 's'} to check`, 'ISAs, pension top-ups and Bed and ISA, worked out for this tax year. Unused allowances are lost.', () => openGuide('tax'), month <= 3 && taxLeft > 0);
+    const prot = g.protection ? PROTECTION.filter(q => g.protection.answers[q.id] !== 'yes').length : null;
+    guideSlide('protection', 'shield', prot ? `Protection: ${prot} thing${prot === 1 ? '' : 's'} to look at` : 'Protection & paperwork', 'Life cover, sick pay, wills, power of attorney and pension nominations: what protects the plan if something goes wrong.', () => openGuide('protection'), prot !== 0);
+    guideSlide('retire', 'clock', 'Can you retire earlier?', 'Pick a person and an age: see the chance the money lasts, what it costs, and the alternatives.', () => openGuide('retire'), !g.retire);
+    guideSlide('life', 'heart', 'Plan for costs that come later', 'Children, cars, home repairs, travel and care, as dated costs.', openLifeWizard, !g.life && !plan().expenses.some(e => (e.key || '').startsWith('life:')));
+    guideSlide('spending', 'piggy', 'Check your spending', 'Go through what you spend, with typical UK ranges.', openWizard, !g.spending);
+    return out.sort((a, b) => a.rank - b.rank);
+  }
+
+  function renderSuggestions() {
+    const list = suggestionSlides();
+    const hide = id => { ws.dismissed = [...new Set(ws.dismissed.concat([id]))]; save(); renderSuggestions(); };
+    const hiddenCount = ws.dismissed.length;
+    const slides = list.map(sg => h('article', { class: `sg-card ${sg.tone}`, 'data-insight': sg.id },
+      h('div', { class: 'sg-top' }, h('span', { class: 'sg-ico' }, glyph(sg.icon)), h('span', { class: 'eyebrow' }, sg.eyebrow)),
+      h('h3', {}, sg.title),
+      h('p', {}, sg.text),
+      h('div', { class: 'sg-actions' },
+        sg.action ? h('button', { type: 'button', class: 'btn small primary', onclick: sg.action[1] }, sg.action[0]) : null,
+        h('button', { type: 'button', class: 'linkish', 'aria-label': `Hide: ${sg.title}`, onclick: () => hide(sg.id) }, sg.tone === 'guide' ? 'Not now' : 'Already sorted'))));
+    setKids($('#ovInsights'),
+      h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Suggestions for you'),
+        h('p', { class: 'sub' }, `${list.length ? `${list.length} things worth a look, most important first.` : 'Nothing to look at right now.'} Rules of thumb for ${R.TAX_YEAR}, not financial advice.`))),
+      list.length ? carousel(slides, 'Suggestions') : null,
+      h('div', { class: 'sg-foot' },
+        more('home-guides', 'All guides', h('div', { id: 'ovGuides' })),
+        hiddenCount ? h('button', { type: 'button', class: 'linkish', onclick: () => { ws.dismissed = []; save(); renderSuggestions(); } }, `Show ${hiddenCount} hidden`) : null));
+    renderGuides();
+  }
+
+  // ------------------------------------------------------------------ guides: step-by-step check-ups
+
+  // Remember that a guide was done (and its answers) for the hub on Home.
+  function markGuide(id, answers) {
+    ws.guides[id] = { date: today(), answers: answers || (ws.guides[id] && ws.guides[id].answers) || {} };
+    save();
+  }
+
+  let guide = null;   // { def, step, s }
+
+  function openGuide(id, opts = {}) {
+    const def = GUIDES[id];
+    guide = { id, def, step: 0, s: def.init(opts) };
+    renderGuide();
+    const dlg = $('#guideDlg');
+    if (!dlg.open) dlg.showModal();
+  }
+
+  function renderGuide() {
+    const { def, s } = guide;
+    const steps = def.steps(s);
+    const st = steps[guide.step];
+    $('#gdStep').textContent = steps.length > 1 ? `${def.name} · step ${guide.step + 1} of ${steps.length}` : def.name;
+    $('#gdTitle').textContent = st.title;
+    $('#gdIntro').textContent = typeof st.intro === 'function' ? st.intro(s) : st.intro || '';
+    $('#gdBar').style.width = `${((guide.step + 1) / steps.length) * 100}%`;
+    setKids($('#gdBody'), ...[].concat(st.render(s)));
+    setKids($('#gdTotal'), st.note ? st.note(s) : null);
+    $('#gdBack').hidden = guide.step === 0;
+    $('#gdNext').textContent = guide.step === steps.length - 1 ? def.finishLabel || 'Done' : 'Next';
+  }
+
+  function guideNext() {
+    const steps = guide.def.steps(guide.s);
+    if (guide.step < steps.length - 1) { guide.step++; renderGuide(); $('#gdBody').scrollTop = 0; return; }
+    const msg = guide.def.finish(guide.s);
+    $('#guideDlg').close();
+    renderPlan();
+    refresh();
+    if (msg) toast(msg);
+  }
+
+  // ---- "Can I retire at …?": one person, one age, and when to take a defined benefit pension
+
+  // A copy of the plan where `who` stops work at `age` and takes their DB pensions then
+  // (reduced) or at the scheme's Normal Pension Age (full).
+  function retireVariant(base, who, age, dbWhen) {
+    const p = E.clonePlan(base);
+    const x = p.household.people.find(y => y.id === who);
+    for (const g of p.goals) if (g.type === 'retire' && E.retiree(p, g).id === who && g.age === x.retireAge) g.age = age;
+    x.retireAge = age;
+    for (const db of p.income.filter(i => i.kind === 'dbpension' && i.owner === who)) {
+      const npa = E.dbEarly(db, x).npa || db.startAge;
+      db.startAge = dbWhen === 'stop' ? Math.min(npa, Math.max(age, x.pensionAccessAge)) : npa;
+    }
+    return E.normalizePlan(p);
+  }
+
+  // What a plan looks like for one person's retirement: chance the money lasts, savings, DB pension.
+  function retireOutcome(q, who) {
+    const proj = E.project(q);
+    const x = q.household.people.find(y => y.id === who);
+    const rows = proj.rows;
+    const real = (v, t) => v / rows[t].deflator;
+    const tr = Math.max(0, Math.min(rows.length - 1, x.retireAge - x.age));
+    const t0 = Math.max(0, Math.min(rows.length - 1, Math.min(...q.household.people.map(y => y.retireAge - y.age))));
+    const after = rows.slice(t0).map((r, i) => real(r.liquid, t0 + i));
+    const db = q.income.filter(i => i.kind === 'dbpension' && i.owner === who).map(i => {
+      const t = Math.max(0, i.startAge - x.age);
+      const v = E.incomeAfterCosts(i, q, Math.min(t, rows.length - 1)) / Math.pow(1 + q.assumptions.inflation / 100, t);
+      return { name: i.name, from: i.startAge, a: v, lump: v * i.lumpMultiple, factor: E.dbEarly(i, x).factor };
+    });
+    return {
+      chance: E.successRate(q, 600, ws.settings.seed),
+      atRetire: real(rows[tr].liquid, tr), lowest: Math.min(...after), end: real(rows[rows.length - 1].liquid, rows.length - 1),
+      db, age: x.retireAge, year: q.startYear + x.retireAge - x.age,
+    };
+  }
+
+  function verdict(chance) {
+    const conf = ws.settings.confidence / 100;
+    if (chance >= conf) return { tone: 'good', text: 'Yes' };
+    if (chance >= 0.7) return { tone: 'warn', text: 'Possibly, with some risk' };
+    return { tone: 'bad', text: 'Not as the plan stands' };
+  }
+
+  const GUIDES = {
+    retire: {
+      name: 'Can I retire at…?',
+      finishLabel: 'Finish',
+      init: opts => {
+        const p = plan();
+        const x = people().find(y => y.id === opts.who) || nextRetiree(p);
+        const db = p.income.find(i => i.kind === 'dbpension' && i.owner === x.id);
+        const npa = db ? E.dbEarly(db, x).npa || db.startAge : null;
+        return { who: x.id, age: opts.age || x.retireAge, dbWhen: db && db.startAge < npa ? 'stop' : 'npa', rows: null, keep: 'look', key: null };
+      },
+      steps: () => [
+        {
+          title: 'Who, and when?',
+          intro: 'Pick a person and the age they would stop work. Everything else in your plan stays as it is.',
+          render: s => {
+            const p = plan();
+            const x = people().find(y => y.id === s.who);
+            const dbs = p.income.filter(i => i.kind === 'dbpension' && i.owner === s.who);
+            return [
+              people().length > 1 ? h('div', { class: 'field' }, h('span', {}, 'Who'), h('div', { class: 'idea-chips' }, people().map(y => h('button', {
+                type: 'button', class: 'idea-chip', 'aria-pressed': String(y.id === s.who), 'data-who': y.id,
+                onclick: () => { s.who = y.id; s.age = y.retireAge; s.rows = null; renderGuide(); },
+              }, y.name)))) : null,
+              field(`${x.name} stops work at`, h('div', { class: 'adorn has-suf' },
+                h('input', { type: 'number', value: s.age, min: x.age + 1, max: 80, 'aria-label': 'Retirement age', oninput: e => { s.age = Math.round(+e.target.value) || s.age; s.rows = null; } }),
+                h('span', { class: 'suf' }, 'years')), `Planned now: ${x.retireAge}. Workplace and personal pensions can be drawn from ${x.pensionAccessAge}; State Pension from ${x.statePensionAge}.`),
+              dbs.length ? h('div', { class: 'field' }, h('span', {}, `When to take ${dbs.map(d => d.name).join(' and ')}`),
+                h('div', { class: 'gd-choices' },
+                  [['stop', 'When I stop work (or from the earliest age it can be paid)', 'Paid sooner, but cut for every year before its Normal Pension Age.'],
+                    ['npa', 'At its Normal Pension Age, in full', 'Nothing from it until then: savings bridge the gap.']].map(([v, t, sub]) => h('label', { class: 'radio-card' },
+                    h('input', { type: 'radio', name: 'gdDb', value: v, checked: s.dbWhen === v, onchange: () => { s.dbWhen = v; s.rows = null; } }),
+                    h('span', {}, h('strong', {}, t), h('small', {}, sub)))))) : null,
+            ];
+          },
+        },
+        {
+          title: 'What happens',
+          intro: s => `${people().find(y => y.id === s.who).name} stopping work at ${s.age}, next to the plan as it is and to working longer. Chance the money lasts across ${600} simulated futures; money in today’s pounds.`,
+          render: s => {
+            const box = h('div', { id: 'gdRetire' }, h('p', { class: 'sub working' }, 'Working it out…'));
+            setTimeout(() => computeRetireGuide(s, box), 30);
+            return box;
+          },
+        },
+        {
+          title: 'Keep it?',
+          intro: 'Change your plan, keep it as a scenario to compare, or just leave it as something you looked at.',
+          render: s => h('div', { class: 'gd-choices' },
+            [['plan', `Update my plan: ${people().find(y => y.id === s.who).name} retires at ${s.age}`, 'Your goals and every chart use it from now on.'],
+              ['scenario', 'Save it as a scenario', 'Your plan stays as it is; compare them in Scenarios.'],
+              ['look', 'Just looking', 'Nothing changes.']].map(([v, t, sub]) => h('label', { class: 'radio-card' },
+              h('input', { type: 'radio', name: 'gdKeep', value: v, checked: s.keep === v, onchange: () => { s.keep = v; } }),
+              h('span', {}, h('strong', {}, t), h('small', {}, sub))))),
+        },
+      ],
+      finish: s => {
+        const x = people().find(y => y.id === s.who);
+        const q = retireVariant(plan(), s.who, s.age, s.dbWhen);
+        markGuide('retire', { [s.who]: String(s.age) });
+        if (s.keep === 'plan') { scenario().plan = q; return `${x.name} now retires at ${s.age} in your plan.`; }
+        if (s.keep === 'scenario') {
+          const name = `${scenario().name}: ${x.name} retires at ${s.age}`;
+          ws.scenarios.push({ id: E.uid(), name, plan: q });
+          save();
+          renderScenarioPicker();
+          return `Saved “${name}”. Compare it in Scenarios.`;
+        }
+        return null;
+      },
+    },
+
+    tax: {
+      name: 'Tax year-end check',
+      finishLabel: 'Save',
+      init: () => ({ year: taxYearEnd(), done: { ...((ws.guides[taxGuideId()] || {}).answers || {}) } }),
+      steps: () => [{
+        title: 'Before the tax year ends',
+        intro: s => `Allowances that reset on 6 April ${s.year} and are lost if unused, worked out from your plan for this tax year (${R.TAX_YEAR}). Tick what you have done.`,
+        render: s => h('ul', { class: 'checklist' }, taxChecks().map(c => h('li', { class: s.done[c.id] ? 'done' : '' },
+          h('label', {}, h('input', { type: 'checkbox', checked: !!s.done[c.id], onchange: e => { if (e.target.checked) s.done[c.id] = 'done'; else delete s.done[c.id]; e.target.closest('li').classList.toggle('done', e.target.checked); } }),
+            h('span', {}, h('strong', {}, c.title), c.amount ? h('span', { class: 'ck-amt' }, c.amount) : null, h('small', {}, c.text)))))),
+        note: s => h('span', { class: 'muted' }, `Deadline: 5 April ${s.year}`),
+      }],
+      finish: s => { markGuide(taxGuideId(), s.done); const n = taxChecks().filter(c => !s.done[c.id]).length; return n ? `Saved. ${n} still to do before 5 April.` : 'All done for this tax year.'; },
+    },
+
+    protection: {
+      name: 'Protection & paperwork',
+      finishLabel: 'Save',
+      init: () => ({ a: { ...((ws.guides.protection || {}).answers || {}) } }),
+      steps: () => [
+        {
+          title: 'What do you have in place?',
+          intro: 'The things that protect the plan if something goes wrong. Answer for the household; “not sure” is fine.',
+          render: s => h('div', { class: 'prot-qs' }, PROTECTION.map(q => h('div', { class: 'prot-q' },
+            h('div', {}, h('strong', {}, q.q()), h('small', {}, q.why())),
+            h('div', { class: 'seg', role: 'group', 'aria-label': q.q() }, [['yes', 'Yes'], ['no', 'No'], ['unsure', 'Not sure']].map(([v, l]) => h('button', {
+              type: 'button', 'aria-pressed': String(s.a[q.id] === v), 'data-answer': `${q.id}:${v}`,
+              onclick: e => { s.a[q.id] = v; for (const b of e.currentTarget.parentElement.children) b.setAttribute('aria-pressed', String(b === e.currentTarget)); },
+            }, l)))))),
+        },
+        {
+          title: 'What to look at',
+          intro: 'For everything you don’t have yet, or aren’t sure about. General guidance, not advice: a regulated adviser or solicitor can help with the detail.',
+          render: s => {
+            const todo = PROTECTION.filter(q => s.a[q.id] !== 'yes');
+            return todo.length ? h('ol', { class: 'advice' }, todo.map(q => h('li', {},
+              h('div', { class: 'adv-head' }, h('strong', {}, q.title), q.amount ? h('span', { class: 'adv-amt' }, q.amount()) : null),
+              h('p', {}, q.tip())))) : h('p', {}, 'All in place. Look again when something changes: a new child, a house move, or a new job.');
+          },
+        },
+      ],
+      finish: s => { markGuide('protection', s.a); return null; },
+    },
+  };
+
+  async function computeRetireGuide(s, box) {
+    const p = plan();
+    const x = people().find(y => y.id === s.who);
+    const key = `${JSON.stringify(p)}|${s.who}|${s.age}|${s.dbWhen}`;
+    if (s.key !== key || !s.rows) {
+      const npaOf = () => { const db = p.income.find(i => i.kind === 'dbpension' && i.owner === s.who); return db ? E.dbEarly(db, x).npa || db.startAge : null; };
+      const npa = npaOf();
+      const opts = [
+        { name: 'Your plan now', plan: p },
+        { name: `Stop at ${s.age}${npa ? (s.dbWhen === 'stop' ? ', pension taken early' : `, pension at ${npa}`) : ''}`, plan: retireVariant(p, s.who, s.age, s.dbWhen), choice: true },
+      ];
+      if (npa) opts.push({ name: `Stop at ${s.age}, pension ${s.dbWhen === 'stop' ? `at ${npa} in full` : 'taken early'}`, plan: retireVariant(p, s.who, s.age, s.dbWhen === 'stop' ? 'npa' : 'stop') });
+      const later = Math.max(npa || 0, x.statePensionAge);
+      if (later > s.age) opts.push({ name: `Work until ${later}`, plan: retireVariant(p, s.who, later, 'npa') });
+      const seen = new Set();
+      s.rows = [];
+      for (const o of opts) {
+        const k = JSON.stringify(o.plan);
+        if (seen.has(k) && !o.choice) continue;
+        seen.add(k);
+        await new Promise(r => setTimeout(r, 0));
+        if (!box.isConnected) return;
+        s.rows.push({ ...o, out: retireOutcome(o.plan, s.who) });
+      }
+      s.key = key;
+    }
+    const mine = s.rows.find(r => r.choice);
+    const v = verdict(mine.out.chance);
+    const q = mine.plan;
+    const xq = q.household.people.find(y => y.id === s.who);
+    setKids(box,
+      h('div', { class: `gd-verdict ${v.tone}` }, glyph(v.tone === 'good' ? 'good' : 'warn'),
+        h('div', {}, h('strong', {}, `${v.text}: ${pct(mine.out.chance)} chance the money lasts`),
+          h('p', {}, `${x.name} stops work in ${mine.out.year} at ${s.age}. Savings, investments and pensions then: about ${fmtCompact(mine.out.atRetire)}; the lowest they get afterwards: ${fmtCompact(mine.out.lowest)}; left at the end of the plan: ${fmtCompact(mine.out.end)}.`))),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'data gd-table' },
+        h('thead', {}, h('tr', {}, ['', 'Chance the money lasts', 'Savings when they stop', 'Lowest after', 'Left at the end', ...(mine.out.db.length ? ['Defined benefit pension'] : [])].map(t => h('th', { scope: 'col' }, t)))),
+        h('tbody', {}, s.rows.map(r => h('tr', { class: r.choice ? 'open' : '' },
+          h('th', { scope: 'row' }, r.name),
+          h('td', {}, pct(r.out.chance)), h('td', {}, fmtCompact(r.out.atRetire)), h('td', {}, fmtCompact(r.out.lowest)), h('td', {}, fmtCompact(r.out.end)),
+          mine.out.db.length ? h('td', {}, r.out.db.map(d => `${money(d.a)} a year from ${d.from}${d.factor < 1 ? ` (${(d.factor * 100).toFixed(1)}%)` : ''}${d.lump ? ` + ${money(d.lump)} lump sum` : ''}`).join('; ')) : null))))),
+      h('h3', {}, 'What it means'),
+      h('ul', { class: 'tradeoffs-flat' }, retireConsequences(q, xq).map(t => h('li', {}, t))));
+  }
+
+  // The checks for this tax year, worked out from the plan.
+  const taxYearEnd = () => { const d = new Date(); return d.getMonth() > 3 || (d.getMonth() === 3 && d.getDate() > 5) ? d.getFullYear() + 1 : d.getFullYear(); };
+  const taxGuideId = () => `tax-${taxYearEnd()}`;
+
+  function taxChecks() {
+    const p = plan(), r0 = model.proj.rows[0], s = p.strategy;
+    const out = [];
+    const add = (id, title, text, amount) => out.push({ id, title, text, amount });
+    const ps = people();
+    const isaEach = (r0.toIsa + r0.sweepIsa + (r0.toLisa || 0)) / ps.length;
+    for (const x of ps) add(`isa-${x.id}`, `${x.name}’s ISA allowance`, `The plan puts about ${money(isaEach)} into ISAs for ${x.name} this tax year, of ${money(s.isaAllowance)}. Unused allowance is lost on 5 April.`, `${money(Math.max(0, s.isaAllowance - isaEach))} left`);
+    for (const a of p.accounts.filter(a => a.type === 'lisa' && !a.excluded)) {
+      const x = ps.find(y => y.id === a.owner);
+      if (x && x.age < R.LISA.payUntil) add(`lisa-${a.id}`, `${a.name}: the full ${money(R.LISA.maxContribution)}`, `Pay it in by 5 April for the ${money(R.LISA.maxContribution * R.LISA.bonus)} government bonus.`);
+    }
+    const region = p.household.region;
+    for (const x of ps) {
+      const pay = p.income.filter(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 0) > 0);
+      const gross = pay.reduce((acc, i) => acc + (i.tax === 'uk' ? E.incomeAfterCosts(i, p, 0) : i.tax === 'none' ? R.grossFromTakeHome(E.incomeAfterCosts(i, p, 0), region) : 0), 0);
+      if (!gross || p.household.ignoreTax) continue;
+      const rate = R.incomeTax(gross + 100, region) - R.incomeTax(gross, region);
+      if (rate >= 40) add(`pension-${x.id}`, `${x.name}: pension top-up at ${Math.round(rate)}% relief`, `${x.name} pays ${Math.round(rate)}% on the top of their pay (estimated). A pension contribution before 5 April gets that relief; unused allowance from the last 3 years can be carried forward (up to ${money(R.PENSION_ANNUAL_ALLOWANCE)} a year). Claim relief above 20% in the self-assessment return.`);
+      if (gross > R.PA_TAPER_START && gross < R.PA_TAPER_START + 2 * R.PERSONAL_ALLOWANCE) add(`taper-${x.id}`, `${x.name}: the £100k tax trap`, `Pay between ${money(R.PA_TAPER_START)} and ${money(R.PA_TAPER_START + 2 * R.PERSONAL_ALLOWANCE)} loses the personal allowance (over 60% tax). Pension contributions bring adjusted net income back down.`);
+      const kids = ((p.life && p.life.children) || []).filter(c => c.age < 18);
+      if (kids.length && gross > R.CHILD_BENEFIT.chargeFrom && gross < R.CHILD_BENEFIT.chargeTo) add(`hicbc-${x.id}`, `${x.name}: Child Benefit charge`, `Income between ${money(R.CHILD_BENEFIT.chargeFrom)} and ${money(R.CHILD_BENEFIT.chargeTo)} claws back Child Benefit. Pension contributions lower the income it is measured on.`);
+    }
+    if (r0.gia > 0.5) add('bed-isa', 'Bed and ISA', `Move money from the general investment account (${money(r0.gia)}) into ISA allowance you have left. Gains up to ${money(R.CGT.annualExempt)} a year each are tax-free, so selling a little each year keeps the tax bill down.`);
+    const kids = ((p.life && p.life.children) || []).filter(c => c.age < 18);
+    if (kids.length) add('jisa', 'Junior ISA', `Up to ${money(R.JUNIOR_ISA_ALLOWANCE)} a year per child, tax-free until 18.`);
+    add('payslip', 'Tax codes and payslips', 'Check each tax code is right (gov.uk personal tax account) and keep your P60s, which arrive by 31 May.');
+    return out;
+  }
+
+  const PROTECTION = [
+    { id: 'life', title: 'Life insurance', q: () => 'Life insurance for each of you?', why: () => 'Pays out if one of you dies, so the other can keep the home and the plan.',
+      amount: () => { const r = lifeCoverNeed(); return `about ${fmtCompact(r.low)}–${fmtCompact(r.high)} each`; },
+      tip: () => { const r = lifeCoverNeed(); return `A common way to size it: clear the mortgage (${money(r.mortgage)}) and cover ${r.years} years of living costs (${money(r.spend)} a year) until ${r.kids ? 'the youngest is 21' : 'the other can adjust'}. Level or decreasing term cover is usually cheap at your ages; written in trust it is paid quickly and stays outside the estate. Check any death-in-service cover from work first (often 2–4× salary).`; } },
+    { id: 'income', title: 'Income protection', q: () => 'Income protection or good sick pay?', why: () => 'Replaces part of your pay if illness stops you working for months or years.',
+      tip: () => 'Check your employers’ sick pay first (many universities pay months at full pay). Income protection then pays 50–70% of pay after a waiting period that matches when sick pay ends, until you can work again or retire.' },
+    { id: 'will', title: 'Wills', q: () => 'Up-to-date wills for both of you?', why: () => 'Say who inherits and who looks after children.',
+      tip: () => (plan().household.region === 'scotland'
+        ? 'In Scotland, without a will the law decides who inherits, and a spouse or civil partner may not get everything. Children can claim “legal rights” either way. A solicitor’s wills for a couple usually cost a few hundred pounds; name guardians for your child too.'
+        : 'Without a will the intestacy rules decide who inherits, and an unmarried partner gets nothing. Name guardians for your children too. A solicitor’s wills for a couple usually cost a few hundred pounds.') },
+    { id: 'poa', title: 'Power of attorney', q: () => (plan().household.region === 'scotland' ? 'Power of attorney (continuing and welfare)?' : 'Lasting powers of attorney?'), why: () => 'Lets someone you trust manage money and decisions if you can’t.',
+      tip: () => (plan().household.region === 'scotland'
+        ? 'A continuing (money) and welfare power of attorney, registered with the Office of the Public Guardian (Scotland). Without one, your partner would need a court order to manage your accounts.'
+        : 'Lasting powers of attorney for property & finance and for health & welfare, registered with the Office of the Public Guardian. Without them, your partner would need a court order.') },
+    { id: 'nominations', title: 'Pension nominations', q: () => 'Told each pension scheme who should get it?', why: () => 'Pensions usually pass outside your will, by the scheme’s choice.',
+      tip: () => 'Fill in an expression of wish (nomination) form for every pension, including workplace schemes like USS, and update it after big changes. Pensions are usually outside your estate for inheritance tax.' },
+    { id: 'records', title: 'A list of accounts', q: () => 'Could your partner find every account?', why: () => 'Saves months of searching at the worst time.',
+      tip: () => 'Keep a short list of accounts, pensions, policies and who to call, somewhere your partner knows. Horizon’s Data → Save to a file is one copy; a printed page in a safe place is another.' },
+  ];
+
+  // A rough life cover need: the mortgage plus some years of the household's spending.
+  function lifeCoverNeed() {
+    const p = plan(), r0 = model.proj.rows[0];
+    const mortgage = p.accounts.filter(a => a.type === 'debt' && !a.excluded).reduce((acc, a) => acc + a.balance, 0);
+    const kids = ((p.life && p.life.children) || []).map(c => c.age);
+    const years = kids.length ? Math.max(3, 21 - Math.min(...kids)) : 5;
+    const spend = r0.spending;
+    return { mortgage, years, spend, kids: kids.length, low: mortgage + years * spend * 0.5, high: mortgage + years * spend };
+  }
+
+  // The hub on Home: every guide, with what is done.
+  function renderGuides() {
+    const p = plan();
+    const g = ws.guides;
+    const when = id => (g[id] && g[id].date ? `Done ${fmtDate(g[id].date)}` : null);
+    const prot = g.protection ? PROTECTION.filter(q => g.protection.answers[q.id] !== 'yes').length : null;
+    const taxDone = g[taxGuideId()] ? Object.keys(g[taxGuideId()].answers).length : 0;
+    const taxAll = taxChecks().length;
+    const due = RV.due(ws);
+    const tiles = [
+      { id: 'spending', icon: 'piggy', title: 'Spending check-up', text: 'Go through what you spend, with typical UK ranges.', status: when('spending'), open: openWizard },
+      { id: 'life', icon: 'heart', title: 'Future costs', text: 'Children, cars, home repairs, travel and care: dated costs to come.', status: when('life') || (p.expenses.some(e => (e.key || '').startsWith('life:')) ? 'Added' : null), open: openLifeWizard },
+      { id: 'retire-plan', icon: 'retire', title: 'Retirement plan', text: 'When you stop, what you spend, State Pensions.', status: p.goals.some(x => x.type === 'retire') ? 'Set up' : null, open: () => { const r = p.goals.find(x => x.type === 'retire'); return r ? openGoalWizard(r) : openGoalWizard(null, 'retire'); } },
+      { id: 'retire', icon: 'clock', title: 'Can I retire at…?', text: 'One person, one age: what happens, what it costs, and the alternatives.', status: when('retire'), open: () => openGuide('retire') },
+      { id: 'saving', icon: 'layers', title: 'Saving & investing', text: 'How much to put where each month, in the usual UK order.', status: null, open: () => navigate('finances/saving') },
+      { id: 'tax', icon: 'review', title: 'Tax year-end check', text: `Allowances to use before 5 April ${taxYearEnd()}.`, status: taxDone ? `${taxDone} of ${taxAll} done` : null, open: () => openGuide('tax') },
+      { id: 'protection', icon: 'shield', title: 'Protection & paperwork', text: 'Life cover, sick pay, wills, power of attorney, pension nominations.', status: prot === null ? null : prot ? `${prot} to look at` : 'All in place', warn: prot > 0, open: () => openGuide('protection') },
+      { id: 'review', icon: 'review', title: 'Yearly review', text: 'Swap estimates for real numbers once a year.', status: due.due ? 'Due now' : ws.checkins.length ? `Last ${fmtDate(ws.checkins[ws.checkins.length - 1].date)}` : null, warn: due.due, open: () => openReview() },
+    ];
+    const box = $('#ovGuides');
+    if (!box) return;
+    setKids(box,
+      h('div', { class: 'guide-grid' }, tiles.map(t => h('button', { type: 'button', class: `guide-tile${t.status ? ' done' : ''}${t.warn ? ' warn' : ''}`, 'data-guide': t.id, onclick: t.open },
+        h('span', { class: 'gt-ico' }, glyph(t.icon)),
+        h('span', { class: 'gt-txt' }, h('strong', {}, t.title), h('small', {}, t.text)),
+        h('span', { class: 'gt-status' }, t.status || 'Start')))));
   }
 
   // ------------------------------------------------------------------ chrome: navigation, notifications, theme, files
@@ -4159,6 +4786,7 @@
     updateIncomeFigures();
     updateAccountFigures();
     updateSavingFigures();
+    updateSummaries();
     renderSavedNote();
     renderNotifications();
     renderScenarioPicker();
@@ -4240,7 +4868,6 @@
     $('#exportBtn').addEventListener('click', () => { $('#dataMenu').open = false; exportFile(); });
     $('#importBtn').addEventListener('click', () => { $('#dataMenu').open = false; $('#importFile').click(); });
     $('#importFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); });
-    $('#ovAddGoal').addEventListener('click', () => openGoalWizard());
     $('#blankBtn').addEventListener('click', () => {
       $('#dataMenu').open = false;
       if (!confirm('Start a blank plan? This replaces everything in Horizon. Save to a file first if you want to keep your data.')) return;
@@ -4279,6 +4906,9 @@
     $('#wizForm').addEventListener('submit', e => e.preventDefault());
 
     $('#lwNext').addEventListener('click', lifeNext);
+    $('#gdNext').addEventListener('click', guideNext);
+    $('#gdBack').addEventListener('click', () => { if (guide && guide.step > 0) { guide.step--; renderGuide(); } });
+    $('#gdClose').addEventListener('click', () => $('#guideDlg').close());
     $('#lwBack').addEventListener('click', () => { if (lw.step > 0) { lw.step--; renderLifeWizard(); } });
     $('#lwClose').addEventListener('click', () => $('#lifeWiz').close());
     $('#lwForm').addEventListener('submit', e => e.preventDefault());

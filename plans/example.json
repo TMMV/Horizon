@@ -1,9 +1,9 @@
 {
   "version": 6,
-  "activeId": "mw50pf3zg6u01",
+  "activeId": "mw52xg33gr3l1",
   "scenarios": [
     {
-      "id": "mw50pf3zg6u01",
+      "id": "mw52xg33gr3l1",
       "name": "Base plan",
       "plan": {
         "startYear": 2026,
@@ -38,7 +38,7 @@
         },
         "accounts": [
           {
-            "id": "mw50pf4042982",
+            "id": "mw52xg35d9im2",
             "name": "Current & savings",
             "type": "cash",
             "owner": "joint",
@@ -59,7 +59,7 @@
             "latest": null
           },
           {
-            "id": "mw50pf409eww3",
+            "id": "mw52xg35eo953",
             "name": "Alex stocks & shares ISA",
             "type": "isa",
             "owner": "p1",
@@ -80,7 +80,7 @@
             "latest": null
           },
           {
-            "id": "mw50pf40tr9f4",
+            "id": "mw52xg35x66u4",
             "name": "Sam stocks & shares ISA",
             "type": "isa",
             "owner": "p2",
@@ -101,7 +101,7 @@
             "latest": null
           },
           {
-            "id": "mw50pf40g5wg5",
+            "id": "mw52xg3557cg5",
             "name": "General investment account",
             "type": "gia",
             "owner": "joint",
@@ -122,7 +122,7 @@
             "latest": null
           },
           {
-            "id": "mw50pf4057oe6",
+            "id": "mw52xg35bvde6",
             "name": "Alex workplace pension",
             "type": "pension",
             "owner": "p1",
@@ -143,7 +143,7 @@
             "latest": null
           },
           {
-            "id": "mw50pf40asjw7",
+            "id": "mw52xg35udk67",
             "name": "Sam workplace pension",
             "type": "pension",
             "owner": "p2",
@@ -164,7 +164,7 @@
             "latest": null
           },
           {
-            "id": "mw50pf405kzo8",
+            "id": "mw52xg35aj6o8",
             "name": "Gilts",
             "type": "bonds",
             "owner": "joint",
@@ -185,7 +185,7 @@
             "latest": null
           },
           {
-            "id": "mw50pf40kodj9",
+            "id": "mw52xg353cgr9",
             "name": "Home",
             "type": "property",
             "owner": "joint",
@@ -206,7 +206,7 @@
             "latest": null
           },
           {
-            "id": "mw50pf41i2p9a",
+            "id": "mw52xg35fmj0a",
             "name": "Mortgage",
             "type": "debt",
             "owner": "joint",
@@ -229,7 +229,7 @@
         ],
         "income": [
           {
-            "id": "mw50pf41rza6b",
+            "id": "mw52xg35nsv4b",
             "name": "Alex salary",
             "owner": "p1",
             "kind": "salary",
@@ -246,6 +246,9 @@
             "amount": 62000,
             "freq": "year",
             "growth": 3,
+            "growthUntilAge": 0,
+            "growthAfter": 3,
+            "raises": [],
             "inflationLinked": false,
             "startRef": "now",
             "startAge": 38,
@@ -257,7 +260,7 @@
             "sacrifice": true
           },
           {
-            "id": "mw50pf4104jsc",
+            "id": "mw52xg354avvc",
             "name": "Sam take-home pay",
             "owner": "p2",
             "kind": "salary",
@@ -274,6 +277,9 @@
             "amount": 2300,
             "freq": "month",
             "growth": 3,
+            "growthUntilAge": 0,
+            "growthAfter": 3,
+            "raises": [],
             "inflationLinked": false,
             "startRef": "now",
             "startAge": 36,
@@ -285,7 +291,7 @@
             "sacrifice": false
           },
           {
-            "id": "mw50pf41eovfd",
+            "id": "mw52xg35aqtnd",
             "name": "Rental flat",
             "owner": "joint",
             "kind": "rental",
@@ -302,6 +308,9 @@
             "amount": 850,
             "freq": "month",
             "growth": 2,
+            "growthUntilAge": 0,
+            "growthAfter": 2,
+            "raises": [],
             "inflationLinked": false,
             "startRef": "now",
             "startAge": 38,
@@ -315,7 +324,7 @@
         ],
         "expenses": [
           {
-            "id": "mw50pf41imroe",
+            "id": "mw52xg35psuve",
             "name": "Groceries",
             "key": "",
             "category": "",
@@ -330,7 +339,7 @@
             "endAge": 95
           },
           {
-            "id": "mw50pf41um58f",
+            "id": "mw52xg35eeb7f",
             "name": "Council tax",
             "key": "",
             "category": "",
@@ -345,7 +354,7 @@
             "endAge": 95
           },
           {
-            "id": "mw50pf41hzhwg",
+            "id": "mw52xg35vp2vg",
             "name": "Energy",
             "key": "",
             "category": "",
@@ -360,7 +369,7 @@
             "endAge": 95
           },
           {
-            "id": "mw50pf41hkm6h",
+            "id": "mw52xg35xrunh",
             "name": "Insurance & subscriptions",
             "key": "",
             "category": "",
@@ -375,7 +384,7 @@
             "endAge": 95
           },
           {
-            "id": "mw50pf41vxwui",
+            "id": "mw52xg35kta5i",
             "name": "Everything else",
             "key": "",
             "category": "",
@@ -390,7 +399,7 @@
             "endAge": 95
           },
           {
-            "id": "mw50pf41elzoj",
+            "id": "mw52xg35ivu0j",
             "name": "Childcare",
             "key": "",
             "category": "",
@@ -405,7 +414,7 @@
             "endAge": 46
           },
           {
-            "id": "mw50pf41gajok",
+            "id": "mw52xg352rjok",
             "name": "Holidays",
             "key": "",
             "category": "",
@@ -422,14 +431,14 @@
         ],
         "events": [
           {
-            "id": "mw50pf41seuil",
+            "id": "mw52xg35gyoil",
             "name": "Replace car",
             "kind": "expense",
             "year": 2029,
             "amount": 18000
           },
           {
-            "id": "mw50pf41nukim",
+            "id": "mw52xg35ukoym",
             "name": "Kitchen renovation",
             "kind": "expense",
             "year": 2032,
@@ -478,7 +487,7 @@
         },
         "goals": [
           {
-            "id": "mw50pf418xf9n",
+            "id": "mw52xg35y0ktn",
             "name": "",
             "color": 0,
             "icon": "goal",
@@ -496,7 +505,7 @@
             "counts": "cash"
           },
           {
-            "id": "mw50pf41gcxko",
+            "id": "mw52xg35atifo",
             "name": "",
             "color": 1,
             "icon": "debt",
@@ -514,7 +523,7 @@
             "counts": "cash"
           },
           {
-            "id": "mw50pf41n24jp",
+            "id": "mw52xg35o2flp",
             "name": "",
             "color": 2,
             "icon": "retire",
@@ -538,6 +547,7 @@
   ],
   "checkins": [],
   "dismissed": [],
+  "guides": {},
   "settings": {
     "realDollars": true,
     "runs": 1000,

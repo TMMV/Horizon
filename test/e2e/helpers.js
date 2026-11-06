@@ -54,4 +54,10 @@ async function settle(page) {
   await page.waitForTimeout(400);
 }
 
-module.exports = { APP_URL, openApp, tab, go, openGoal, asTable, settle };
+// Finances lists show each item as a line; open every one in a section for editing.
+async function editAll(page, section) {
+  const rows = page.locator(`#sec-${section} .sum-row`);
+  for (let i = 0; i < 40 && await rows.count(); i++) { await rows.first().click(); await page.waitForTimeout(20); }
+}
+
+module.exports = { APP_URL, openApp, tab, go, openGoal, asTable, settle, editAll };

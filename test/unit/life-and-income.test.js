@@ -112,3 +112,20 @@ test('spending slows down from the chosen age', () => {
   near(pre.expenses[t75 - 1], base.expenses[t75 - 1], 1e-6);
   near(pre.expenses[t75], base.expenses[t75] * 0.8, 1e-6);
 });
+
+test('pay progression: rises until an age, then slower, plus promotions', () => {
+  const p = E.clonePlan(E.defaultPlan(2026));
+  const pay = p.income[0];   // Alex, 38, £62,000, 3% a year
+  Object.assign(pay, { growth: 4, growthUntilAge: 45, growthAfter: 2, raises: [{ age: 41, pct: 10 }] });
+  const q = E.normalizePlan(p);
+  const it = q.income[0];
+  const at = t => E.streamAt(it, q, t);
+  assert.ok(Math.abs(at(2) - 62000 * 1.04 ** 2) < 0.01, 'before the promotion');
+  assert.ok(Math.abs(at(3) - 62000 * 1.04 ** 3 * 1.1) < 0.01, 'promotion at 41');
+  assert.ok(Math.abs(at(10) - 62000 * 1.04 ** 7 * 1.02 ** 3 * 1.1) < 0.01, '4% to 45, then 2%');
+  // Without the new fields, pay grows as before.
+  const plain = E.normalizePlan(E.defaultPlan(2026));
+  assert.ok(Math.abs(E.streamAt(plain.income[0], plain, 5) - 62000 * 1.03 ** 5) < 0.01);
+  assert.equal(plain.income[0].growthUntilAge, 0);
+  assert.deepEqual(plain.income[0].raises, []);
+});

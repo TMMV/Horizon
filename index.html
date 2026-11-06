@@ -51,12 +51,12 @@
             <h2 id="ovGoalsTitle">Your goals</h2>
             <p class="sub" id="ovGoalsSub">Everything in the plan works towards these. Each goal has its own tab: open one to see how it is tracking and what moves it.</p>
           </div>
-          <div class="controls">
-            <button type="button" class="btn small primary" id="ovAddGoal">+ Add a goal</button>
-          </div>
         </div>
         <div class="goal-strip" id="ovGoalStrip"></div>
       </section>
+      <section class="card" id="ovInOut"></section>
+      <section class="card" id="ovMonthly"></section>
+      <section class="card" id="ovInsights"></section>
       <section class="card">
         <div class="card-head">
           <div>
@@ -69,7 +69,6 @@
         <div class="chart" id="ovChart"></div>
         <div class="legend" id="ovLegend"></div>
       </section>
-      <section class="card" id="ovInsights"></section>
     </section>
 
     <!-- One goal's own tab -->
@@ -206,6 +205,28 @@
         <div class="controls">
           <button type="button" class="btn" id="wizBack">Back</button>
           <button type="button" class="btn primary" id="wizNext">Next</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="guideDlg" class="wide" aria-labelledby="gdTitle">
+    <form method="dialog" class="wizard" id="gdForm">
+      <header class="wiz-head">
+        <div>
+          <p class="wiz-step" id="gdStep"></p>
+          <h2 id="gdTitle"></h2>
+          <p class="sub" id="gdIntro"></p>
+        </div>
+        <button type="button" class="btn ghost icon-btn" id="gdClose" aria-label="Close">✕</button>
+      </header>
+      <div class="wiz-progress"><span id="gdBar"></span></div>
+      <div class="wiz-body" id="gdBody"></div>
+      <footer class="wiz-foot">
+        <div class="wiz-total" id="gdTotal"></div>
+        <div class="controls">
+          <button type="button" class="btn" id="gdBack">Back</button>
+          <button type="button" class="btn primary" id="gdNext">Next</button>
         </div>
       </footer>
     </form>

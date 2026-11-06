@@ -188,6 +188,7 @@
       scenarios: [{ id, name: 'Base plan', plan: defaultPlan() }],
       checkins: [],
       dismissed: [],
+      guides: {},
       settings: { realDollars: true, runs: 1000, seed: 42, theme: 'light', confidence: 90, lastSaved: null, showTo: 85 },
     };
   }
@@ -340,6 +341,11 @@
       amount: Math.max(0, num(i.amount)),
       freq: oneOf(i.freq, ['month', 'year'], 'year'),
       growth: num(i.growth),
+      // Pay progression: `growth` until this age (0 = all along), then `growthAfter`; promotions add a step.
+      growthUntilAge: Math.max(0, Math.round(num(i.growthUntilAge, 0))),
+      growthAfter: num(i.growthAfter, num(i.growth)),
+      raises: arr(i.raises).filter(r => r && Number.isFinite(+r.age) && Number.isFinite(+r.pct)).slice(0, 10)
+        .map(r => ({ age: Math.round(+r.age), pct: Math.max(-90, Math.min(500, +r.pct)) })).sort((a, b) => a.age - b.age),
       inflationLinked: !!i.inflationLinked,
       ...normalizeTiming(i, 'now', 'retire'),
       pensionMode: oneOf(i.pensionMode, ['pct', 'fixed'], 'pct'),
@@ -430,6 +436,20 @@
     }
   }
 
+  // What each guide remembers: when it was last done, and short text answers
+  // (e.g. { protection: { date: '2026-11-06', answers: { will: 'no' } } }).
+  function cleanGuides(g) {
+    const out = {};
+    if (!g || typeof g !== 'object') return out;
+    for (const [id, v] of Object.entries(g)) {
+      if (!/^[a-z0-9-]{1,40}$/.test(id) || !v || typeof v !== 'object') continue;
+      const answers = {};
+      for (const [k, a] of Object.entries(v.answers || {})) if (/^[a-z0-9:-]{1,60}$/i.test(k) && typeof a === 'string') answers[k] = a.slice(0, 40);
+      out[id] = { date: isDate(v.date) ? v.date : null, answers };
+    }
+    return out;
+  }
+
   function normalizeWorkspace(w) {
     if (!w || typeof w !== 'object') return defaultWorkspace();
     if (!Array.isArray(w.scenarios) && (w.household || w.accounts)) {
@@ -466,6 +486,7 @@
       scenarios,
       checkins,
       dismissed: Array.isArray(w.dismissed) ? [...new Set(w.dismissed.filter(x => typeof x === 'string'))] : [],
+      guides: cleanGuides(w.guides),
       settings: {
         realDollars: st.realDollars !== undefined ? !!st.realDollars : ds.realDollars,
         runs: Math.min(20000, Math.max(100, Math.round(num(st.runs, ds.runs)))),
@@ -536,14 +557,31 @@
   // Inflation-linked: the price index. Otherwise: its own rate, adjusted by the inflation
   // surprise (and, for salaries, the salary surprise).
   function growthFactor(item, plan, t, econ) {
-    if (item.inflationLinked) return econ.price[t];
-    const f = Math.pow(1 + item.growth / 100, t) * econ.surprise[t];
+    if (item.inflationLinked) return econ.price[t] * promotions(item, plan, t);
+    const f = progression(item, plan, t) * econ.surprise[t];
     return item.kind === 'salary' ? f * econ.wage[t] : f;
   }
 
   // Growth multiplier in the expected economy (no surprises).
   function expectedGrowth(item, plan, t) {
-    return Math.pow(1 + (item.inflationLinked ? plan.assumptions.inflation : item.growth) / 100, t);
+    if (item.inflationLinked) return Math.pow(1 + plan.assumptions.inflation / 100, t) * promotions(item, plan, t);
+    return progression(item, plan, t);
+  }
+
+  // Rises at `growth` a year until `growthUntilAge`, then at `growthAfter`, plus any promotions.
+  function progression(item, plan, t) {
+    const until = item.growthUntilAge > 0 ? Math.max(0, item.growthUntilAge - ownerOf(plan, item).age) : Infinity;
+    const t1 = Math.min(t, until), t2 = Math.max(0, t - until);
+    return Math.pow(1 + item.growth / 100, t1) * Math.pow(1 + (item.growthAfter ?? item.growth) / 100, t2) * promotions(item, plan, t);
+  }
+
+  // One-off steps (a promotion or a new job) at an age, from the year after now.
+  function promotions(item, plan, t) {
+    if (!item.raises || !item.raises.length) return 1;
+    const age = ownerOf(plan, item).age;
+    let f = 1;
+    for (const r of item.raises) if (r.age > age && age + t >= r.age) f *= 1 + r.pct / 100;
+    return f;
   }
 
   // Nominal amount of an income or expense stream in year t (expected economy by default).

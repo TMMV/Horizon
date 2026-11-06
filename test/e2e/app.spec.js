@@ -1,7 +1,7 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
-const { openApp, tab, go, openGoal, asTable, settle } = require('./helpers');
+const { openApp, tab, go, openGoal, asTable, settle, editAll } = require('./helpers');
 
 test.describe('Horizon app', () => {
   let tracker;
@@ -37,7 +37,7 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#homeYear')).toHaveCount(0);
     await expect(page.locator('#ovGoalStrip .goal-tile', { hasText: '£1M by' }).locator('.gt-action')).toContainText('Invest £1,034 a month');
     await expect(page.locator('#ovGoalStrip .goal-tile', { hasText: 'Mortgage-free' }).locator('.gt-action')).toContainText('Mortgage payments');
-    await expect(page.locator('#ovInsights .insight').first()).toBeVisible();
+    await expect(page.locator('#ovInsights .sg-card').first()).toBeVisible();
     const box = await page.locator('#ovChart canvas').boundingBox();
     expect(box && box.width).toBeGreaterThan(500);
   });
@@ -114,7 +114,7 @@ test.describe('Horizon app', () => {
     expect(p.asOf).toBe(`${year - 1}-03-15`);
     expect(p.startYear).toBe(year - 1);
     await expect(page.locator('#sec-accounts')).toContainText('15 Mar');
-    await expect(page.locator('#sec-accounts .tag.est').first()).toContainText('today');
+    await expect(page.locator('#sec-accounts [data-est]').first()).toContainText('today');
   });
 
   test('every dialog works inside a second scenario and never shows "null"', async ({ page }) => {
@@ -201,6 +201,7 @@ test.describe('Horizon app', () => {
     const before = await page.evaluate(() => window.__horizon.model.proj.rows[0].netWorth);
     const beforeInvest = await page.evaluate(() => window.__horizon.model.monthly.invest);
     await go(page, 'finances/income');
+    await editAll(page, 'income');
     const salary = page.locator('#sec-income .item').first().locator('input[aria-label="Amount"]');
     await salary.fill('90000');
     await settle(page);
@@ -222,6 +223,7 @@ test.describe('Horizon app', () => {
 
   test('add and remove an account', async ({ page }) => {
     await go(page, 'finances/portfolio');
+    await page.click('#sec-accounts summary:has-text("Add an account")');
     const items = page.locator('#sec-accounts .item');
     const n = await items.count();
     await page.click('#sec-accounts button:has-text("+ ISA")');
@@ -232,6 +234,7 @@ test.describe('Horizon app', () => {
 
   test('each kind of account has its own fields, and no type to change', async ({ page }) => {
     await go(page, 'finances/portfolio');
+    await page.click('#sec-accounts summary:has-text("Add an account")');
     await page.click('#sec-accounts button:has-text("+ Mortgage or loan")');
     const added = page.locator('#sec-accounts .item').last();
     await expect(added).toContainText('Interest rate');
@@ -413,6 +416,7 @@ test.describe('Horizon app', () => {
 
   test('income cards show a typical trend', async ({ page }) => {
     await go(page, 'finances/income');
+    await editAll(page, 'income');
     const item = page.locator('#sec-income .item').first();
     await item.locator('.trend summary').click();
     await expect(item.locator('.trend canvas')).toBeVisible();
@@ -451,6 +455,7 @@ test.describe('Horizon app', () => {
 
   test('rent with currency, costs and a flat tax is worked out like a formula', async ({ page }) => {
     await go(page, 'finances/income');
+    await editAll(page, 'income');
     const rent = page.locator('#sec-income .item').nth(2); // Rental flat
     await rent.locator('input[aria-label="Amount"]').fill('1148');
     await rent.locator('input[aria-label="Exchange rate"]').fill('0.84');
@@ -463,6 +468,7 @@ test.describe('Horizon app', () => {
   test('an account can be left out of the plan', async ({ page }) => {
     const before = await page.evaluate(() => window.__horizon.model.proj.rows[0].netWorth);
     await go(page, 'finances/portfolio');
+    await editAll(page, 'accounts');
     const home = page.locator('#sec-accounts .item').nth(7); // Home
     await home.locator('details.more summary').click();
     await home.locator('input[role="switch"]').uncheck();
@@ -488,6 +494,7 @@ test.describe('Horizon app', () => {
 
   test('details stay tucked away until asked for', async ({ page }) => {
     await go(page, 'finances/income');
+    await editAll(page, 'income');
     const salary = page.locator('#sec-income .item').first();
     await expect(salary.locator('text=Workplace pension')).toBeHidden();
     await salary.locator('details.more summary').click();
@@ -740,18 +747,26 @@ test.describe('Horizon app', () => {
   });
 
   test('plan check items can be marked as sorted and shown again', async ({ page }) => {
-    const first = page.locator('#ovInsights .insight').first();
-    const title = await first.locator('strong').innerText();
-    await first.locator('button:has-text("Already sorted")').click();
-    await expect(page.locator('#ovInsights .insights').first()).not.toContainText(title);
-    await page.click('#ovInsights button:has-text("marked as sorted")');
-    await page.locator('#ovInsights .insight.sorted button:has-text("Show again")').click();
-    await expect(page.locator('#ovInsights .insights').first()).toContainText(title);
+    // One card at a time in a carousel; hiding one moves it out, and it can be shown again.
+    const cards = page.locator('#ovInsights .sg-card');
+    const n = await cards.count();
+    expect(n).toBeGreaterThan(3);
+    const title = await cards.first().locator('h3').innerText();
+    await cards.first().locator('button:has-text("Already sorted")').click();
+    await expect(page.locator('#ovInsights .sg-card')).toHaveCount(n - 1);
+    await expect(page.locator('#ovInsights .car-track')).not.toContainText(title);
+    // Arrows step through the cards.
+    const next = page.locator('#ovInsights .car-btn[aria-label="Next"]');
+    await next.click();
+    await expect.poll(() => page.locator('#ovInsights .car-track').evaluate(t => t.scrollLeft)).toBeGreaterThan(0);
+    await page.click('#ovInsights button:has-text("hidden")');
+    await expect(page.locator('#ovInsights .car-track')).toContainText(title);
     expect(await page.evaluate(() => window.__horizon.ws.dismissed)).toEqual([]);
   });
 
   test('mortgage: rate after the fix and keeping the end date', async ({ page }) => {
     await go(page, 'finances/portfolio');
+    await editAll(page, 'accounts');
     const item = page.locator('#sec-accounts .item').filter({ has: page.locator('.item-head .tag', { hasText: /^Mortgage or loan$/ }) });
     await item.locator('details.more summary').click();
     await item.locator('input[aria-label="Rate after the fix ends"]').fill('6');
@@ -865,6 +880,96 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#gpFlows')).toContainText('ISAs last');
   });
 
+  test('home: what to put away each month, and the guides', async ({ page }) => {
+    await expect(page.locator('#ovMonthly')).toContainText('What to put away each month');
+    await expect(page.locator('#ovMonthly .mp-parts')).toContainText('ISAs');
+    await expect(page.locator('#ovMonthly .mp-parts')).toContainText('Pensions');
+    // The example's mortgage ends after both retire, so there is no "from then" line.
+    await expect(page.locator('#ovMonthly')).not.toContainText('with the mortgage paid off');
+    // Guides not done yet are suggestions too; every guide is under "All guides".
+    await expect(page.locator('#ovInsights [data-insight="guide-protection"]')).toContainText('Start');
+    await expect(page.locator('#ovInsights [data-insight^="adv-pension"]')).toContainText('Pension for Alex');
+    await page.click('#ovInsights summary:has-text("All guides")');
+    await expect(page.locator('#ovGuides .guide-tile')).toHaveCount(8);
+    // Can I retire at…? Sam at 50, then save it as a scenario.
+    await page.click('#ovGuides [data-guide="retire"]');
+    await expect(page.locator('#gdTitle')).toHaveText('Who, and when?');
+    await page.click('#gdBody [data-who="p2"]');
+    await page.locator('#gdBody input[aria-label="Retirement age"]').fill('50');
+    await page.click('#gdNext');
+    await expect(page.locator('#gdRetire .gd-verdict')).toContainText('chance the money lasts', { timeout: 30000 });
+    await expect(page.locator('#gdRetire .gd-table tbody tr')).toHaveCount(3);
+    await expect(page.locator('#gdRetire')).toContainText('No State Pension for 18 years');
+    await page.click('#gdNext');
+    await page.locator('#gdBody input[value="scenario"]').check();
+    await page.click('#gdNext');
+    await expect(page.locator('#guideDlg')).toBeHidden();
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios.map(s => s.name))).toContain('Base plan: Sam retires at 50');
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[1].plan.household.people[1].retireAge)).toBe(50);
+    await expect(page.locator('#ovGuides [data-guide="retire"]')).toContainText('Done');
+    // Tax year-end check: tick one.
+    await page.click('#ovGuides [data-guide="tax"]');
+    await expect(page.locator('#gdBody .checklist li').first()).toContainText('ISA allowance');
+    await expect(page.locator('#gdBody')).toContainText('Bed and ISA');
+    await page.locator('#gdBody .checklist input').first().check();
+    await page.click('#gdNext');
+    await expect(page.locator('#ovGuides [data-guide="tax"]')).toContainText('1 of');
+    // Protection: answer two, see the suggestions.
+    await page.click('#ovGuides [data-guide="protection"]');
+    await page.click('#gdBody [data-answer="life:no"]');
+    await page.click('#gdBody [data-answer="will:yes"]');
+    await page.click('#gdNext');
+    await expect(page.locator('#gdBody .advice')).toContainText('Life insurance');
+    await expect(page.locator('#gdBody .advice')).not.toContainText('Wills');
+    await expect(page.locator('#gdBody .advice')).toContainText('clear the mortgage');
+    await page.click('#gdNext');
+    await expect(page.locator('#ovGuides [data-guide="protection"]')).toContainText('to look at');
+    expect(await page.evaluate(() => window.__horizon.ws.guides.protection.answers.will)).toBe('yes');
+    await expect(page.locator('main')).not.toContainText('null');
+  });
+
+  test('finances: items are plain lines with a summary on top; one opens to edit', async ({ page }) => {
+    await go(page, 'finances/income');
+    await expect(page.locator('#sum-income')).toContainText('Coming in this year');
+    await expect(page.locator('#sec-income .sum-row')).toHaveCount(3);
+    await expect(page.locator('#sec-income input[aria-label="Amount"]')).toHaveCount(0);
+    await expect(page.locator('#sec-income .sum-row').first()).toContainText('Alex salary');
+    await page.locator('#sec-income .sum-row').first().click();
+    await expect(page.locator('#sec-income [data-editing] input[aria-label="Amount"]')).toBeVisible();
+    await page.locator('#sec-income [data-editing] input[aria-label="Amount"]').fill('70000');
+    await settle(page);
+    await expect(page.locator('#sum-income')).toContainText('a month');
+    await page.click('#sec-income .edit-done button');
+    await expect(page.locator('#sec-income .sum-row').first()).toContainText('£5,833 a month');
+    await go(page, 'finances/spending');
+    await expect(page.locator('#sum-expenses')).toContainText('Spending this year');
+    await go(page, 'finances/portfolio');
+    await expect(page.locator('#sum-accounts')).toContainText('Net worth');
+    // Home: money in and out, with future costs.
+    await tab(page, 'home');
+    await expect(page.locator('#ovInOut .io-sum')).toContainText('Coming in');
+    await expect(page.locator('#ovInOut .io-sum')).toContainText('Left to save');
+    await expect(page.locator('#ovInOutLegend')).toContainText('One-off costs');
+    await expect(page.locator('#ovInOut canvas')).toBeVisible();
+  });
+
+  test('pay progression on a salary', async ({ page }) => {
+    await go(page, 'finances/income');
+    await editAll(page, 'income');
+    const card = page.locator('#sec-income .item').first();
+    await expect(card.locator('.pay-prog')).toContainText('Pay progression');
+    await card.locator('input[aria-label="Pay rises until age"]').fill('45');
+    await settle(page);
+    await card.locator('input[aria-label="Pay rise after that age"]').fill('2.5');
+    await page.locator('#sec-income .item').first().locator('button:has-text("Add a promotion")').click();
+    await settle(page);
+    const it = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.income[0]);
+    expect(it.growthUntilAge).toBe(45);
+    expect(it.growthAfter).toBe(2.5);
+    expect(it.raises).toHaveLength(1);
+    await expect(page.locator('#sec-income .item').first().locator('.pay-prog .calc')).toContainText('Pay in today’s money');
+  });
+
   test('home chart: by account or by access, and how far ahead to show', async ({ page }) => {
     await expect(page.locator('#ovGroup button[data-by="type"]')).toHaveAttribute('aria-pressed', 'true');
     await page.click('#ovGroup button[data-by="access"]');
@@ -911,9 +1016,7 @@ test.describe('Horizon app', () => {
 
   test('scenarios: compare two choices, reached from a suggestion on Home', async ({ page }) => {
     // The Lifetime ISA suggestion leads to the salary sacrifice comparison.
-    const more = page.locator('#ovInsights button:has-text("Show all")');
-    if (await more.count()) await more.click();
-    await page.locator('#ovInsights [data-insight="lisa"] button:has-text("Compare in Scenarios")').click();
+    await page.locator('#ovInsights [data-insight="lisa"] button:has-text("Compare the options")').click();
     await expect(page.locator('#view-scenarios')).toBeVisible();
     await expect(page.locator('#cmpGrid [data-compare="sacrifice-lisa"]')).toHaveAttribute('aria-pressed', 'true');
     const rows = page.locator('#cmpResult .cmp-table tbody tr');
@@ -966,6 +1069,7 @@ test.describe('Horizon app', () => {
 
   test('a Lifetime ISA gets its bonus and shows in the plan', async ({ page }) => {
     await go(page, 'finances/portfolio');
+    await page.click('#sec-accounts summary:has-text("Add an account")');
     await page.click('#sec-accounts button:has-text("+ Lifetime ISA")');
     await settle(page);
     const row = await page.evaluate(() => window.__horizon.model.proj.rows[0]);
