@@ -196,3 +196,40 @@ test('inheritance: estate at the end, allowances, and ideas that pass more on', 
     assert.ok(B.inheritance(q, E.project(q)).estate < ih.estate, `${id} leaves less`);
   }
 });
+
+test('stay under £100k: pay above the line is sacrificed into the pension', () => {
+  const R = E.R;
+  for (const tax of ['uk', 'none']) {
+    const base = E.clonePlan(E.defaultPlan(2026));
+    const pay = base.income.find(i => i.kind === 'salary' && i.owner === 'p1');
+    Object.assign(pay, tax === 'uk' ? { tax, amount: 98000, freq: 'year' } : { tax, amount: 5000, freq: 'month' }, { growth: 4, sacrifice: true });
+    const off = E.normalizePlan(base);
+    const q = E.clonePlan(off); q.strategy.stayUnder100k = true;
+    const on = E.normalizePlan(q);
+    const a = E.project(off), b = E.project(on);
+    const ani = (pr, t) => { const P = pr.pre.people[0], g = pr.pre.g[t]; return P.taxable[t] + (P.netPay[t] > 0 ? R.grossFromTakeHome(P.netPay[t] / g, 'scotland') * g : 0); };
+    const t = a.rows.findIndex((r, k) => k < a.pre.N && ani(a, k) > R.PA_TAPER_START * a.pre.g[k] + 1000);
+    assert.ok(t > 0, `${tax}: crosses later`);
+    assert.ok(b.rows[t].sacrificed > 900, `${tax}: sacrificed`);
+    assert.ok(Math.abs(ani(b, t) - R.PA_TAPER_START * b.pre.g[t]) < 300, `${tax}: held at the line (${ani(b, t)})`);
+    assert.ok(b.rows[t].pensionIn - a.rows[t].pensionIn > b.rows[t].sacrificed - 1);
+    // Take-home pay falls by much less than what goes into the pension (60%+ relief).
+    const takeHome = pr => pr.pre.people[0].netPay[t] + pr.pre.people[0].gross[t] - pr.pre.people[0].employee[t] - pr.pre.people[0].baseTax[t];
+    assert.ok(takeHome(a) - takeHome(b) < b.rows[t].sacrificed * 0.45, `${tax}: ${takeHome(a) - takeHome(b)} vs ${b.rows[t].sacrificed}`);
+  }
+});
+
+test('gilt coupons: reinvested in the gilt, or paid into the ISA', () => {
+  const base = E.clonePlan(E.defaultPlan(2026));
+  base.accounts.push({ id: 'g1', name: 'Gilt', type: 'bonds', owner: 'p1', balance: 10000, rate: 5, maturityYear: 2030, inIsa: true });
+  const a = E.project(E.normalizePlan(base)).rows;
+  base.accounts.find(x => x.id === 'g1').coupons = 'payout';
+  const b = E.project(E.normalizePlan(base)).rows;
+  // Reinvested: the gilt grows; paid out: it stays at 10,000 and the coupon goes into the ISA.
+  assert.ok(a[1].bonds > b[1].bonds + 400);
+  assert.ok(Math.abs(b[1].bonds - (a[1].bonds - 500)) < 1);
+  assert.ok(Math.abs(b[0].bondsToIsa - a[0].bondsToIsa - 500) < 1);
+  // Saved answers can hold a few amounts.
+  const ws = E.normalizeWorkspace({ scenarios: [{ plan: base }], guides: { questions: { date: '2026-11-06', answers: { mix: 'growth', 'pension-amounts-p1': { employeePension: 1000, employerPension: '110', bad: 'x' } } } } });
+  assert.deepEqual(ws.guides.questions.answers, { mix: 'growth', 'pension-amounts-p1': { employeePension: 1000, employerPension: 110 } });
+});

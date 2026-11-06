@@ -240,18 +240,20 @@
       }
     }
 
-    // 4b. Pay rises that carry someone over £100k later (the line has stayed at £100,000 since 2010).
-    if (taxOn) {
+    // 4b. Pay rises that carry someone over the £100k line later (it rises with the other thresholds
+    // after the freeze, as the plan assumes). Not when the plan already sacrifices the rest.
+    if (taxOn && !s.stayUnder100k) {
       plan.household.people.forEach((x, i) => {
         const P = proj.pre.people[i], ani = m.people[i].ani;
-        const pay0 = P.gross[0] + P.netPay[0];
-        if (!(pay0 > 0) || ani >= R.PA_TAPER_START || ani < R.PA_TAPER_START * 0.6) return;
+        if (!(P.gross[0] + P.netPay[0] > 0) || ani >= R.PA_TAPER_START || ani < R.PA_TAPER_START * 0.6) return;
         const last = Math.min(proj.pre.N - 1, x.retireAge - x.age - 1);
         for (let t = 1; t <= last; t++) {
-          if (ani * (P.gross[t] + P.netPay[t]) / pay0 < R.PA_TAPER_START) continue;
+          const g = proj.pre.g[t];
+          const at = P.taxable[t] + (P.netPay[t] > 0 ? R.grossFromTakeHome(P.netPay[t] / g, plan.household.region) * g : 0) - P.extraPot[t];
+          if (at < R.PA_TAPER_START * g) continue;
           const rate = plan.household.region === 'scotland' ? '69.5%' : '62%';
-          out.push({ id: `trap-ahead-${x.id}`, tone: 'tip', title: `${x.name}’s pay could pass £100,000 around ${plan.startYear + t}`, action: 'compare:after-isa',
-            text: `${x.name}’s income for tax is about ${money(ani)} now${m.people[i].estimated ? ' (estimated from take-home pay)' : ''}. With the pay rises in the plan it reaches £100,000 in about ${plan.startYear + t}, if that line stays where it has been since 2010. From there to £125,140 the personal allowance is taken away: each extra £1 costs about ${rate} in tax and NI, and Tax-Free Childcare stops. Pension contributions (best by salary sacrifice) keep the income it is measured on below £100,000.` });
+          out.push({ id: `trap-ahead-${x.id}`, tone: 'tip', title: `${x.name}’s pay could pass £100,000 around ${plan.startYear + t}`, action: 'saving',
+            text: `${x.name}’s income for tax is about ${money(ani)} now${m.people[i].estimated ? ' (estimated from take-home pay)' : ''}, after pension contributions. With the pay rises in the plan it reaches the £100,000 line (${money(R.PA_TAPER_START * g)} by then, if it rises with prices after the freeze) in about ${plan.startYear + t}. From there to £125,140 the personal allowance is taken away: each extra £1 costs about ${rate} in tax and NI, and Tax-Free Childcare stops. Salary sacrificing the pay above it avoids that: turn on “Keep income under £100,000” in Saving & investing.` });
           return;
         }
       });
@@ -319,6 +321,30 @@
     // 10. Life check-up
     const lifeDone = plan.expenses.some(e => (e.key || '').startsWith('life:')) || plan.events.some(e => (e.id || '').startsWith('life:'));
     if (!lifeDone) out.push({ id: 'life', tone: 'tip', title: 'Plan for costs that come later', text: 'Cars, home repairs, children’s education, travel in early retirement and care later on. Future costs (in Spending) adds them as dated spending in two minutes.', action: 'life' });
+    // 10b. Gilt coupons bought back into gilts: small amounts each pay a dealing charge.
+    for (const a of plan.accounts.filter(x => x.type === 'bonds' && !x.excluded && x.coupons !== 'payout' && x.balance > 0)) {
+      const c = a.balance * a.rate / 100;
+      if (c > 0 && c < 2500) out.push({ id: `gilt-coupons-${a.id}`, tone: 'tip', action: 'accounts', title: `${a.name}: put the coupons in your fund`,
+        text: `It pays about ${money(c)} a year in two halves of about ${money(c / 2)}. Buying more gilts with that costs a dealing charge each time (a few pounds is 2–3% of it). Cheaper: add the coupons to the fund you buy each month${a.inIsa ? ' inside the ISA' : ''}, or hold bonds through a gilt index fund with regular investing. In Accounts, set its coupons to “${a.inIsa ? 'Into the ISA’s other investments' : 'Paid out as cash'}” to plan it that way.` });
+    }
+
+    // 10c. Shares and bonds: mostly shares while retirement is far off; more can stay in shares
+    // when pensions and other income will cover most of retirement spending anyway.
+    {
+      const a = plan.assumptions, p1 = plan.household.people[0];
+      const years = p1.retireAge - p1.age;
+      const sp = Math.max(...plan.household.people.map(x => x.statePensionAge - x.age));
+      const k = Math.min(proj.pre.N - 1, Math.max(1, sp));
+      const cover = proj.rows[k] && proj.rows[k].spending > 0 ? proj.rows[k].nonWork / proj.rows[k].spending : 0;
+      if (years >= 15 && a.stockPctNow < 80) {
+        out.push({ id: 'mix', tone: 'tip', action: 'market', title: `${a.stockPctNow}% in shares, with ${years} years to go`,
+          text: `Money that won’t be needed for 15 years or more is usually held mostly in shares (most workplace pensions use 80–100% at this stage): they fall further in a bad year but have grown more over long periods, and there is time to recover. The plan then moves gradually towards bonds as retirement nears.` });
+      } else if (years > 0 && cover >= 0.8 && a.stockPctRetire < 70) {
+        out.push({ id: 'mix', tone: 'info', action: 'market', title: `You could keep more in shares at retirement (${a.stockPctRetire}% now)`,
+          text: `From ${proj.rows[k].year} the State Pension and other pensions and income cover about ${Math.round(Math.min(1, cover) * 100)}% of spending, so savings mainly pay for the years before then. Many people in that position keep 70–80% in shares when they retire. Scenarios shows what a different mix does (“Weaker or stronger markets”).` });
+      }
+    }
+
     // 11. USS: an extra 1% of pay into the Investment Builder is matched by the employer.
     for (const i of plan.income.filter(x => x.kind === 'dbpension' && x.dbScheme === 'uss')) {
       const x = plan.household.people.find(y => y.id === i.owner);

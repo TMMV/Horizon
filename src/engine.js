@@ -35,7 +35,7 @@
     'cgt', 'gCash', 'gIsa', 'gGia', 'gPension', 'gBonds', 'gProperty',
     'debtInterest', 'debtRegular', 'lumpOverpay', 'bondsMatured', 'bondsToIsa', 'propSold', 'extraPension', 'flatTax',
     'sweepIsa', 'sweepGia', 'nonWork',
-    'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension',
+    'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension', 'sacrificed',
   ];
 
   const GOAL_MEASURES = {
@@ -116,6 +116,9 @@
       // relief at their top rate) before the general account: highest rate first, within the annual
       // allowance and their pay. Not for anyone retiring before they can draw a pension.
       pensionFirst: false,
+      // Salary sacrifice whatever would take someone's income over £100,000 (where the personal
+      // allowance starts to go), into their pension, within the annual allowance.
+      stayUnder100k: false,
       // Your own amounts a month (today's money); null = automatic (everything left, in order).
       // Whatever your amounts leave over stays in cash.
       isaMonthly: null,
@@ -316,6 +319,9 @@
         afterFix: oneOf(a.afterFix, ['payment', 'term'], 'payment'),
         excluded: !!a.excluded,
         inIsa: type === 'bonds' && !!a.inIsa,   // gilts held inside an ISA: maturing money stays in the ISA
+        // Coupons: bought back into the gilt (as if reinvested at its rate), or paid out: into the
+        // ISA's other investments when held in one, else into cash.
+        ...(type === 'bonds' ? { coupons: oneOf(a.coupons, ['reinvest', 'payout'], 'reinvest') } : {}),
         // Lifetime ISA: yearly payment (up to £4,000), and whether it is for retirement or a first home
         contribution: Math.min(R.LISA.maxContribution, Math.max(0, num(a.contribution, type === 'lisa' ? R.LISA.maxContribution : 0))),
         purpose: oneOf(a.purpose, ['retirement', 'home'], 'retirement'),
@@ -451,7 +457,16 @@
     for (const [id, v] of Object.entries(g)) {
       if (!/^[a-z0-9-]{1,40}$/.test(id) || !v || typeof v !== 'object') continue;
       const answers = {};
-      for (const [k, a] of Object.entries(v.answers || {})) if (/^[a-z0-9:-]{1,60}$/i.test(k) && typeof a === 'string') answers[k] = a.slice(0, 40);
+      for (const [k, a] of Object.entries(v.answers || {})) {
+        if (!/^[a-z0-9:-]{1,60}$/i.test(k)) continue;
+        if (typeof a === 'string') answers[k] = a.slice(0, 40);
+        // A few amounts (e.g. pension contributions), numbers only.
+        else if (a && typeof a === 'object' && !Array.isArray(a)) {
+          const o = {};
+          for (const [f, x] of Object.entries(a).slice(0, 6)) if (/^[a-z]{1,30}$/i.test(f) && Number.isFinite(+x)) o[f] = +x;
+          answers[k] = o;
+        }
+      }
       out[id] = { date: isDate(v.date) ? v.date : null, answers };
     }
     return out;
@@ -781,6 +796,7 @@
         gross: zeros(),        // gross salary paid in cash (before employee contributions)
         netPay: zeros(),       // take-home pay entered as net
         employee: zeros(),     // employee contributions deducted from gross pay
+        ee: zeros(),           // the person's own workplace contributions (any kind of pay)
         contrib: zeros(),      // workplace contributions into the pot (employee + employer)
         extraOut: zeros(),     // extra personal contributions paid from take-home pay
         extraPot: zeros(),     // ... and what lands in the pot after basic-rate relief
@@ -791,6 +807,7 @@
         ni: zeros(),
         baseTax: zeros(),      // income tax + NI before withdrawals
         relief: zeros(),       // higher-rate relief on personal pension contributions (reduces income tax)
+        sacrificed: zeros(),   // pay sacrificed into the pension to stay under £100,000
         payInc: zeros(),       // income tax is measured on (take-home pay grossed up), for "pensions first"
         earned: zeros(),       // pay before tax: the most that can get relief in a year
       })),
@@ -817,6 +834,7 @@
         if (item.kind === 'salary' && P) {
           const [ee, er] = pensionContrib(item, v, plan, t, econ);
           P.contrib[t] += ee + er;
+          P.ee[t] += ee;
           if (tax === 'uk') {
             P.gross[t] += v;
             P.employee[t] += ee;
@@ -840,6 +858,8 @@
         if (tax === 'flat') pre.flatTax[t] += v * item.taxRate / 100;
       }
 
+      // Take-home pay back to gross, with the year's thresholds.
+      const grossUp = net => (net > 0 ? R.grossFromTakeHome(net / g, household.region) * g : 0);
       people.forEach((p, i) => {
         const P = pre.people[i];
         const age = p.age + t;
@@ -850,6 +870,27 @@
           P.extraOut[t] = p.extraPension * 12 * price;
           P.extraPot[t] = P.extraOut[t] / (1 - BASIC_RELIEF);
         }
+        // Stay under £100,000: sacrifice the pay above it (take-home pay falls by what that pay would
+        // have left after tax, and NI while sacrifice still saves it).
+        if (s.stayUnder100k && !household.ignoreTax && age < p.retireAge) {
+          const fromNet = grossUp(P.netPay[t]);
+          const ani = P.gross[t] - P.employee[t] + P.other[t] + P.statePension[t] + fromNet - P.extraPot[t];
+          const room = Math.max(0, R.PENSION_ANNUAL_ALLOWANCE - P.contrib[t] - P.extraPot[t]);
+          const E = Math.min(room, Math.max(0, ani - R.PA_TAPER_START * g));
+          const niSaved = plan.startYear + t < R.SACRIFICE_NI_CAP_FROM;
+          if (E > 0.5 && P.netPay[t] > 0 && fromNet >= E) {
+            const taxCut = T.incomeTax(fromNet, household.region, g) - T.incomeTax(fromNet - E, household.region, g);
+            const niCut = niSaved ? T.nationalInsurance(fromNet, g) - T.nationalInsurance(fromNet - E, g) : 0;
+            P.netPay[t] = Math.max(0, P.netPay[t] - (E - taxCut - niCut));
+            P.contrib[t] += E;
+            P.sacrificed[t] = E;
+          } else if (E > 0.5 && P.gross[t] - P.employee[t] >= E) {
+            P.employee[t] += E;
+            if (niSaved) niable[i] = Math.max(0, niable[i] - E);
+            P.contrib[t] += E;
+            P.sacrificed[t] = E;
+          }
+        }
         P.taxable[t] = P.gross[t] - P.employee[t] + P.other[t] + P.statePension[t];
         P.ni[t] = age < p.statePensionAge ? T.nationalInsurance(niable[i], g) : 0;
         P.baseIT[t] = T.incomeTax(P.taxable[t], household.region, g);
@@ -857,14 +898,14 @@
         // the tax saved by taking the gross contribution off taxable income, less the 20% already
         // added to the pot. Take-home pay is grossed up to estimate the tax paid on it.
         if (P.extraPot[t] > 0 && s.claimRelief && !household.ignoreTax) {
-          const inc = P.taxable[t] + (P.netPay[t] > 0 ? R.grossFromTakeHome(P.netPay[t], household.region) : 0);
+          const inc = P.taxable[t] + grossUp(P.netPay[t]);
           const saved = T.incomeTax(inc, household.region, g) - T.incomeTax(Math.max(0, inc - P.extraPot[t]), household.region, g);
           P.relief[t] = Math.max(0, saved - BASIC_RELIEF * P.extraPot[t]);
           P.baseIT[t] -= P.relief[t];
         }
         P.baseTax[t] = P.baseIT[t] + P.ni[t];
         if (s.pensionFirst && !household.ignoreTax && age < p.retireAge && p.retireAge >= p.pensionAccessAge && (P.gross[t] > 0 || P.netPay[t] > 0)) {
-          const grossed = P.netPay[t] > 0 ? R.grossFromTakeHome(P.netPay[t], household.region) : 0;
+          const grossed = grossUp(P.netPay[t]);
           P.payInc[t] = P.taxable[t] + grossed - P.extraPot[t];
           P.earned[t] = P.gross[t] + grossed;
         }
@@ -999,7 +1040,7 @@
           home: x.purpose === 'home' && x.homeYear ? x.homeYear - plan.startYear : Infinity,
         });
       }
-      else if (x.type === 'bonds') bonds.push({ bal: x.balance, rate: x.rate / 100, t: x.maturityYear ? x.maturityYear - plan.startYear : Infinity, inIsa: x.inIsa });
+      else if (x.type === 'bonds') bonds.push({ bal: x.balance, rate: x.rate / 100, t: x.maturityYear ? x.maturityYear - plan.startYear : Infinity, inIsa: x.inIsa, payout: x.coupons === 'payout' });
       else if (x.type === 'property') props.push({ val: x.balance, rate: x.rate / 100, t: x.sellYear ? x.sellYear - plan.startYear : Infinity });
       else if (x.type === 'debt') {
         debts.push({
@@ -1054,8 +1095,12 @@
       let gBonds = 0, bondsMatured = 0, bondsToIsa = 0;
       for (const b of bonds) {
         const x = b.bal * b.rate;
-        b.bal += x;
         gBonds += x;
+        if (b.payout && b.bal > 0) {
+          // Paid out: into the ISA's investments (no allowance used), or cash.
+          if (b.inIsa) { isa += x; bondsToIsa += x; } else { cash += x; bondsMatured += x; }
+          gBonds -= x;
+        } else b.bal += x;
         if (t + 1 >= b.t && b.bal > 0) {
           // Inside an ISA the money stays sheltered without using the year's allowance.
           if (b.inIsa) { isa += b.bal; bondsToIsa += b.bal; } else { cash += b.bal; bondsMatured += b.bal; }
@@ -1330,6 +1375,7 @@
         out.overpay[t] = overpay;
         out.saved[t] = employee + extraOut + toCash + toIsa + toGia + toLisa + toPension;
         out.toPension[t] = toPension;
+        out.sacrificed[t] = pre.people.reduce((acc, P) => acc + P.sacrificed[t], 0);
         out.toLisa[t] = toLisa; out.lisaBonus[t] = lisaBonus; out.wLisa[t] = wLisa; out.lisaHome[t] = lisaHome; out.lisaCharge[t] = lisaCharge;
         out.pensionRelief[t] = pre.people.reduce((acc, P) => acc + P.relief[t], 0);
         out.extraPension[t] = extraOut;

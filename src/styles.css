@@ -1441,6 +1441,44 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 /* grid columns never grow past the screen because of a wide table inside */
 .money-page.io > * { min-width: 0; }
 
+/* "i" explanations and suggestion markers */
+.info-btn, .tip-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: 4px; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--muted); cursor: pointer; vertical-align: middle; flex: none; }
+.info-btn .glyph, .tip-btn .glyph { width: 15px; height: 15px; }
+.info-btn:hover, .info-btn[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
+.tip-btn { color: var(--warn-text); background: var(--warn-soft, rgba(222, 160, 30, 0.16)); }
+.tip-btn:hover, .tip-btn[aria-expanded="true"] { background: rgba(222, 160, 30, 0.3); }
+.info-btn:focus-visible, .tip-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+h2 > .info-btn, h2 > .tip-btn { width: 22px; height: 22px; }
+.sum-wrap { position: relative; }
+.sum-wrap > .tip-btn { position: absolute; top: 4px; right: 4px; margin: 0; }
+.info-pop { position: fixed; z-index: 1000; padding: 12px 14px; border-radius: 12px; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16); font-size: 0.86rem; line-height: 1.45; max-height: min(70vh, 480px); overflow: auto; }
+.info-pop .ip-title { display: block; font-size: 0.92rem; margin-bottom: 4px; }
+.info-pop p { margin: 0; color: var(--text-2); }
+.info-pop .ip-tip + .ip-tip { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; }
+.info-pop .eyebrow { color: var(--warn-text); }
+.info-pop .ip-actions { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+
+/* home: what to do, and when */
+.todo { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.todo-item { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.todo-item.now { background: var(--accent-soft); }
+.todo-when { font-weight: 700; font-size: 0.82rem; color: var(--text-2); padding-top: 1px; font-variant-numeric: tabular-nums; }
+.todo-item.now .todo-when { color: var(--accent); }
+.todo-body strong { display: block; font-size: 0.92rem; }
+.todo-body p { margin: 2px 0 0; color: var(--text-2); font-size: 0.84rem; line-height: 1.4; }
+.todo-body .linkish { margin-top: 4px; font-size: 0.82rem; }
+@media (min-width: 1100px) { #ovTodo .todo { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .todo-item { grid-template-columns: 1fr; gap: 2px; } }
+
+/* questions about your plan */
+.q-options { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.q-rec { display: inline-block; justify-self: start; font-size: 0.7rem; font-weight: 650; padding: 1px 8px; border-radius: 999px; background: var(--good-soft, rgba(12, 163, 12, 0.12)); color: var(--good-text); }
+
+/* portfolio: today or years ahead */
+.pf-ahead { flex-wrap: wrap; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }

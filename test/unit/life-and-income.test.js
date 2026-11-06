@@ -129,3 +129,14 @@ test('pay progression: rises until an age, then slower, plus promotions', () => 
   assert.equal(plain.income[0].growthUntilAge, 0);
   assert.deepEqual(plain.income[0].raises, []);
 });
+
+test('life check-up: care costs rise faster than prices until they start', () => {
+  const E = require('../../src/engine.js');
+  const LW = require('../../src/life-wizard.js');
+  const p = E.defaultPlan(2026);
+  const age = p.household.people[0].age;
+  const cost = a => LW.build(p, { ...LW.answersFromPlan(p), careAge: 85, careCost: 60000, careYears: 3, ...a }).expenses.find(e => e.key === 'life:care').amount;
+  assert.equal(cost({ careRealGrowth: 0 }), 60000);
+  assert.equal(cost({ careRealGrowth: 1 }), Math.round(60000 * Math.pow(1.01, 85 - age)));
+  assert.equal(LW.defaults(p).careRealGrowth, 1);
+});

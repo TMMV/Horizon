@@ -807,8 +807,9 @@ test.describe('Horizon app', () => {
     const cards = page.locator('#ovInsights .sg-card');
     const n = await cards.count();
     expect(n).toBeGreaterThan(3);
-    const title = await cards.first().locator('h3').innerText();
-    await cards.first().locator('button:has-text("Already sorted")').click();
+    const check = cards.filter({ has: page.locator('button:has-text("Already sorted")') }).first();
+    const title = await check.locator('h3').innerText();
+    await check.locator('button:has-text("Already sorted")').click();
     await expect(page.locator('#ovInsights .sg-card')).toHaveCount(n - 1);
     await expect(page.locator('#ovInsights .car-track')).not.toContainText(title);
     // Arrows step through the cards.
@@ -949,7 +950,7 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#ovInsights .sg-card', { hasText: 'costs that come later' })).toHaveCount(1);
     await expect(page.locator('#ovInsights [data-insight^="adv-pension"]')).toContainText('Pension for Alex');
     await page.click('#ovInsights summary:has-text("All guides")');
-    await expect(page.locator('#ovGuides .guide-tile')).toHaveCount(9);
+    await expect(page.locator('#ovGuides .guide-tile')).toHaveCount(10);
     // Can I retire at…? Sam at 50, then save it as a scenario.
     await page.click('#ovGuides [data-guide="retire"]');
     await expect(page.locator('#gdTitle')).toHaveText('Who, and when?');
@@ -1156,12 +1157,107 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#sec-saving [data-flow="toPension"]')).not.toBeEmpty();
     await sw.uncheck();
     await settle(page);
+    // Keep income under £100,000: nobody in the example gets there.
+    await page.locator('#sec-saving label.switch', { hasText: 'Keep income under £100,000' }).locator('input').check();
+    await expect(page.locator('#sec-saving [data-flow="sacrificed"]')).toContainText('Nobody’s income reaches £100,000');
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.strategy.stayUnder100k)).toBe(true);
     await tab(page, 'scenarios');
     await page.click('#cmpGrid [data-compare="after-isa"]');
     const rows = page.locator('#cmpResult .cmp-table tbody tr');
     await expect(rows).toHaveCount(2, { timeout: 30000 });
     await expect(rows.nth(0)).toContainText('General account (as now)');
     await expect(rows.nth(1)).toContainText('Pensions first');
+  });
+
+  test('"i" explanations and suggestion markers', async ({ page }) => {
+    // An "i" beside a heading explains it; Escape closes it.
+    const info = page.locator('#homePortfolio .info-btn[aria-label="About: Available or locked away"]').first();
+    await info.click();
+    await expect(page.locator('#infoPop')).toBeVisible();
+    await expect(page.locator('#infoPop')).toContainText('Lifetime ISAs (from 60');
+    await expect(info).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#infoPop')).toBeHidden();
+    // A field with a suggestion has a marker that opens it, with its action.
+    await go(page, 'finances/saving');
+    const tip = page.locator('#sec-saving .tip-btn[aria-label^="Suggestion: A Lifetime ISA"]');
+    await expect(tip).toBeVisible();
+    await tip.click();
+    await expect(page.locator('#infoPop')).toContainText('A Lifetime ISA adds a 25% bonus');
+    await page.locator('#infoPop button:has-text("Compare the options")').click();
+    await expect(page.locator('#cmpGrid [data-compare="sacrifice-lisa"]')).toHaveAttribute('aria-pressed', 'true');
+    // Saying it is sorted removes the marker.
+    await go(page, 'finances/saving');
+    await page.locator('#sec-saving .tip-btn[aria-label^="Suggestion: A Lifetime ISA"]').click();
+    await page.locator('#infoPop button:has-text("Already sorted")').click();
+    await expect(page.locator('#sec-saving .tip-btn[aria-label^="Suggestion: A Lifetime ISA"]')).toHaveCount(0);
+    // Inputs keep their own names.
+    await expect(page.locator('#sec-saving input[aria-label="Sam stocks & shares ISA a month"], #sec-saving select[aria-label^="ISAs"]').first()).toBeVisible();
+  });
+
+  test('home: what to do, and when', async ({ page }) => {
+    const todo = page.locator('#ovTodo');
+    await expect(todo.locator('h2')).toContainText('What to do, and when');
+    // Now: this month's ISA amounts, split between the ISAs.
+    const isa = todo.locator('.todo-item.now', { hasText: 'a month into ISAs' });
+    await expect(isa).toContainText('into Alex stocks & shares ISA');
+    const m = await page.evaluate(() => Math.round(window.__horizon.model.monthly.isa));
+    await expect(isa.locator('strong')).toContainText(`£${m.toLocaleString('en-GB')} a month`);
+    // Dated items in order, and every-year reminders.
+    const whens = await todo.locator('.todo-item .todo-when').allInnerTexts();
+    const years = whens.filter(w => /^\d{4}$/.test(w)).map(Number);
+    expect(years).toEqual([...years].sort((a, b) => a - b));
+    await expect(todo).toContainText('By 5 April');
+    // Retirement: when each person stops, and later the State Pension to claim.
+    await todo.locator('summary').click();
+    await expect(todo).toContainText('Alex retires at');
+    await expect(todo).toContainText('claim the State Pension');
+    await todo.locator('.todo-item', { hasText: 'By 5 April' }).locator('button').click();
+    await expect(page.locator('#guideDlg')).toBeVisible();
+  });
+
+  test('questions about your plan: asked one at a time, applied to the plan', async ({ page }) => {
+    // Suggested on Home while unanswered.
+    const card = page.locator('#ovInsights [data-insight="guide-questions"]');
+    await expect(card).toContainText('questions about your plan');
+    await card.locator('button:has-text("Answer them")').click();
+    await expect(page.locator('#gdTitle')).toHaveText('How does Alex pay into the workplace pension?');
+    await expect(page.locator('#gdBody .q-rec').first()).toHaveText('Recommended');
+    await page.click('#gdBody [data-q="pension-how-p1:sacrifice"]');
+    await page.click('#gdNext');
+    await expect(page.locator('#gdTitle')).toHaveText('How much goes into Alex’s pension each month?');
+    // Skip ahead to the shares question and pick the growth mix.
+    for (let i = 0; i < 12; i++) {
+      if ((await page.locator('#gdTitle').innerText()).startsWith('How much of your investments')) break;
+      await page.click('#gdNext');
+    }
+    await page.click('#gdBody [data-q="mix:growth"]');
+    while ((await page.locator('#gdNext').innerText()) !== 'Save answers') await page.click('#gdNext');
+    await page.click('#gdNext');
+    await expect(page.locator('#guideDlg')).toBeHidden();
+    const p = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    expect(p.income.find(i => i.owner === 'p1' && i.kind === 'salary').sacrifice).toBe(true);
+    expect([p.assumptions.stockPctNow, p.assumptions.stockPctRetire]).toEqual([100, 80]);
+    expect(await page.evaluate(() => Object.keys(window.__horizon.ws.guides.questions.answers))).toContain('mix');
+  });
+
+  test('home portfolio: today or years ahead', async ({ page }) => {
+    const box = page.locator('#homePortfolio');
+    const today = await box.locator('.hero-value').innerText();
+    await box.locator('[data-ahead="10"]').click();
+    await expect(box.locator('.hero-label')).toContainText('Expected net worth in');
+    await expect(box.locator('.pf-row.head')).toContainText('(expected)');
+    await expect(box.locator('.delta')).toContainText('in today’s money');
+    expect(await box.locator('.hero-value').innerText()).not.toBe(today);
+    // The donut and the sums follow: net worth = own − owe, for that year.
+    const nums = await box.locator('#pfSum dd').allInnerTexts();
+    const v = t => +t.replace(/[^0-9]/g, '') * (t.includes('−') ? -1 : 1);
+    expect(Math.abs(v(nums[0]) + v(nums[2]) - v(nums[3]))).toBeLessThan(2);
+    expect(v(nums[3])).toBe(v(await box.locator('.hero-value').innerText()));
+    await box.locator('[data-ahead="retire"]').click();
+    await expect(box.locator('#pfTitle')).toHaveText('Where you’ll be');
+    await box.locator('[data-ahead="0"]').click();
+    await expect(box.locator('.hero-value')).toHaveText(today);
   });
 
   test('start a blank plan', async ({ page }) => {

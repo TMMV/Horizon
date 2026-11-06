@@ -25,6 +25,7 @@
       travelExtra: 0, travelYears: 10,
       slowDownAge: 0, slowDownPct: 80,
       careAge: 0, careYears: 3, careCost: 40000,
+      careRealGrowth: 1,            // care costs rise this much a year faster than prices (mostly wages)
       familyAmount: 0, familyFrom: p1.age, familyTo: p1.age + 10,
     };
   }
@@ -84,7 +85,9 @@
       }
     }
     exp('travel', 'Active retirement: travel & hobbies', a.travelExtra, p1.retireAge, p1.retireAge + a.travelYears, { startRef: 'retire' });
-    if (a.careAge > 0) exp('care', 'Care in later life', a.careCost, a.careAge, a.careAge + a.careYears);
+    // Today's cost, grown by how much faster than prices care is expected to rise until it starts.
+    const careAt = a.careCost * Math.pow(1 + (a.careRealGrowth || 0) / 100, Math.max(0, a.careAge - p1.age));
+    if (a.careAge > 0) exp('care', 'Care in later life', Math.round(careAt), a.careAge, a.careAge + a.careYears);
     exp('family', 'Helping family', a.familyAmount, a.familyFrom, a.familyTo);
 
     return {
