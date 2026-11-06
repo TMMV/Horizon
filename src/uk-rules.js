@@ -60,6 +60,10 @@
   };
   const TAX_FREE_CHILDCARE = { topUp: 0.2, capPerChild: 2000, incomeLimit: 100000, maxAge: 11 };
   const JUNIOR_ISA_ALLOWANCE = 9000;
+  // Inheritance tax, per person: nil-rate band and residence nil-rate band (frozen to April 2030),
+  // the residence band withdrawn £1 for every £2 of estate over £2m; 40% above. Gifts of up to
+  // £3,000 a year are exempt.
+  const IHT = { nilRate: 325000, residence: 175000, taperFrom: 2000000, rate: 0.4, annualGift: 3000 };
 
   // Lifetime ISA: open from 18 to 39, pay in until 50, 25% government bonus, inside the ISA
   // allowance. Withdrawals are free from 60 or for a first home up to £450,000; otherwise
@@ -161,7 +165,7 @@
   }
 
   const api = {
-    TAX_YEAR, PERSONAL_ALLOWANCE, PA_TAPER_START, INCOME_TAX, NI, CGT,
+    TAX_YEAR, PERSONAL_ALLOWANCE, PA_TAPER_START, INCOME_TAX, NI, CGT, IHT,
     ISA_ALLOWANCE, STATE_PENSION_FULL, LUMP_SUM_ALLOWANCE, PENSION_TAX_FREE_SHARE,
     MIN_PENSION_AGE, PENSION_ANNUAL_ALLOWANCE, FREEZE_UNTIL, SACRIFICE_NI_CAP, SACRIFICE_NI_CAP_FROM,
     CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, DB_SCHEMES, USS_EARLY, LISA,

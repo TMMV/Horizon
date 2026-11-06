@@ -135,6 +135,28 @@
     return { takeHome, spending: r.spending, debtPay: r.debtPay || 0, saved: r.saved || 0, people };
   }
 
+  // What the plan leaves at the end, in today's money, and a rough inheritance tax bill: the
+  // allowances of everyone in the household (a couple passes unused ones on), the home allowance
+  // only with a home and shrinking above £2m, 40% above. Unused pensions count from April 2027.
+  function inheritance(plan, proj) {
+    const t = Math.min(proj.rows.length - 1, proj.pre.N);
+    const end = proj.rows[t];
+    if (!end) return null;
+    const d = end.deflator;
+    const parts = {
+      savings: (end.cash + end.isa + end.gia + end.bonds) / d,
+      pensions: end.pension / d,
+      homes: end.property / d,
+      debts: -end.debt / d,
+    };
+    const estate = end.netWorth / d;
+    const n = plan.household.people.length;
+    const home = end.property > 0 ? Math.max(0, R.IHT.residence * n - Math.max(0, estate - R.IHT.taperFrom) / 2) : 0;
+    const free = R.IHT.nilRate * n + home;
+    const tax = Math.max(0, estate - free) * R.IHT.rate;
+    return { year: end.year, t, estate, nominal: end.netWorth, parts, n, home, free, tax, left: estate - tax };
+  }
+
   // Spending split into needs and wants (for the 50/30/20 picture).
   function split(plan) {
     let needs = 0, wants = 0;
@@ -218,10 +240,39 @@
       }
     }
 
-    // 5. ISA allowance
+    // 4b. Pay rises that carry someone over £100k later (the line has stayed at £100,000 since 2010).
+    if (taxOn) {
+      plan.household.people.forEach((x, i) => {
+        const P = proj.pre.people[i], ani = m.people[i].ani;
+        const pay0 = P.gross[0] + P.netPay[0];
+        if (!(pay0 > 0) || ani >= R.PA_TAPER_START || ani < R.PA_TAPER_START * 0.6) return;
+        const last = Math.min(proj.pre.N - 1, x.retireAge - x.age - 1);
+        for (let t = 1; t <= last; t++) {
+          if (ani * (P.gross[t] + P.netPay[t]) / pay0 < R.PA_TAPER_START) continue;
+          const rate = plan.household.region === 'scotland' ? '69.5%' : '62%';
+          out.push({ id: `trap-ahead-${x.id}`, tone: 'tip', title: `${x.name}’s pay could pass £100,000 around ${plan.startYear + t}`, action: 'compare:after-isa',
+            text: `${x.name}’s income for tax is about ${money(ani)} now${m.people[i].estimated ? ' (estimated from take-home pay)' : ''}. With the pay rises in the plan it reaches £100,000 in about ${plan.startYear + t}, if that line stays where it has been since 2010. From there to £125,140 the personal allowance is taken away: each extra £1 costs about ${rate} in tax and NI, and Tax-Free Childcare stops. Pension contributions (best by salary sacrifice) keep the income it is measured on below £100,000.` });
+          return;
+        }
+      });
+    }
+
+    // 5. ISA allowance, now and once the ISAs fill up: the general account is taxed.
     const allowance = s.isaAllowance * plan.household.people.length;
-    if (r0.toGia > 100) {
-      out.push({ id: 'isa-full', tone: 'tip', title: `${money(r0.toGia)} a year goes into a taxable account`, text: `Your ISAs are full (${money(allowance)}). Extra pension contributions get tax relief at your highest rate; a general account pays tax on gains when you sell.`, action: 'compare:pension-isa' });
+    const firstGia = proj.rows.findIndex((r, t) => t < proj.pre.N && r.toGia > 100);
+    const topRate = Math.max(0, ...m.people.map(x => (x.ani > 0 ? R.incomeTax(x.ani + 100, plan.household.region) - R.incomeTax(x.ani, plan.household.region) : 0)));
+    const toPensions = taxOn && topRate >= 40 && !s.pensionFirst;
+    if (firstGia >= 0) {
+      const r = proj.rows[firstGia];
+      const years = proj.rows.filter(x => x.toGia > 100).length;
+      const total = proj.rows.reduce((acc, x) => acc + x.toGia, 0);
+      out.push({ id: 'isa-full', tone: 'tip', action: toPensions ? 'compare:after-isa' : 'compare:pension-isa',
+        title: (() => {
+          const peak = proj.rows.reduce((a, b) => (b.toGia > a.toGia ? b : a), r);
+          const upTo = peak.toGia > r.toGia * 1.5 ? `, up to ${money(peak.toGia)} by ${peak.year}` : '';
+          return firstGia === 0 ? `${money(r0.toGia)} a year goes into a taxable account${upTo}` : `From ${r.year}, savings go into a taxable account${upTo || `: ${money(r.toGia)} a year`}`;
+        })(),
+        text: `${firstGia === 0 ? 'Your ISAs are full' : `Once the ${money(allowance)} of ISA allowance is used each year`}, the rest goes into the general account: about ${money(total)} over ${years} years, where dividends and gains are taxed. ${toPensions ? `The top of your pay is taxed at ${Math.round(topRate)}%: paid into a pension instead, the same money gets that relief, grows tax-free and a quarter comes out tax-free from the minimum pension age. Scenarios compares the two.` : 'Extra pension contributions get tax relief at your highest rate.'}` });
     } else if (r0.gia > 1000 && r0.toIsa < allowance - 1000) {
       out.push({ id: 'bed-isa', tone: 'tip', title: 'Move the general account into ISAs', text: `You have ${money(r0.gia)} outside an ISA and unused allowance this year. "Bed and ISA" moves up to ${money(s.isaAllowance)} a person each tax year so future growth is tax-free.` });
     }
@@ -262,12 +313,29 @@
       const house = plan.goals.some(g => g.icon === 'home');
       const owner = plan.accounts.some(a => a.type === 'property' && !a.excluded && a.balance > 0);
       out.push({ id: 'lisa', tone: 'tip', title: 'A Lifetime ISA adds a 25% bonus', action: 'compare:sacrifice-lisa',
-        text: `${eligible.map(x => x.name).join(' and ')} can open one before turning 40: up to ${money(R.LISA.maxContribution)} a year (within the ISA allowance) gets ${money(R.LISA.maxContribution * R.LISA.bonus)} from the government, until 50. ${owner ? 'As you already own a home, it is for retirement: it can be used from 60' : `It can be used from 60, or ${house ? 'for your first home (up to £450,000)' : 'for a first home up to £450,000'}`}; other withdrawals lose 25%. Scenarios compares it with salary sacrifice into a pension.` });
+        text: `${eligible.map(x => `${x.name} (40 in ${plan.startYear + R.LISA.openBefore - x.age})`).join(' and ')} can open one before turning 40, and keep paying in once it is open: up to ${money(R.LISA.maxContribution)} a year (within the ISA allowance) gets ${money(R.LISA.maxContribution * R.LISA.bonus)} from the government, until 50. ${owner ? 'As you already own a home, it is for retirement: it can be used from 60' : `It can be used from 60, or ${house ? 'for your first home (up to £450,000)' : 'for a first home up to £450,000'}`}; other withdrawals lose 25%. Scenarios compares it with salary sacrifice into a pension.` });
     }
 
     // 10. Life check-up
     const lifeDone = plan.expenses.some(e => (e.key || '').startsWith('life:')) || plan.events.some(e => (e.id || '').startsWith('life:'));
     if (!lifeDone) out.push({ id: 'life', tone: 'tip', title: 'Plan for costs that come later', text: 'Cars, home repairs, children’s education, travel in early retirement and care later on. Future costs (in Spending) adds them as dated spending in two minutes.', action: 'life' });
+    // 11. USS: an extra 1% of pay into the Investment Builder is matched by the employer.
+    for (const i of plan.income.filter(x => x.kind === 'dbpension' && x.dbScheme === 'uss')) {
+      const x = plan.household.people.find(y => y.id === i.owner);
+      if (!x || x.retireAge <= x.age) continue;
+      const sal = i.dbSalary > 0 ? i.dbSalary : 0;
+      out.push({ id: `uss-match-${x.id}`, tone: 'tip', title: `${x.name}: the USS match is free money`,
+        text: `In USS, paying an extra 1% of salary into the Investment Builder makes the employer add 1% too${sal ? ` (about ${money(sal / 100)} a year each on ${money(sal)})` : ''}, with tax relief on ${x.name}’s part. Choose it in My USS; it can be changed at any time.` });
+    }
+
+    // 12. Inheritance tax on what is left at the end (today's money; pensions count from April 2027).
+    const ih = inheritance(plan, proj);
+    if (taxOn && ih && kids.length) {
+      const { estate, free, tax, n } = ih;
+      if (tax > 10000) out.push({ id: 'iht', tone: tax > 250000 ? 'tip' : 'info', title: `Inheritance tax could take about ${money(tax)}`, action: 'guide:estate',
+        text: `The plan leaves about ${money(estate)} in today’s money at the end, homes and pensions included (unused pensions count from April 2027). Above ${money(free)} of allowances${n > 1 ? ' for a couple' : ''}${estate > R.IHT.taperFrom ? ' (the home allowance shrinks above £2 million)' : ''}, 40% is due. To pass on more: regular gifts from surplus income are free of tax if they don’t lower your standard of living; ${money(R.IHT.annualGift)} a year each can be given anyway; larger gifts are free after 7 years; Junior ISAs and pensions for children; or spend more yourselves. Wills and pension nominations matter too (Guides, Protection & paperwork).` });
+    }
+
     if (kids.some(a => a < 18)) out.push({ id: 'jisa', tone: 'info', title: 'Junior ISA', text: `Up to ${money(R.JUNIOR_ISA_ALLOWANCE)} a year per child grows tax-free and becomes theirs at 18. A “Save for something” goal can track university or a first deposit.` });
 
     const rank = { warn: 0, tip: 1, good: 2, info: 3 };
@@ -275,7 +343,7 @@
     return opts.limit ? out.slice(0, opts.limit) : out;
   }
 
-  const api = { GUIDES, NEEDS, PLSA, ONS_AVERAGE_MONTH, household, equivalence, forQuestion, position, questionFor, moneyThisYear, split, insights };
+  const api = { GUIDES, NEEDS, PLSA, ONS_AVERAGE_MONTH, household, equivalence, forQuestion, position, questionFor, moneyThisYear, split, insights, inheritance };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Benchmarks = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -662,7 +662,7 @@
     }));
   }
 
-  const ACTION_LABEL = { life: 'Future costs', strategy: 'Saving strategy', explorer: 'Try changes', accounts: 'Accounts', spending: 'Spending check-up', review: 'Start review', emergency: 'Add a goal' };
+  const ACTION_LABEL = { 'guide:estate': 'Open the guide', life: 'Future costs', strategy: 'Saving strategy', explorer: 'Try changes', accounts: 'Accounts', spending: 'Spending check-up', review: 'Start review', emergency: 'Add a goal' };
 
   function insightAction(a) {
     if (a === 'life') return openLifeWizard();
@@ -670,12 +670,13 @@
     if (a === 'review') return openReview();
     if (a === 'emergency') return openGoalWizard(null, 'emergency');
     if (a.startsWith('compare:')) { openComparison(a.slice(8)); return; }
+    if (a.startsWith('guide:')) { openGuide(a.slice(6)); return; }
     navigate(a === 'accounts' ? 'finances/portfolio' : a === 'strategy' ? 'finances/saving' : 'finances/assumptions');
     requestAnimationFrame(() => { const sec = $(`#sec-${a}`); if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   }
 
   // A suggestion's button shows only when there is somewhere for it to go.
-  const actionFits = a => !!a && (!a.startsWith('compare:') || SI.comparisonsFor(plan()).some(c => c.id === a.slice(8)));
+  const actionFits = a => !!a && (a.startsWith('guide:') ? !!GUIDES[a.slice(6)] : !a.startsWith('compare:') || SI.comparisonsFor(plan()).some(c => c.id === a.slice(8)));
 
   // The projection by account type, or by when the money can be used, with goal markers (home page).
   let homeBy = 'type';
@@ -3067,7 +3068,7 @@
     const rows = model.proj.rows.slice(0, -1);
     const infl = p.assumptions.inflation / 100;
     return rows.map((r, t) => {
-      const employee = Math.max(0, r.saved - (r.extraPension || 0) - r.toCash - r.toIsa - r.toGia - (r.toLisa || 0));
+      const employee = Math.max(0, r.saved - (r.extraPension || 0) - r.toCash - r.toIsa - r.toGia - (r.toLisa || 0) - (r.toPension || 0));
       const inn = r.earnings + r.otherIncome + r.statePension - r.taxes - employee - (r.extraPension || 0);
       const oneOff = p.events.filter(e => e.kind === 'expense' && e.year === r.year).reduce((acc, e) => acc + e.amount * Math.pow(1 + infl, t), 0);
       const listed = Math.max(0, r.spending - oneOff);
@@ -3084,10 +3085,11 @@
     return model.proj.rows.slice(0, -1).map((r, t) => {
       const g = r.thresholdFactor || 1;
       const payTax = p.household.ignoreTax ? 0 : pre.people.reduce((acc, P) => acc + (P.netPay[t] > 0 ? Math.max(0, R.grossFromTakeHome(P.netPay[t] / g, p.household.region) * g - P.netPay[t]) : 0), 0);
-      const employee = Math.max(0, r.saved - (r.extraPension || 0) - r.toCash - r.toIsa - r.toGia - (r.toLisa || 0));
+      const employee = Math.max(0, r.saved - (r.extraPension || 0) - r.toCash - r.toIsa - r.toGia - (r.toLisa || 0) - (r.toPension || 0));
       return {
         year: r.year, t,
-        inn: r.earnings + r.otherIncome + r.statePension + payTax + (r.pensionIn - employee),
+        // Pension contributions from outside pay (employer, tax relief) count as coming in.
+        inn: r.earnings + r.otherIncome + r.statePension + payTax + (r.pensionIn - employee - (r.toPension || 0)),
         tax: r.taxes + payTax, payTax, spending: r.spending, mortgage: r.debtRegular + r.lumpOverpay, overpay: r.overpay,
         pension: r.pensionIn, lisa: r.toLisa || 0, isa: r.toIsa, gia: r.toGia, cash: r.toCash, fromSavings: r.withdrawals,
       };
@@ -3130,11 +3132,11 @@
     const m = x => money(x / 12);
     const out0 = now.everyday + now.future + now.oneOff + now.mortgage;
     const mp = model.monthly;
-    const goes = [['Lifetime ISAs', mp.lisa], ['ISAs', mp.isa], ['General account', mp.gia], ['Mortgage overpayments', mp.overpay], ['Cash buffer', mp.cash]].filter(x => x[1] > 0.5);
+    const goes = [['Lifetime ISAs', mp.lisa], ['ISAs', mp.isa], ['Pensions, with relief', mp.toPension], ['General account', mp.gia], ['Mortgage overpayments', mp.overpay], ['Cash buffer', mp.cash]].filter(x => x[1] > 0.5);
     const rows0 = model.proj.rows;
     const dEnd = rows0.findIndex((r, t) => t > 0 && rows0[0].debt > 0.5 && r.debt <= 0.5);
     const later = dEnd > 0 && dEnd < rows0.length - 1 ? rows0[dEnd] : null;
-    const laterSave = later ? (later.toIsa + later.toGia + (later.toLisa || 0) + later.overpay + later.toCash) / 12 / later.deflator : 0;
+    const laterSave = later ? (later.toIsa + later.toGia + (later.toLisa || 0) + (later.toPension || 0) + later.overpay + later.toCash) / 12 / later.deflator : 0;
     const host = h('div', { class: 'chart', id: 'ovInOutChart' });
     setKids(box,
       h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Money in and out'),
@@ -3331,7 +3333,12 @@
           moneyInput(() => Math.round(a.contribution / 12), v => { a.contribution = Math.min(R.LISA.maxContribution, Math.max(0, v * 12)); }, { label: `${a.name} a month` }),
           h('span', { class: 'hint' }, `Up to ${money(R.LISA.maxContribution / 12)} a month (${money(R.LISA.maxContribution)} a year) gets the 25% bonus, until 50.`))),
         isaAmounts(p),
-        autoOrSet('giaMonthly', 'General investment account', 'Automatic: whatever is left once the ISAs are full.'),
+        h('div', { class: 'field' }, h('span', {}, 'Once the ISAs are full'),
+          switchInput('Pensions first, with tax relief', ...bind(s, 'pensionFirst'), { rerender: 'saving' }),
+          flow('toPension'),
+          h('span', { class: 'hint' }, s.giaMonthly !== null ? 'Off while the general account has a set amount.'
+            : 'What is left goes into the pension of whoever pays the highest rate of tax and is still working (within the £60,000 annual allowance and their pay), then the general account. It can be drawn from the minimum pension age, a quarter tax-free; skipped for anyone retiring before then.')),
+        autoOrSet('giaMonthly', 'General investment account', s.pensionFirst ? 'Automatic: whatever is left once the ISAs and pensions are full.' : 'Automatic: whatever is left once the ISAs are full.'),
         people().map(x => field(`Extra into ${x.name}’s pension`, moneyInput(...bind(x, 'extraPension'), { label: `Extra pension for ${x.name} a month` }),
           'From take-home pay until retirement; 20% tax relief is added, and higher-rate relief is claimed back. Salary sacrifice (on the salary in Income) saves NI too.'))),
       h('p', { class: 'hint', 'data-flow': 'cash' }),
@@ -3378,6 +3385,13 @@
       : `This year about ${money(surplus)} a month is left over after spending and mortgage payments.`);
     set('isaMonthly', `This year: ${money(m.isa)} a month${(r0.sweepIsa || 0) > 0.5 ? `, plus ${money(r0.sweepIsa)} of spare cash` : ''}.`);
     set('giaMonthly', `This year: ${money(m.gia)} a month.`);
+    {
+      // Pensions first: this year, or the first year it starts (when the ISAs fill up).
+      const rows = model.proj.rows, k = rows.findIndex(r => (r.toPension || 0) > 0.5);
+      const r = k >= 0 ? rows[k] : null;
+      set('toPension', !plan().strategy.pensionFirst ? '' : !r ? 'Nothing goes this way in the plan: the ISAs take it all.'
+        : `${k === 0 ? 'This year' : `From ${r.year}`}: about ${money(r.toPension / 12 / (real() ? r.deflator : 1))} a month from what is left${k ? (real() ? ' (today’s money)' : '') : ''}, with tax relief on top.`);
+    }
     set('cash', m.cash > 0.5 ? `${money(m.cash)} a month goes to cash this year (topping up the buffer, or what your set amounts leave over).` : '');
   }
 
@@ -4634,6 +4648,62 @@
       finish: s => { markGuide(taxGuideId(), s.done); const n = taxChecks().filter(c => !s.done[c.id]).length; return n ? `Saved. ${n} still to do before 5 April.` : 'All done for this tax year.'; },
     },
 
+    estate: {
+      name: 'What you leave behind',
+      finishLabel: 'Done',
+      init: () => ({ added: {} }),
+      steps: () => [
+        {
+          title: 'What the plan leaves',
+          intro: () => { const ih = B.inheritance(plan(), model.proj); return `At the end of the plan (${ih.year}), on average returns. In today’s money, so it compares with the tax allowances; in ${ih.year} pounds the estate is about ${money(ih.nominal)}.`; },
+          render: () => {
+            const ih = B.inheritance(plan(), model.proj);
+            const row = (label, v, cls) => h('tr', { class: cls || '' }, h('th', { scope: 'row' }, label), h('td', {}, v < 0 ? `−${money(-v)}` : money(v)));
+            return [
+              h('div', { class: 'table-wrap' }, h('table', { class: 'data gd-table' }, h('tbody', {},
+                row('Savings and investments', ih.parts.savings), row('Pensions (counted from April 2027)', ih.parts.pensions), row('Homes', ih.parts.homes),
+                ih.parts.debts < -0.5 ? row('Debts', ih.parts.debts) : null,
+                row('Estate', ih.estate, 'total'),
+                row(`Tax-free allowances${ih.n > 1 ? ' (both of you)' : ''}`, -ih.free),
+                row('Inheritance tax at 40%', -ih.tax, 'total'),
+                row('Passed on', ih.left, 'total')))),
+              h('p', { class: 'hint' }, `Allowances: ${money(R.IHT.nilRate)} each, plus ${money(R.IHT.residence)} each when a home goes to children or grandchildren, which shrinks by £1 for every £2 over ${money(R.IHT.taperFrom)}${ih.home < R.IHT.residence * ih.n ? (ih.home > 0.5 ? ` (here ${money(ih.home)} is left of it)` : ' (here none of it is left)') : ''}. Between spouses nothing is due, and unused allowances pass to the survivor. Rough: the rules may change, and allowances are frozen until 2030.`),
+            ];
+          },
+        },
+        {
+          title: 'Ways to pass on more',
+          intro: 'Try one as a scenario to see what it does to your goals; nothing changes in your plan until you choose.',
+          render: s => {
+            const p = plan();
+            const idea = id => SI.ideasFor(p).find(x => x.id === id);
+            const tryBtn = id => {
+              const it = idea(id);
+              if (!it) return null;
+              return h('button', { type: 'button', class: 'btn small', disabled: !!s.added[id], onclick: e => {
+                ws.scenarios.push({ id: E.uid(), name: ideaName(it), plan: SI.variantOf(it, p) });
+                s.added[id] = true; save(); renderScenarioPicker();
+                e.currentTarget.disabled = true; e.currentTarget.textContent = 'Added to Scenarios';
+              } }, s.added[id] ? 'Added to Scenarios' : 'Try it as a scenario');
+            };
+            const kids = ((p.life && p.life.children) || []).filter(c => c.age < 18);
+            const items = [
+              ['Give from surplus income', 'Regular gifts out of income (not savings) are free of inheritance tax straight away, with no limit, if they don’t lower your standard of living. Keep a note of them.', tryBtn('gifts')],
+              ['Help with a first home', 'A larger gift is free of tax if you live 7 more years (less tax from year 3). Helping in your 60s, when it matters most to them, usually beats leaving it at 95.', tryBtn('first-home')],
+              ['Enjoy more of it', 'The simplest way: spend more in retirement. The goals show how much room there is.', tryBtn('spend-more')],
+              kids.length ? ['Junior ISAs and pensions', `Up to ${money(R.JUNIOR_ISA_ALLOWANCE)} a year per child in a Junior ISA, and up to £2,880 a year into a child’s pension (the government adds 20%). Free of tax as gifts from income or within ${money(R.IHT.annualGift)} a year each.`, null] : null,
+              ['Small gifts every year', `${money(R.IHT.annualGift)} a year each (and last year’s if unused), £250 a person to anyone, and wedding gifts are always free.`, null],
+              ['Wills, nominations and cover in trust', 'Up-to-date wills, pension nominations and life cover written in trust keep money out of the estate and quick to reach. See Protection & paperwork.', h('button', { type: 'button', class: 'btn small ghost', onclick: () => { $('#guideDlg').close(); openGuide('protection'); } }, 'Open')],
+            ].filter(Boolean);
+            return h('ol', { class: 'advice' }, items.map(([title, text, btn]) => h('li', {},
+              h('div', { class: 'adv-head' }, h('strong', {}, title), btn), h('p', {}, text))));
+          },
+          note: () => h('span', { class: 'muted' }, 'General guidance, not advice: a solicitor or adviser can help with trusts and larger gifts.'),
+        },
+      ],
+      finish: () => { markGuide('estate'); return null; },
+    },
+
     protection: {
       name: 'Protection & paperwork',
       finishLabel: 'Save',
@@ -4787,6 +4857,7 @@
       { id: 'retire', icon: 'clock', title: 'Can I retire at…?', text: 'One person, one age: what happens, what it costs, and the alternatives.', status: when('retire'), open: () => openGuide('retire') },
       { id: 'saving', icon: 'layers', title: 'Saving & investing', text: 'How much to put where each month, in the usual UK order.', status: null, open: () => navigate('finances/saving') },
       { id: 'tax', icon: 'review', title: 'Tax year-end check', text: `Allowances to use before 5 April ${taxYearEnd()}.`, status: taxDone ? `${taxDone} of ${taxAll} done` : null, open: () => openGuide('tax') },
+      { id: 'estate', icon: 'home', title: 'What you leave behind', text: 'Inheritance tax on what the plan leaves, and ways to pass more on.', status: when('estate'), open: () => openGuide('estate') },
       { id: 'protection', icon: 'shield', title: 'Protection & paperwork', text: 'Life cover, sick pay, wills, power of attorney, pension nominations.', status: prot === null ? null : prot ? `${prot} to look at` : 'All in place', warn: prot > 0, open: () => openGuide('protection') },
       { id: 'review', icon: 'review', title: 'Yearly review', text: 'Swap estimates for real numbers once a year.', status: due.due ? 'Due now' : ws.checkins.length ? `Last ${fmtDate(ws.checkins[ws.checkins.length - 1].date)}` : null, warn: due.due, open: () => openReview() },
     ];

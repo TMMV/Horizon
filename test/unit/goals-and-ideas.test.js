@@ -91,7 +91,7 @@ test('retiring earlier or later moves the retirement goal with it', () => {
 test('comparisons: salary sacrifice or Lifetime ISA costs the same take-home pay', () => {
   const p = E.defaultPlan(2026);
   const ids = SI.comparisonsFor(p).map(c => c.id);
-  assert.deepEqual(ids, ['sacrifice-lisa', 'pension-isa', 'overpay-invest', 'retire-when', 'markets', 'mortgage-rate']);
+  assert.deepEqual(ids, ['sacrifice-lisa', 'pension-isa', 'after-isa', 'overpay-invest', 'retire-when', 'markets', 'mortgage-rate']);
   const c = SI.COMPARISONS.find(x => x.id === 'sacrifice-lisa');
   const [lisa, sac] = SI.optionsOf(c, p);
   assert.equal(lisa.name, 'Lifetime ISA');
@@ -125,7 +125,7 @@ test('comparisons: options that change nothing are left out, and some need a mor
   // Over 40 without a Lifetime ISA: pension or ISA, but no Lifetime ISA.
   const r = E.clonePlan(p);
   r.household.people.forEach(x => { x.age += 5; });
-  assert.deepEqual(SI.comparisonsFor(E.normalizePlan(r)).map(x => x.id).slice(0, 2), ['pension-isa', 'overpay-invest']);
+  assert.deepEqual(SI.comparisonsFor(E.normalizePlan(r)).map(x => x.id).slice(0, 2), ['pension-isa', 'after-isa']);
 });
 
 test('a Lifetime ISA grows once: ISA balances add up year by year', () => {
@@ -153,4 +153,46 @@ test('comparisons: salary sacrifice also works on pay entered as take-home', () 
   const extra = (pay[0].employeePension - 300) * 12;
   assert.ok(extra > 5000 && extra < 8000, String(extra));   // tax and NI relief on top
   assert.equal(pay[1].amount, 3800);   // from 50 the pay is back to normal
+});
+
+test('pensions first: once the ISAs are full, money goes into pensions with tax relief, not the general account', () => {
+  const base = E.clonePlan(E.defaultPlan(2026));
+  base.income[0].amount *= 2.5;   // a high earner, so the ISAs fill and the top of pay is taxed at 40%+
+  base.household.people.forEach(x => { x.retireAge = 60; });   // can draw a pension when they stop
+  const p = E.normalizePlan(base);
+  const before = E.project(p).rows;
+  const k = before.findIndex(r => r.toGia > 1000);
+  assert.ok(k >= 0, 'the general account gets money');
+  const q = E.clonePlan(p); q.strategy.pensionFirst = true;
+  const after = E.project(E.normalizePlan(q)).rows;
+  assert.ok(after[k].toPension > 0, 'paid into pensions');
+  assert.ok(after[k].toGia < before[k].toGia, 'less into the general account');
+  // Relief: the pot gets more than the cash it costs, within the annual allowance.
+  const extraPot = after[k].pensionIn - before[k].pensionIn;
+  assert.ok(extraPot > after[k].toPension * 1.3, `relief ${extraPot} vs ${after[k].toPension}`);
+  assert.ok(after[k].pensionIn <= E.R.PENSION_ANNUAL_ALLOWANCE * p.household.people.length + 1);
+  // The same money is saved either way: ISAs + pension cash + general account + cash.
+  const cashOut = r => r.toIsa + (r.toPension || 0) + r.toGia + r.toCash + (r.toLisa || 0);
+  assert.ok(Math.abs(cashOut(after[k]) - cashOut(before[k])) < 1);
+  // Not for anyone retiring before they can draw a pension.
+  const early = E.clonePlan(q); early.household.people.forEach(x => { x.retireAge = x.pensionAccessAge - 2; });
+  assert.ok(E.project(E.normalizePlan(early)).rows.every(r => !(r.toPension > 0)));
+});
+
+test('inheritance: estate at the end, allowances, and ideas that pass more on', () => {
+  const B = require('../../src/benchmarks.js');
+  const p = E.clonePlan(E.defaultPlan(2026));
+  p.life = { children: [{ name: '', age: 5 }] };
+  const plan = E.normalizePlan(p);
+  const ih = B.inheritance(plan, E.project(plan));
+  const sum = ih.parts.savings + ih.parts.pensions + ih.parts.homes + ih.parts.debts;
+  assert.ok(Math.abs(sum - ih.estate) < 1);
+  assert.equal(ih.free, E.R.IHT.nilRate * 2 + ih.home);
+  assert.ok(Math.abs(ih.tax - Math.max(0, ih.estate - ih.free) * 0.4) < 1);
+  for (const id of ['gifts', 'first-home', 'spend-more']) {
+    const it = SI.ideasFor(plan).find(x => x.id === id);
+    assert.ok(it, id);
+    const q = SI.variantOf(it, plan);
+    assert.ok(B.inheritance(q, E.project(q)).estate < ih.estate, `${id} leaves less`);
+  }
 });

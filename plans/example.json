@@ -1,9 +1,9 @@
 {
   "version": 6,
-  "activeId": "mw58iatlnmqo1",
+  "activeId": "mw59es2sbzf11",
   "scenarios": [
     {
-      "id": "mw58iatlnmqo1",
+      "id": "mw59es2sbzf11",
       "name": "Base plan",
       "plan": {
         "startYear": 2026,
@@ -38,7 +38,7 @@
         },
         "accounts": [
           {
-            "id": "mw58iatn084m2",
+            "id": "mw59es2u84512",
             "name": "Current & savings",
             "type": "cash",
             "owner": "joint",
@@ -60,7 +60,7 @@
             "latest": null
           },
           {
-            "id": "mw58iatnq1b03",
+            "id": "mw59es2uq3by3",
             "name": "Alex stocks & shares ISA",
             "type": "isa",
             "owner": "p1",
@@ -82,7 +82,7 @@
             "latest": null
           },
           {
-            "id": "mw58iatn8tvj4",
+            "id": "mw59es2uwy4f4",
             "name": "Sam stocks & shares ISA",
             "type": "isa",
             "owner": "p2",
@@ -104,7 +104,7 @@
             "latest": null
           },
           {
-            "id": "mw58iatna9dp5",
+            "id": "mw59es2u1onw5",
             "name": "General investment account",
             "type": "gia",
             "owner": "joint",
@@ -126,7 +126,7 @@
             "latest": null
           },
           {
-            "id": "mw58iatnwwec6",
+            "id": "mw59es2uoutm6",
             "name": "Alex workplace pension",
             "type": "pension",
             "owner": "p1",
@@ -148,7 +148,7 @@
             "latest": null
           },
           {
-            "id": "mw58iatnta457",
+            "id": "mw59es2u3pt37",
             "name": "Sam workplace pension",
             "type": "pension",
             "owner": "p2",
@@ -170,7 +170,7 @@
             "latest": null
           },
           {
-            "id": "mw58iatn22rh8",
+            "id": "mw59es2ukwf28",
             "name": "Gilts",
             "type": "bonds",
             "owner": "joint",
@@ -192,7 +192,7 @@
             "latest": null
           },
           {
-            "id": "mw58iatnlyze9",
+            "id": "mw59es2ubr289",
             "name": "Home",
             "type": "property",
             "owner": "joint",
@@ -214,7 +214,7 @@
             "latest": null
           },
           {
-            "id": "mw58iatnbou1a",
+            "id": "mw59es2urmnsa",
             "name": "Mortgage",
             "type": "debt",
             "owner": "joint",
@@ -238,7 +238,7 @@
         ],
         "income": [
           {
-            "id": "mw58iatnojsnb",
+            "id": "mw59es2unkgzb",
             "name": "Alex salary",
             "owner": "p1",
             "kind": "salary",
@@ -269,7 +269,7 @@
             "sacrifice": true
           },
           {
-            "id": "mw58iatn16vic",
+            "id": "mw59es2uepkcc",
             "name": "Sam take-home pay",
             "owner": "p2",
             "kind": "salary",
@@ -300,7 +300,7 @@
             "sacrifice": false
           },
           {
-            "id": "mw58iatnq4sgd",
+            "id": "mw59es2ua2d1d",
             "name": "Rental flat",
             "owner": "joint",
             "kind": "rental",
@@ -333,7 +333,7 @@
         ],
         "expenses": [
           {
-            "id": "mw58iatn2sfee",
+            "id": "mw59es2u2uoee",
             "name": "Groceries",
             "key": "",
             "category": "",
@@ -348,7 +348,7 @@
             "endAge": 95
           },
           {
-            "id": "mw58iatnyhx1f",
+            "id": "mw59es2ul3v1f",
             "name": "Council tax",
             "key": "",
             "category": "",
@@ -363,7 +363,7 @@
             "endAge": 95
           },
           {
-            "id": "mw58iatnerrrg",
+            "id": "mw59es2ub6tlg",
             "name": "Energy",
             "key": "",
             "category": "",
@@ -378,7 +378,7 @@
             "endAge": 95
           },
           {
-            "id": "mw58iatnx356h",
+            "id": "mw59es2uh9hvh",
             "name": "Insurance & subscriptions",
             "key": "",
             "category": "",
@@ -393,7 +393,7 @@
             "endAge": 95
           },
           {
-            "id": "mw58iatnih7yi",
+            "id": "mw59es2ugma2i",
             "name": "Everything else",
             "key": "",
             "category": "",
@@ -408,7 +408,7 @@
             "endAge": 95
           },
           {
-            "id": "mw58iatnt52vj",
+            "id": "mw59es2u3t1xj",
             "name": "Childcare",
             "key": "",
             "category": "",
@@ -423,7 +423,7 @@
             "endAge": 46
           },
           {
-            "id": "mw58iatnemm0k",
+            "id": "mw59es2ux96mk",
             "name": "Holidays",
             "key": "",
             "category": "",
@@ -440,14 +440,14 @@
         ],
         "events": [
           {
-            "id": "mw58iatnpcp3l",
+            "id": "mw59es2uzu29l",
             "name": "Replace car",
             "kind": "expense",
             "year": 2029,
             "amount": 18000
           },
           {
-            "id": "mw58iatnpftvm",
+            "id": "mw59es2usn0um",
             "name": "Kitchen renovation",
             "kind": "expense",
             "year": 2032,
@@ -465,6 +465,7 @@
           "slowDownAge": 0,
           "slowDownPct": 100,
           "claimRelief": true,
+          "pensionFirst": false,
           "isaMonthly": null,
           "giaMonthly": null
         },
@@ -496,7 +497,7 @@
         },
         "goals": [
           {
-            "id": "mw58iatnlm87n",
+            "id": "mw59es2ui4o5n",
             "name": "",
             "color": 0,
             "icon": "goal",
@@ -514,7 +515,7 @@
             "counts": "cash"
           },
           {
-            "id": "mw58iatni8oio",
+            "id": "mw59es2udad1o",
             "name": "",
             "color": 1,
             "icon": "debt",
@@ -532,7 +533,7 @@
             "counts": "cash"
           },
           {
-            "id": "mw58iatnrrskp",
+            "id": "mw59es2uwqgzp",
             "name": "",
             "color": 2,
             "icon": "retire",

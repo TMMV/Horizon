@@ -45,6 +45,8 @@
     return p;
   }
 
+  const childName = p => { const c = ((p.life && p.life.children) || []).filter(x => x.age < 30).sort((a, b) => b.age - a.age)[0]; return c && c.name ? c.name : 'your eldest'; };
+
   function addExpense(p, e) {
     p.expenses.push(E.normalizePlan({ ...p, expenses: [{ owner: 'p1', inflationLinked: true, freq: 'month', ...e }] }).expenses[0]);
   }
@@ -114,6 +116,18 @@
     { id: 'sell-property', icon: 'home', title: 'Sell a property in 10 years', text: p => `Sell ${p.accounts.filter(a => a.type === 'property' && !a.excluded).sort((a, b) => a.balance - b.balance)[0].name} and invest the money.`,
       applies: p => p.accounts.filter(a => a.type === 'property' && !a.excluded).length >= 2,
       apply: p => { const a = p.accounts.filter(x => x.type === 'property' && !x.excluded).sort((x, y) => x.balance - y.balance)[0]; a.sellYear = p.startYear + 10; } },
+    { id: 'gifts', icon: 'heart', title: 'Give £10,000 a year to family', text: p => `From ${people(p)[0].name}'s retirement until 85, in today's money: gifts out of surplus income are free of inheritance tax.`,
+      applies: p => !!(p.life && (p.life.children || []).length),
+      apply: p => addExpense(p, { key: 'life:gifts', name: 'Gifts to family', amount: 10000, freq: 'year', category: 'Gifts', startRef: 'retire', endRef: 'age', endAge: 85 }) },
+    { id: 'first-home', icon: 'home', title: 'Help a child buy a first home', text: p => `£50,000 in today's money when ${childName(p)} is 30.`,
+      applies: p => !!(p.life && (p.life.children || []).some(c => c.age < 30)),
+      apply: p => {
+        const c = (p.life.children || []).filter(x => x.age < 30).sort((a, b) => b.age - a.age)[0];
+        p.events.push(E.normalizePlan({ ...p, events: [{ name: `First home help${c.name ? ` for ${c.name}` : ''}`, kind: 'expense', amount: 50000, year: p.startYear + 30 - c.age }] }).events[0]);
+      } },
+    { id: 'spend-more', icon: 'piggy', title: 'Spend 20% more in retirement', text: 'More holidays, help for family, a better car: what if you enjoy more of it?',
+      applies: p => p.strategy.retireSpending > 0 || retirementSpending(p) > 0,
+      apply: p => { p.strategy.retireSpending = Math.round((p.strategy.retireSpending > 0 ? p.strategy.retireSpending : retirementSpending(p)) * 1.2 / 100) * 100; } },
     { id: 'care', icon: 'heart', title: 'Care costs later in life', text: p => `£60,000 a year of care for three years from ${people(p)[0].name}'s 85th birthday.`,
       applies: p => people(p)[0].endAge > 86,
       apply: p => addExpense(p, { key: 'idea:care', name: 'Care in later life', amount: 60000, freq: 'year', startRef: 'age', startAge: 85, endRef: 'age', endAge: 88 }) },
@@ -231,6 +245,11 @@
         const gross = grossForTakeHome(p, x.id, PENSION_ISA_NET);
         return [{ name: 'Pension by salary sacrifice', text: `${gbp(gross)} a year more into ${x.name}’s pension, for ${gbp(PENSION_ISA_NET)} less take-home pay${guess(p, x)}`, apply: q => sacrificeMore(q, x.id, gross) }];
       } },
+    { id: 'after-isa', icon: 'pension', title: 'Once the ISAs are full',
+      applies: p => !p.household.ignoreTax && !p.strategy.pensionFirst && p.strategy.giaMonthly === null && earners(p).length > 0,
+      text: 'What is left after the ISAs goes into a general investment account (dividends and gains taxed, money available any time), or first into the pensions of whoever pays the most tax and is still working: tax relief at their top rate, within the £60,000 annual allowance, available from the minimum pension age with a quarter tax-free.',
+      base: 'General account (as now)',
+      options: () => [{ name: 'Pensions first', text: 'Then the general account', apply: q => { q.strategy.pensionFirst = true; } }] },
     { id: 'overpay-invest', icon: 'debt', title: 'Overpay the mortgage or invest',
       applies: hasDebt,
       text: p => `What is left over each month all goes into investments, or all pays the mortgage off sooner${p.strategy.overpayCapPct > 0 ? ` (up to the ${p.strategy.overpayCapPct}% a year most lenders allow)` : ''}.`,

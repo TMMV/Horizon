@@ -949,7 +949,7 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#ovInsights .sg-card', { hasText: 'costs that come later' })).toHaveCount(1);
     await expect(page.locator('#ovInsights [data-insight^="adv-pension"]')).toContainText('Pension for Alex');
     await page.click('#ovInsights summary:has-text("All guides")');
-    await expect(page.locator('#ovGuides .guide-tile')).toHaveCount(8);
+    await expect(page.locator('#ovGuides .guide-tile')).toHaveCount(9);
     // Can I retire at…? Sam at 50, then save it as a scenario.
     await page.click('#ovGuides [data-guide="retire"]');
     await expect(page.locator('#gdTitle')).toHaveText('Who, and when?');
@@ -1127,6 +1127,43 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#cmpResult')).toBeEmpty();
     await expect(page.locator('#view-scenarios')).not.toContainText('null');
   });
+  test('what you leave behind: estate, inheritance tax, and ideas to try as scenarios', async ({ page }) => {
+    await page.click('#ovInsights summary:has-text("All guides")');
+    await page.click('#ovGuides [data-guide="estate"]');
+    await expect(page.locator('#gdTitle')).toHaveText('What the plan leaves');
+    const cells = page.locator('#gdBody .gd-table tbody tr');
+    await expect(cells.filter({ hasText: 'Estate' })).toContainText('£');
+    await expect(cells.filter({ hasText: 'Inheritance tax at 40%' })).toBeVisible();
+    await expect(page.locator('#gdIntro')).toContainText('pounds the estate is about');
+    await page.click('#gdNext');
+    await expect(page.locator('#gdTitle')).toHaveText('Ways to pass on more');
+    await expect(page.locator('#gdBody .advice')).toContainText('Give from surplus income');
+    await page.locator('#gdBody .advice li', { hasText: 'Enjoy more of it' }).locator('button').click();
+    await expect(page.locator('#gdBody .advice li', { hasText: 'Enjoy more of it' }).locator('button')).toHaveText('Added to Scenarios');
+    await page.click('#gdNext');
+    await expect(page.locator('#guideDlg')).toBeHidden();
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios.map(s => s.name))).toContain('Base plan: Spend 20% more in retirement');
+    await expect(page.locator('#ovGuides [data-guide="estate"]')).toContainText('Done');
+  });
+
+  test('pensions first: a switch on the saving page and a comparison', async ({ page }) => {
+    await go(page, 'finances/saving');
+    const sw = page.locator('#sec-saving label.switch', { hasText: 'Pensions first' }).locator('input');
+    await expect(sw).not.toBeChecked();
+    await sw.check();
+    await settle(page);
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.strategy.pensionFirst)).toBe(true);
+    await expect(page.locator('#sec-saving [data-flow="toPension"]')).not.toBeEmpty();
+    await sw.uncheck();
+    await settle(page);
+    await tab(page, 'scenarios');
+    await page.click('#cmpGrid [data-compare="after-isa"]');
+    const rows = page.locator('#cmpResult .cmp-table tbody tr');
+    await expect(rows).toHaveCount(2, { timeout: 30000 });
+    await expect(rows.nth(0)).toContainText('General account (as now)');
+    await expect(rows.nth(1)).toContainText('Pensions first');
+  });
+
   test('start a blank plan', async ({ page }) => {
     await page.click('#dataMenu summary');
     await page.click('#blankBtn');

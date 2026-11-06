@@ -35,7 +35,7 @@
     'cgt', 'gCash', 'gIsa', 'gGia', 'gPension', 'gBonds', 'gProperty',
     'debtInterest', 'debtRegular', 'lumpOverpay', 'bondsMatured', 'bondsToIsa', 'propSold', 'extraPension', 'flatTax',
     'sweepIsa', 'sweepGia', 'nonWork',
-    'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief',
+    'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension',
   ];
 
   const GOAL_MEASURES = {
@@ -112,6 +112,10 @@
       slowDownAge: 0,        // from this age (first person) spending is scaled by slowDownPct; 0 = never
       slowDownPct: 100,
       claimRelief: true,     // claim higher-rate relief on personal pension contributions (self-assessment)
+      // Once the ISAs are full, what is left goes into the pensions of people still working (with tax
+      // relief at their top rate) before the general account: highest rate first, within the annual
+      // allowance and their pay. Not for anyone retiring before they can draw a pension.
+      pensionFirst: false,
       // Your own amounts a month (today's money); null = automatic (everything left, in order).
       // Whatever your amounts leave over stays in cash.
       isaMonthly: null,
@@ -787,6 +791,8 @@
         ni: zeros(),
         baseTax: zeros(),      // income tax + NI before withdrawals
         relief: zeros(),       // higher-rate relief on personal pension contributions (reduces income tax)
+        payInc: zeros(),       // income tax is measured on (take-home pay grossed up), for "pensions first"
+        earned: zeros(),       // pay before tax: the most that can get relief in a year
       })),
     };
 
@@ -857,6 +863,11 @@
           P.baseIT[t] -= P.relief[t];
         }
         P.baseTax[t] = P.baseIT[t] + P.ni[t];
+        if (s.pensionFirst && !household.ignoreTax && age < p.retireAge && p.retireAge >= p.pensionAccessAge && (P.gross[t] > 0 || P.netPay[t] > 0)) {
+          const grossed = P.netPay[t] > 0 ? R.grossFromTakeHome(P.netPay[t], household.region) : 0;
+          P.payInc[t] = P.taxable[t] + grossed - P.extraPot[t];
+          P.earned[t] = P.gross[t] + grossed;
+        }
       });
 
       const retired = p1.age + t >= p1.retireAge;
@@ -1113,7 +1124,7 @@
         - pre.expenses[t] - pre.eventsOut[t] - debtRegular - lumpOverpay;
 
       let extraTax = 0, cgt = 0, unfunded = 0, sweepIsa = 0, sweepGia = 0;
-      let toCash = 0, overpay = 0, toIsa = 0, toGia = 0, toLisa = 0, lisaBonus = 0, wLisa = 0, lisaCharge = 0;
+      let toCash = 0, overpay = 0, toIsa = 0, toGia = 0, toLisa = 0, lisaBonus = 0, wLisa = 0, lisaCharge = 0, toPension = 0;
       let wCash = 0, wGia = 0, wIsa = 0, wPension = 0;
       const drawn = people.map(() => 0), taxFreeTaken = people.map(() => 0);
       let gains = 0;
@@ -1153,10 +1164,32 @@
         const capGia = s.giaMonthly === null ? Infinity : Math.max(0, s.giaMonthly) * 12 * f;
         toIsa = Math.min(left, allowance, capIsa);
         isa += toIsa;
-        toGia = Math.min(left - toIsa, capGia);
+        // Pensions first: £1,000 of contribution at a time, at the relief it gets, highest rate first.
+        if (s.pensionFirst && s.giaMonthly === null) {
+          const room = people.map((_, i) => {
+            const P = pre.people[i];
+            return P.earned[t] > 0 ? Math.max(0, Math.min(R.PENSION_ANNUAL_ALLOWANCE, P.earned[t]) - P.contrib[t] - P.extraPot[t]) : 0;
+          });
+          const inc = people.map((_, i) => pre.people[i].payInc[t]);
+          const rate = i => Math.min(0.7, (T.incomeTax(inc[i], region, g) - T.incomeTax(Math.max(0, inc[i] - 1000), region, g)) / 1000);
+          for (let k = 0; k < 200; k++) {
+            let best = -1, bestRate = 0.195;
+            for (let i = 0; i < n; i++) if (room[i] > 1) { const m = rate(i); if (m > bestRate) { best = i; bestRate = m; } }
+            const spare = left - toIsa - toPension;
+            if (best < 0 || spare < 1) break;
+            const gross = Math.min(1000, room[best], spare / (1 - bestRate));
+            const cost = gross * (1 - bestRate);
+            pension[best] += gross;
+            pensionIn += gross;
+            toPension += cost;
+            room[best] -= gross;
+            inc[best] -= gross;
+          }
+        }
+        toGia = Math.min(left - toIsa - toPension, capGia);
         gia += toGia;
         basis += toGia;
-        const rest = left - toIsa - toGia;   // left over by your own amounts: kept as cash
+        const rest = left - toIsa - toPension - toGia;   // left over by your own amounts: kept as cash
         if (rest > 0) { cash += rest; toCash += rest; }
         // Cash above the buffer (e.g. matured gilts) is invested too, within your own amounts.
         const excess = cash - s.cashReserve * f;
@@ -1295,7 +1328,8 @@
         out.debtInterest[t] = debtInterest;
         out.lumpOverpay[t] = lumpOverpay;
         out.overpay[t] = overpay;
-        out.saved[t] = employee + extraOut + toCash + toIsa + toGia + toLisa;
+        out.saved[t] = employee + extraOut + toCash + toIsa + toGia + toLisa + toPension;
+        out.toPension[t] = toPension;
         out.toLisa[t] = toLisa; out.lisaBonus[t] = lisaBonus; out.wLisa[t] = wLisa; out.lisaHome[t] = lisaHome; out.lisaCharge[t] = lisaCharge;
         out.pensionRelief[t] = pre.people.reduce((acc, P) => acc + P.relief[t], 0);
         out.extraPension[t] = extraOut;
@@ -1355,8 +1389,9 @@
       isa: r.toIsa / 12, gia: r.toGia / 12, overpay: (r.overpay + r.lumpOverpay) / 12, cash: r.toCash / 12,
       lisa: (r.toLisa || 0) / 12,
       pension: r.pensionIn / 12,
-      invest: (r.toIsa + r.toGia + (r.toLisa || 0)) / 12,
-      surplus: (r.toIsa + r.toGia + (r.toLisa || 0) + r.overpay + r.toCash) / 12,
+      toPension: (r.toPension || 0) / 12,
+      invest: (r.toIsa + r.toGia + (r.toLisa || 0) + (r.toPension || 0)) / 12,
+      surplus: (r.toIsa + r.toGia + (r.toLisa || 0) + (r.toPension || 0) + r.overpay + r.toCash) / 12,
       shortfall: (r.withdrawals + r.unfunded) / 12,
     };
   }
