@@ -1805,6 +1805,9 @@
     return p;
   }
 
+  // A Lifetime ISA can only buy a first home: not for anyone who already owns one.
+  const ownsHome = plan => plan.accounts.some(a => a.type === 'property' && !a.excluded && a.balance > 0);
+
   // The person a retirement goal is about.
   const retiree = (plan, goal) => plan.household.people.find(x => x.id === goal.owner) || plan.household.people[0];
 
@@ -2044,7 +2047,7 @@
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,
     solveRetirement, solveSpending, solveRetirementSpending, solveDebtFree, solveNetWorth,
-    shiftRetirement, retiree, scaleSpending, variant, summarize, sweep,
+    shiftRetirement, retiree, ownsHome, scaleSpending, variant, summarize, sweep,
     makeCheckin, checkinReview, rollForward,
     mulberry32, makeNormal, lognormal, percentile, clonePlan, grossUp,
   };

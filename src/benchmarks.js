@@ -260,8 +260,9 @@
     const eligible = plan.household.people.filter(x => x.age < R.LISA.openBefore && !lisaOwners.has(x.id));
     if (eligible.length) {
       const house = plan.goals.some(g => g.icon === 'home');
+      const owner = plan.accounts.some(a => a.type === 'property' && !a.excluded && a.balance > 0);
       out.push({ id: 'lisa', tone: 'tip', title: 'A Lifetime ISA adds a 25% bonus', action: 'compare:sacrifice-lisa',
-        text: `${eligible.map(x => x.name).join(' and ')} can open one before turning 40: up to ${money(R.LISA.maxContribution)} a year (within the ISA allowance) gets ${money(R.LISA.maxContribution * R.LISA.bonus)} from the government, until 50. It can be used from 60, or ${house ? 'for your first home (up to £450,000)' : 'for a first home up to £450,000'}; other withdrawals lose 25%. Scenarios compares it with salary sacrifice into a pension.` });
+        text: `${eligible.map(x => x.name).join(' and ')} can open one before turning 40: up to ${money(R.LISA.maxContribution)} a year (within the ISA allowance) gets ${money(R.LISA.maxContribution * R.LISA.bonus)} from the government, until 50. ${owner ? 'As you already own a home, it is for retirement: it can be used from 60' : `It can be used from 60, or ${house ? 'for your first home (up to £450,000)' : 'for a first home up to £450,000'}`}; other withdrawals lose 25%. Scenarios compares it with salary sacrifice into a pension.` });
     }
 
     // 10. Life check-up

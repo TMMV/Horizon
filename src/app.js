@@ -392,8 +392,15 @@
     const classTotal = c => c.groups.reduce((x, g) => x + typeTotal(g.key), 0);
     const totalAssets = classes.filter(c => c.key !== 'owed').reduce((acc, c) => acc + classTotal(c), 0);
     const avail = classes.find(c => c.key === 'now');
-    const ring = portfolioDonut(classes.filter(c => c.key !== 'owed').map(c => c.groups.map(g => ({ label: g.label, color: g.color, value: typeTotal(g.key) }))),
-      avail ? classTotal(avail) : 0, totalAssets);
+    const owed = classes.find(c => c.key === 'owed');
+    const totalOwed = owed ? classTotal(owed) : 0;
+    const ring = portfolioDonut(classes.filter(c => c.key !== 'owed').map(c => c.groups.map(g => ({ key: g.key, label: g.label, color: g.color, value: typeTotal(g.key), group: c.label }))),
+      totalAssets, key => {
+        const g = PF_GROUPS.find(x => x.key === key);
+        if (!g || !p.accounts.filter(a => a.type === key).length || p.accounts.filter(a => a.type === key).length === 1) return;
+        if (pfOpen.has(key)) pfOpen.delete(key); else pfOpen.add(key);
+        renderPortfolio();
+      });
     // Accounts under their type, and types under when the money can be used.
     const owner = a => (a.owner === 'joint' ? 'Joint' : (people()[E.personIndex(p, a.owner)] || {}).name || '');
     const signed = (v, debtish) => `${debtish ? '−' : ''}${money(v)}`;
@@ -406,7 +413,7 @@
       // A type with one account is a single row: the type, with the account named under it.
       if (accounts.length === 1) {
         const a = accounts[0];
-        return h('div', { class: `pf-row group single${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, style: `--item-color:${cssVar(g.color)}` },
+        return h('div', { class: `pf-row group single${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, 'data-type': g.key, style: `--item-color:${cssVar(g.color)}` },
           h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }),
             h('span', { class: 'pf-two' }, h('span', {}, h('strong', {}, g.label), updated(est.reading[a.id])),
               h('small', {}, [a.name, owner(a), a.excluded ? 'not counted' : ''].filter(Boolean).join(' · ')))),
@@ -417,7 +424,7 @@
       const nUpdated = accounts.filter(a => est.reading[a.id]).length;
       const toggle = () => { if (open) pfOpen.delete(g.key); else pfOpen.add(g.key); renderPortfolio(); };
       return [
-        h('div', { class: `pf-row group${open ? ' open' : ''}`, role: 'row', style: `--item-color:${cssVar(g.color)}` },
+        h('div', { class: `pf-row group${open ? ' open' : ''}`, role: 'row', 'data-type': g.key, style: `--item-color:${cssVar(g.color)}` },
           h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }), h('strong', {}, g.label),
             accounts.length
               ? h('button', { type: 'button', class: 'pf-toggle', 'aria-expanded': String(open), 'aria-label': `${open ? 'Hide' : 'Show'} the ${accounts.length} ${g.label} accounts`, onclick: toggle },
@@ -478,8 +485,14 @@
             : h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your last update (${fmtDate(lastUpdate)})`),
           readings && Math.abs(vsPlan) >= 1 ? h('div', { class: `delta vs-plan ${vsPlan >= 0 ? 'pos' : 'neg'}`, id: 'pfVsPlan' }, glyph(vsPlan >= 0 ? 'good' : 'warn'),
             `${money(Math.abs(vsPlan))} ${vsPlan >= 0 ? 'ahead of' : 'behind'} the plan on the ${readings} balance${readings === 1 ? '' : 's'} you updated`) : null),
-        h('div', { class: 'pf-mix' }, ring),
+        // How the net worth is made up, so the numbers add up.
+        h('dl', { class: 'pf-sum', id: 'pfSum' },
+          h('div', {}, h('dt', {}, 'What you own'), h('dd', {}, money(totalAssets))),
+          avail ? h('div', { class: 'sub-line' }, h('dt', {}, 'of which available now'), h('dd', {}, money(classTotal(avail)))) : null,
+          h('div', {}, h('dt', {}, 'What you owe'), h('dd', {}, `−${money(totalOwed)}`)),
+          h('div', { class: 'total' }, h('dt', {}, 'Net worth'), h('dd', {}, money(totalAssets - totalOwed)))),
         readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null),
+      h('div', { class: 'pf-mix' }, ring),
       list),
     ].filter(Boolean));
   }
@@ -491,36 +504,59 @@
     return [
       { key: 'now', label: 'Available now', types: ['cash', 'isa', 'gia', 'bonds'], note: 'Cash, ISAs, investments and gilts: can be withdrawn or sold' },
       { key: 'locked', label: 'Locked away for now', types: ['pension', 'lisa'],
-        note: `Pensions from ${ages}${drawing.length ? ` (${drawing.join(' and ')} can draw now)` : ''}; Lifetime ISAs from 60 or for a first home` },
+        note: `Pensions from ${ages}${drawing.length ? ` (${drawing.join(' and ')} can draw now)` : ''}; Lifetime ISAs from 60${E.ownsHome(plan()) ? '' : ' or for a first home'}` },
       { key: 'property', label: 'Property', types: ['property'], note: 'Only usable by selling or downsizing' },
       { key: 'owed', label: 'Owed', types: ['debt'], note: 'Mortgage and loans' },
     ];
   }
 
   // A donut of what you own: one ring of types, grouped (a wider gap) by when they can be used.
-  function portfolioDonut(groups, available, total) {
+  // Hover or focus a slice: it stands out, the centre gives its details and its row lights up.
+  function portfolioDonut(groups, total, onPick) {
     const NS = 'http://www.w3.org/2000/svg';
-    const R = 52, W = 18, C = 2 * Math.PI * R;
+    const R = 54, W = 20, C = 2 * Math.PI * R;
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('viewBox', '0 0 140 140');
     svg.setAttribute('class', 'pf-donut-svg');
-    svg.setAttribute('aria-hidden', 'true');
-    const items = groups.flatMap((g, gi) => g.filter(x => x.value > 0.5).map((x, i) => ({ ...x, gap: i === 0 && gi > 0 ? 6 : 2 })));
+    const items = groups.flatMap((g, gi) => g.filter(x => x.value > 0.5).map((x, i) => ({ ...x, gap: i === 0 && gi > 0 ? 5 : 1.6 })));
     const gaps = items.length > 1 ? items.reduce((acc, x) => acc + x.gap, 0) : 0;
+    const label = h('small', {}, 'What you own'), value = h('strong', {}, fmtCompact(total)), note = h('small', {}, `${items.length} kinds of account`);
+    const centre = h('div', { class: 'pf-donut-centre', 'aria-live': 'polite' }, label, value, note);
+    const arcs = [];
+    const show = x => {
+      for (const a of arcs) { a.el.classList.toggle('on', a.x === x); a.el.classList.toggle('dim', !!x && a.x !== x); }
+      for (const row of $$('#homePortfolio .pf-row[data-type]')) row.classList.toggle('hl', !!x && row.dataset.type === x.key);
+      if (x) { label.textContent = x.label; value.textContent = money(x.value); note.textContent = `${Math.round((x.value / Math.max(1, total)) * 100)}% of what you own · ${x.group.toLowerCase()}`; }
+      else { label.textContent = 'What you own'; value.textContent = fmtCompact(total); note.textContent = `${items.length} kinds of account`; }
+    };
     let at = 0;
     for (const x of items) {
       const len = Math.max(0.5, (x.value / Math.max(1, total)) * (C - gaps));
       const c = document.createElementNS(NS, 'circle');
       for (const [k, v] of [['cx', 70], ['cy', 70], ['r', R], ['fill', 'none'], ['stroke', cssVar(x.color)], ['stroke-width', W],
-        ['stroke-dasharray', `${len} ${C - len}`], ['stroke-dashoffset', -at], ['transform', 'rotate(-90 70 70)']]) c.setAttribute(k, String(v));
-      const t = document.createElementNS(NS, 'title');
-      t.textContent = `${x.label}: ${money(x.value)}`;
-      c.append(t);
+        ['stroke-dasharray', `${len} ${C - len}`], ['stroke-dashoffset', -at], ['transform', 'rotate(-90 70 70)'],
+        ['tabindex', 0], ['role', 'img'], ['aria-label', `${x.label}: ${money(x.value)}, ${Math.round((x.value / Math.max(1, total)) * 100)}% of what you own`], ['data-type', x.key], ['class', 'arc']]) c.setAttribute(k, String(v));
+      c.addEventListener('pointerenter', () => show(x));
+      c.addEventListener('focus', () => show(x));
+      c.addEventListener('pointerleave', () => show(null));
+      c.addEventListener('blur', () => show(null));
+      c.addEventListener('click', () => onPick && onPick(x.key));
+      c.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (onPick) onPick(x.key); } });
+      arcs.push({ x, el: c });
       svg.append(c);
       at += len + (items.length > 1 ? x.gap : 0);
     }
-    return h('div', { class: 'pf-donut', role: 'img', 'aria-label': `${money(available)} of the ${money(total)} you own is available now` }, svg,
-      h('div', { class: 'pf-donut-centre' }, h('small', {}, 'Available now'), h('strong', {}, fmtCompact(available)), h('small', {}, `of ${fmtCompact(total)}`)));
+    const box = h('div', { class: 'pf-donut', role: 'group', 'aria-label': `What you own, ${money(total)}, by kind of account` }, svg, centre);
+    // The table points back: hovering a row lights up its slice.
+    requestAnimationFrame(() => {
+      for (const row of $$('#homePortfolio .pf-row[data-type]')) {
+        const x = items.find(i => i.key === row.dataset.type);
+        if (!x) continue;
+        row.addEventListener('pointerenter', () => show(x));
+        row.addEventListener('pointerleave', () => show(null));
+      }
+    });
+    return box;
   }
 
   // ---- home: this year (what to do now and what is coming)
@@ -3190,7 +3226,7 @@
     add('2. Workplace pension match', 'In full', 'Pay at least what your employer matches: their contribution is free money. Check your payslip or scheme rules.');
     const lisaPeople = people().filter(x => x.age >= 18 && x.age < R.LISA.payUntil && (x.age < R.LISA.openBefore || p.accounts.some(a => a.type === 'lisa' && a.owner === x.id)));
     if (lisaPeople.length) {
-      add('3. Lifetime ISA', `${money(R.LISA.maxContribution / 12)} a month each`, `${lisaPeople.map(x => x.name).join(' and ')} can get a 25% bonus (${money(R.LISA.maxContribution * R.LISA.bonus)} a year each) until 50, usable from 60 or for a first home. Good if you won’t need it before 60.`,
+      add('3. Lifetime ISA', `${money(R.LISA.maxContribution / 12)} a month each`, `${lisaPeople.map(x => x.name).join(' and ')} can get a 25% bonus (${money(R.LISA.maxContribution * R.LISA.bonus)} a year each) until 50, usable from 60${E.ownsHome(p) ? '' : ' or for a first home'}. Good if you won’t need it before 60.`,
         ['Compare with salary sacrifice', () => openComparison('sacrifice-lisa')]);
     }
     // Pension relief for anyone paying higher-rate tax: the pay above the higher-rate threshold.
@@ -3722,7 +3758,8 @@
       if (E.OWNED_TYPES.includes(a.type)) main.push(field('Whose', selectInput(ownerOptions(false), ...bind(a, 'owner'))));
       if (a.type === 'lisa') {
         main.push(field('Pay in each year', moneyInput(...bind(a, 'contribution')), `Up to ${money(R.LISA.maxContribution)}; the government adds 25%. Paid from your surplus before other ISAs, until 50.`));
-        extra.push(field('Saving for', selectInput([['retirement', 'Retirement (from 60)'], ['home', 'A first home']], ...bind(a, 'purpose'), { rerender: 'accounts' })));
+        // Only someone who has never owned a home can use it for one.
+        if (!E.ownsHome(plan()) || a.purpose === 'home') extra.push(field('Saving for', selectInput([['retirement', 'Retirement (from 60)'], ['home', 'A first home']], ...bind(a, 'purpose'), { rerender: 'accounts' })));
         if (a.purpose === 'home') extra.push(field('Buying in', numInput(...bind(a, 'homeYear'), { min: plan().startYear, max: plan().startYear + 40, label: 'First home year' }), `Paid out that year with no charge if the home costs up to ${money(R.LISA.homePriceCap)}. Add the purchase itself as a one-off event.`));
         extra.push(h('p', { class: 'hint' }, `Withdrawals before 60 for anything else lose 25%, so the plan only uses it that way as a last resort. It counts within the ${money(R.ISA_ALLOWANCE)} ISA allowance and must be opened before 40.`));
       }

@@ -181,3 +181,16 @@ test('plan check: emergency fund, children and the £100k trap', () => {
   list = B.insights(r, E.project(r));
   assert.ok(list.some(i => i.id.startsWith('trap-') && i.tone === 'warn'));
 });
+
+test('a Lifetime ISA is only offered for a first home to people who do not own one', () => {
+  const E2 = require('../../src/engine');
+  const B2 = require('../../src/benchmarks');
+  const p = E2.defaultPlan(2026);   // owns a home
+  assert.equal(E2.ownsHome(p), true);
+  const tip = B2.insights(p, E2.project(p)).find(i => i.id === 'lisa');
+  assert.match(tip.text, /already own a home/);
+  assert.doesNotMatch(tip.text, /first home up to/);
+  const renter = E2.normalizePlan({ ...p, accounts: p.accounts.filter(a => a.type !== 'property' && a.type !== 'debt') });
+  assert.equal(E2.ownsHome(renter), false);
+  assert.match(B2.insights(renter, E2.project(renter)).find(i => i.id === 'lisa').text, /first home up to/);
+});

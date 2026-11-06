@@ -1361,6 +1361,37 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 .sg-foot { margin-top: 2px; }
 @media (max-width: 640px) { .goal-strip { display: grid; } .io-fig.left { grid-column: auto; } }
 
+/* portfolio: net worth, donut and table side by side */
+.pf-body { grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 0.9fr) minmax(0, 1.5fr); gap: 24px; }
+.pf-body > .pf-mix { align-self: start; position: sticky; top: 84px; }
+.pf-donut { width: min(320px, 100%); height: auto; aspect-ratio: 1; }
+.pf-donut-svg .arc { cursor: pointer; transition: stroke-width 0.15s ease, opacity 0.15s ease; outline: none; }
+.pf-donut-svg .arc.on, .pf-donut-svg .arc:focus-visible { stroke-width: 26; }
+.pf-donut-svg .arc.dim { opacity: 0.35; }
+.pf-donut-centre { padding: 0 22%; pointer-events: none; }
+.pf-donut-centre strong { font-size: 1.5rem; }
+.pf-donut-centre small { line-height: 1.3; }
+.pf-row.hl { background: var(--accent-soft) !important; }
+.pf-sum { margin: 6px 0 0; display: grid; gap: 4px; width: 100%; font-size: 0.9rem; }
+.pf-sum > div { display: flex; justify-content: space-between; gap: 10px; }
+.pf-sum dt { color: var(--text-2); }
+.pf-sum dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+.pf-sum .sub-line { font-size: 0.8rem; padding-left: 10px; }
+.pf-sum .sub-line dd { font-weight: 500; color: var(--text-2); }
+.pf-sum .total { border-top: 1px solid var(--border-strong); padding-top: 6px; margin-top: 2px; }
+.pf-sum .total dt { color: var(--text); font-weight: 600; }
+@media (max-width: 1150px) {
+  .pf-body { grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.4fr); }
+  .pf-body > .pf-mix { grid-column: 1; grid-row: 2; position: static; }
+  .pf-body > .pf-list { grid-column: 2; grid-row: 1 / span 2; }
+}
+@media (max-width: 900px) {
+  .pf-body { grid-template-columns: 1fr; }
+  .pf-body > .pf-mix, .pf-body > .pf-list { grid-column: auto; grid-row: auto; }
+}
+
+.pf-toggle { white-space: nowrap; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }

@@ -25,7 +25,34 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#homePortfolio')).toContainText('Estimated net worth today');
     // A donut, and the accounts grouped by when the money can be used.
     await expect(page.locator('#homePortfolio .pf-donut circle')).toHaveCount(6);
-    await expect(page.locator('#homePortfolio .pf-donut')).toContainText('Available now');
+    await expect(page.locator('#homePortfolio .pf-donut')).toContainText('What you own');
+    // Net worth is worked out beside it, so the figures add up.
+    await expect(page.locator('#pfSum')).toContainText('What you own');
+    await expect(page.locator('#pfSum')).toContainText('What you owe');
+    await expect(page.locator('#pfSum .total')).toContainText(await page.locator('#homePortfolio .hero-value').innerText());
+    // Hover a slice: the centre gives its details and its row lights up; leave and it resets.
+    // Move the mouse onto the middle of the property slice.
+    const at = await page.locator('#homePortfolio .pf-donut .arc[data-type="property"]').evaluate(c => {
+      const svg = c.ownerSVGElement, r = +c.getAttribute('r'), C = 2 * Math.PI * r;
+      const len = parseFloat(c.getAttribute('stroke-dasharray')), off = -parseFloat(c.getAttribute('stroke-dashoffset'));
+      const a = ((off + len / 2) / C) * 2 * Math.PI - Math.PI / 2;
+      const box = svg.getBoundingClientRect(), k = box.width / 140;
+      return { x: box.left + (70 + r * Math.cos(a)) * k, y: box.top + (70 + r * Math.sin(a)) * k };
+    });
+    await page.mouse.move(at.x, at.y);
+    await expect(page.locator('#homePortfolio .pf-donut-centre')).toContainText('% of what you own');
+    await expect(page.locator('#homePortfolio .pf-row.hl[data-type="property"]')).toHaveCount(1);
+    await page.locator('#homePortfolio .hero-value').hover();
+    await expect(page.locator('#homePortfolio .pf-donut-centre')).toContainText('What you own');
+    await expect(page.locator('#homePortfolio .pf-row.hl')).toHaveCount(0);
+    // Clicking the ISAs slice opens its accounts.
+    await page.locator('#homePortfolio .pf-donut .arc[data-type="isa"]').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#homePortfolio .pf-row.acct').first()).toBeVisible();
+    await page.locator('#homePortfolio .pf-donut .arc[data-type="isa"]').focus();
+    await page.keyboard.press('Enter');
+    // A homeowner's Lifetime ISA is for retirement only.
+    await expect(page.locator('#homePortfolio .pf-row.access.locked')).not.toContainText('first home');
     await expect(page.locator('#homePortfolio .pf-row.access')).toHaveCount(4);
     await expect(page.locator('#homePortfolio .pf-row.access.now')).toContainText('% of what you own');
     await expect(page.locator('#homePortfolio .pf-row.access.locked')).toContainText('Pensions from 57');
@@ -1079,8 +1106,9 @@ test.describe('Horizon app', () => {
     const item = page.locator('#sec-accounts .item').last();
     await expect(item).toContainText('Pay in each year');
     await item.locator('details.more summary').click();
-    await item.locator('select').filter({ hasText: 'A first home' }).selectOption('home');
-    await expect(item.locator('input[aria-label="First home year"]')).toBeVisible();
+    // The example owns a home, so a first home is not offered.
+    await expect(item.locator('select').filter({ hasText: 'A first home' })).toHaveCount(0);
+    await expect(item).toContainText('Withdrawals before 60');
     await tab(page, 'home');
     await openGoal(page, '£1M by');
     await expect(page.locator('#gpYear')).toContainText('Lifetime ISAs');
