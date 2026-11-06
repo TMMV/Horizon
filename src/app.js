@@ -468,7 +468,8 @@
           h('p', { class: 'sub' }, days > 0
             ? `Estimated for today from your figures as at ${fmtDate(est.asOf)} (${sinceText(days)}), on average returns${readings ? `, with ${readings} balance${readings === 1 ? '' : 's'} you updated since` : ''}.`
             : `Your figures as at ${fmtDate(est.asOf)}. From here Horizon estimates each balance until your next review.`))),
-      h('div', { class: 'pf-top' },
+      h('div', { class: 'pf-body' },
+      h('div', { class: 'pf-side' },
         h('div', { class: 'pf-total' },
           h('div', { class: 'hero-label' }, 'Estimated net worth today'),
           h('div', { class: 'hero-value' }, money(est.netWorth)),
@@ -477,9 +478,9 @@
             : h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your last update (${fmtDate(lastUpdate)})`),
           readings && Math.abs(vsPlan) >= 1 ? h('div', { class: `delta vs-plan ${vsPlan >= 0 ? 'pos' : 'neg'}`, id: 'pfVsPlan' }, glyph(vsPlan >= 0 ? 'good' : 'warn'),
             `${money(Math.abs(vsPlan))} ${vsPlan >= 0 ? 'ahead of' : 'behind'} the plan on the ${readings} balance${readings === 1 ? '' : 's'} you updated`) : null),
-        h('div', { class: 'pf-mix' }, ring)),
-      list,
-      readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null,
+        h('div', { class: 'pf-mix' }, ring),
+        readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null),
+      list),
     ].filter(Boolean));
   }
 
@@ -686,7 +687,6 @@
   function renderHome() {
     renderPortfolio();
     renderGoalStrip();
-    renderMonthlyPlan();
     renderHomeChart();
     renderInOut();
     renderSuggestions();
@@ -3039,14 +3039,24 @@
     for (const x of people()) { const y = p.startYear + x.retireAge - x.age; if (y <= xs[xs.length - 1]) markers.push({ x: y, label: `${people().length > 1 ? `${x.name} retires` : 'Retire'}`, color: '--muted' }); }
     const m = x => money(x / 12);
     const out0 = now.everyday + now.future + now.oneOff + now.mortgage;
+    const mp = model.monthly;
+    const goes = [['Lifetime ISAs', mp.lisa], ['ISAs', mp.isa], ['General account', mp.gia], ['Mortgage overpayments', mp.overpay], ['Cash buffer', mp.cash]].filter(x => x[1] > 0.5);
+    const rows0 = model.proj.rows;
+    const dEnd = rows0.findIndex((r, t) => t > 0 && rows0[0].debt > 0.5 && r.debt <= 0.5);
+    const later = dEnd > 0 && dEnd < rows0.length - 1 ? rows0[dEnd] : null;
+    const laterSave = later ? (later.toIsa + later.toGia + (later.toLisa || 0) + later.overpay + later.toCash) / 12 / later.deflator : 0;
     const host = h('div', { class: 'chart', id: 'ovInOutChart' });
     setKids(box,
       h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Money in and out'),
-        h('p', { class: 'sub' }, `Coming in after tax and pension contributions (the line) against what goes out (the stack), on average, in ${unitLabel()}. Above the stack is what is left to save; below it, savings pay the difference.`))),
+        h('p', { class: 'sub' }, `This month, and over the years on average, in ${unitLabel()}: what comes in after tax and pension contributions (the line) against what goes out (the stack). Above the stack is what is left to save; below it, savings pay the difference.`))),
       h('div', { class: 'io-sum' },
-        h('div', { class: 'io-fig in' }, h('span', {}, 'Coming in'), h('strong', {}, m(now.inn)), h('small', {}, 'a month this year')),
+        h('div', { class: 'io-fig in' }, h('span', {}, 'Coming in'), h('strong', {}, m(now.inn)), h('small', {}, 'a month, after tax')),
         h('div', { class: 'io-fig out' }, h('span', {}, 'Going out'), h('strong', {}, m(out0)), h('small', {}, [now.mortgage > 0.5 ? `incl. ${m(now.mortgage)} mortgage` : null, now.oneOff > 0.5 ? `${m(now.oneOff)} one-offs` : null].filter(Boolean).join(', ') || 'spending')),
-        h('div', { class: `io-fig left ${now.left >= 0 ? 'pos' : 'neg'}` }, h('span', {}, now.left >= 0 ? 'Left to save' : 'From savings'), h('strong', {}, m(Math.abs(now.left))), h('small', {}, 'a month'))),
+        h('div', { class: `io-fig left ${now.left >= 0 ? 'pos' : 'neg'}` }, h('span', {}, now.left >= 0 ? 'Left to save' : 'From savings'), h('strong', {}, m(Math.abs(now.left))),
+          goes.length && now.left >= 0 ? h('ul', { class: 'io-goes' }, goes.map(([k, v]) => h('li', {}, h('span', {}, k), h('b', {}, money(v))))) : h('small', {}, 'a month'),
+          later && laterSave > 0.5 ? h('small', {}, `From ${later.year}, mortgage paid off: about ${money(laterSave)} a month`) : null,
+          h('button', { type: 'button', class: 'linkish', onclick: () => navigate('finances/saving') }, 'Set your amounts')),
+        mp.pension > 0.5 ? h('div', { class: 'io-fig pen' }, h('span', {}, 'Into pensions'), h('strong', {}, money(mp.pension)), h('small', {}, 'a month through payroll, you and your employer')) : null),
       host,
       h('div', { class: 'legend', id: 'ovInOutLegend' }));
     const c = new Chart(host, { height: 260, label: 'Money coming in and going out by year', name: 'money-in-out' });
@@ -4133,37 +4143,6 @@
     explorerValues = null;
     renderPlan();
     refresh();
-  }
-
-  // Home: how much to put away each month, where it goes, and what could be better.
-  function renderMonthlyPlan() {
-    const m = model.monthly, rows = model.proj.rows, r0 = rows[0];
-    const parts = [
-      ['Lifetime ISAs', m.lisa, '--s7', 'with the 25% bonus'],
-      ['ISAs', m.isa, '--s2', 'tax-free, available any time'],
-      ['General investment account', m.gia, '--s3', 'once ISAs are full'],
-      ['Pensions', m.pension, '--s4', 'through payroll: you and your employer'],
-      ['Mortgage overpayments', m.overpay, '--s8', null],
-      ['Cash buffer', m.cash, '--s1', 'topping up your emergency cash'],
-    ].filter(x => x[1] > 0.5);
-    const total = parts.reduce((acc, x) => acc + x[1], 0);
-    // When the mortgage ends, what was going on payments is free to save.
-    const debtEnd = rows.findIndex((r, t) => t > 0 && r0.debt > 0.5 && r.debt <= 0.5);
-    const later = debtEnd > 0 && debtEnd < rows.length - 1 ? rows[debtEnd + 0] : null;
-    const laterInvest = later ? (later.toIsa + later.toGia + (later.toLisa || 0) + later.overpay + later.toCash) / 12 / later.deflator : 0;
-    setKids($('#ovMonthly'),
-      h('div', { class: 'card-head' },
-        h('div', {}, h('h2', {}, 'What to put away each month'), h('p', { class: 'sub' }, `This year, from what is left after spending and mortgage payments, plus pensions through payroll.`)),
-        h('button', { type: 'button', class: 'btn small', onclick: () => navigate('finances/saving') }, 'Set your amounts')),
-      m.shortfall > 0
-        ? h('p', { class: 'mp-short' }, `Spending is ${money(m.shortfall)} a month more than comes in this year, so savings pay the difference.`)
-        : h('div', { class: 'mp-grid' },
-          h('div', { class: 'mp-total' }, h('span', { class: 'hero-label' }, 'In all'), h('strong', { class: 'hero-value' }, `${money(total)}`), h('small', {}, 'a month'),
-            later && laterInvest > 0.5 ? h('p', { class: 'hint' }, `From ${later.year}, with the mortgage paid off: about ${money(laterInvest)} a month to save, in today’s money.`) : null),
-          h('ul', { class: 'mp-parts' }, parts.map(([label, v, color, note]) => h('li', {},
-            h('i', { class: 'key square', style: `--key:${cssVar(color)}` }),
-            h('span', {}, h('strong', {}, label), note ? h('small', {}, note) : null),
-            h('span', { class: 'mp-amt' }, `${money(v)}`))))));
   }
 
   // A row of cards you swipe or step through, one or a few at a time (scroll-snap, arrows, dots).

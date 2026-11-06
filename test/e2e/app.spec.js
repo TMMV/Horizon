@@ -881,11 +881,12 @@ test.describe('Horizon app', () => {
   });
 
   test('home: what to put away each month, and the guides', async ({ page }) => {
-    await expect(page.locator('#ovMonthly')).toContainText('What to put away each month');
-    await expect(page.locator('#ovMonthly .mp-parts')).toContainText('ISAs');
-    await expect(page.locator('#ovMonthly .mp-parts')).toContainText('Pensions');
+    // What is left to save, and where it goes, sits with money in and out.
+    await expect(page.locator('#ovInOut .io-fig.left .io-goes')).toContainText('ISAs');
+    await expect(page.locator('#ovInOut .io-fig.pen')).toContainText('Into pensions');
+    await expect(page.locator('#ovMonthly')).toHaveCount(0);
     // The example's mortgage ends after both retire, so there is no "from then" line.
-    await expect(page.locator('#ovMonthly')).not.toContainText('with the mortgage paid off');
+    await expect(page.locator('#ovInOut')).not.toContainText('mortgage paid off: about');
     // Guides not done yet are suggestions too; every guide is under "All guides".
     await expect(page.locator('#ovInsights [data-insight="guide-protection"]')).toContainText('Start');
     await expect(page.locator('#ovInsights [data-insight^="adv-pension"]')).toContainText('Pension for Alex');
