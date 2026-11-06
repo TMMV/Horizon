@@ -189,7 +189,8 @@
       checkins: [],
       dismissed: [],
       guides: {},
-      settings: { realDollars: true, runs: 1000, seed: 42, theme: 'light', confidence: 90, lastSaved: null, showTo: 85 },
+      // Actual pounds of each year by default (as in a spreadsheet: spending visibly rises with prices).
+      settings: { realDollars: false, runs: 1000, seed: 42, theme: 'light', confidence: 90, lastSaved: null, showTo: 85, inOutReal: false, inOutView: 'spend' },
     };
   }
 
@@ -314,6 +315,8 @@
         // Lifetime ISA: yearly payment (up to £4,000), and whether it is for retirement or a first home
         contribution: Math.min(R.LISA.maxContribution, Math.max(0, num(a.contribution, type === 'lisa' ? R.LISA.maxContribution : 0))),
         purpose: oneOf(a.purpose, ['retirement', 'home'], 'retirement'),
+        // An ISA's own amount a month (today's money); null = automatic.
+        monthly: type === 'isa' && a.monthly !== null && a.monthly !== undefined && a.monthly !== '' && Number.isFinite(+a.monthly) ? Math.max(0, +a.monthly) : null,
         homeYear: Math.round(num(a.homeYear, 0)),
         // A balance read since the plan's figures date (e.g. from a banking app). It shows on
         // the home page and feeds the next yearly review; the projection keeps the figures.
@@ -497,6 +500,8 @@
         lastSaved: isDate(st.lastSaved) ? st.lastSaved : null,   // when the plan was last saved to a file
         // Charts over time stop when the first person reaches this age (0 = the whole plan).
         showTo: st.showTo === 0 ? 0 : Math.min(120, Math.max(50, Math.round(num(st.showTo, ds.showTo)))),
+        inOutReal: !!st.inOutReal,   // Home "Money in and out": today's money (true) or actual pounds (false)
+        inOutView: oneOf(st.inOutView, ['spend', 'all'], 'spend'),   // Money in and out: spending, or where it all goes
       },
     };
   }
@@ -964,6 +969,10 @@
     const pension = people.map(() => 0);
     const lsaLeft = people.map(() => R.LUMP_SUM_ALLOWANCE);
     const bonds = [], props = [], debts = [], lisas = [];
+    // Your own amount for each ISA, totalled per person (null when the ISAs are automatic).
+    const isaSet = plan.accounts.some(x => x.type === 'isa' && !x.excluded && x.monthly !== null)
+      ? people.map((_, i) => plan.accounts.filter(x => x.type === 'isa' && !x.excluded && personIndex(plan, x.owner) === i).reduce((acc, x) => acc + (x.monthly || 0) * 12, 0))
+      : null;
     for (const x of plan.accounts) {
       if (x.excluded) continue;
       if (x.type === 'cash') cash += x.balance;
@@ -1126,6 +1135,7 @@
         left -= overpay;
         // Lifetime ISAs first: the 25% bonus beats everything else. They share the ISA allowance.
         let allowance = s.isaAllowance * g * n;
+        const lisaPaid = people.map(() => 0);
         for (const l of lisas) {
           const age = people[l.owner].age + t;
           if (!l.canOpen || age < 18 || age >= R.LISA.payUntil || t >= l.home || left <= 0) continue;
@@ -1135,8 +1145,11 @@
           lisaBonus += x * R.LISA.bonus;
           left -= x;
           allowance -= x;
+          lisaPaid[l.owner] += x;
         }
-        const capIsa = s.isaMonthly === null ? Infinity : Math.max(0, s.isaMonthly) * 12 * f;
+        // Each person's own ISA amounts, within what is left of their allowance after a Lifetime ISA.
+        const capIsa = isaSet ? isaSet.reduce((acc, v, i) => acc + Math.min(v * f, Math.max(0, s.isaAllowance * g - lisaPaid[i])), 0)
+          : s.isaMonthly === null ? Infinity : Math.max(0, s.isaMonthly) * 12 * f;
         const capGia = s.giaMonthly === null ? Infinity : Math.max(0, s.giaMonthly) * 12 * f;
         toIsa = Math.min(left, allowance, capIsa);
         isa += toIsa;

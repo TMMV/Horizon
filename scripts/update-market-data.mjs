@@ -52,7 +52,7 @@ async function main() {
       gilt10y: { label: '10-year gilt yield', value: Math.round(gilt.value * 100) / 100, date: gilt.date, source: 'https://www.bankofengland.co.uk/statistics/yield-curves' },
     },
     suggested: {
-      inflation: { value: inflation, why: `CPI is ${cpi.value}%; the Bank of England targets 2%. The suggestion assumes a third of today's gap persists on average.` },
+      inflation: { value: inflation, why: `CPI is ${cpi.value}% today. Over a long plan inflation has mostly averaged near the Bank of England's 2% target, so the suggestion is 2% plus a third of today's gap above it.` },
       cashRate: { value: cashRate, why: `Easy-access savings typically pay a little below Bank Rate (${bank.value}%).` },
       bondReturn: { value: bondReturn, why: `Starting yields are the best guide to long-run bond returns; 10-year gilts yield about ${round1(gilt.value)}%.` },
     },

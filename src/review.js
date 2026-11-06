@@ -70,6 +70,39 @@
     return p;
   }
 
+  // ISAs and Lifetime ISAs: the projection's totals split by following each account: it grows at
+  // the ISA return, receives its own amount a month (or an even share when automatic), and gives
+  // up its share of withdrawals. Lifetime ISAs share the Lifetime ISA total by balance.
+  function isaShares(plan, proj, f, row, out) {
+    const at = (key, t) => proj.rows[t][key] || 0;
+    const lisas = plan.accounts.filter(a => a.type === 'lisa' && !a.excluded);
+    const isas = plan.accounts.filter(a => a.type === 'isa' && !a.excluded);
+    const k = Math.min(proj.pre.N - 1, Math.floor(f)), x = f - k;
+    const lisaTotal = at('lisa', k) + (at('lisa', k + 1) - at('lisa', k)) * x;
+    const lb = lisas.reduce((s, a) => s + a.balance, 0);
+    for (const a of lisas) out[a.id] = Math.max(0, lisaTotal * (lb > 0 ? a.balance / lb : 1 / lisas.length));
+    if (!isas.length) return;
+    const set = isas.some(a => a.monthly !== null);
+    const weight = isas.map(a => (set ? (a.monthly || 0) : 1));
+    const wSum = weight.reduce((s, v) => s + v, 0);
+    let bal = isas.map(a => a.balance);
+    const path = [bal.slice()];
+    for (let t = 0; t <= k && t < proj.rows.length - 1; t++) {
+      const r = proj.rows[t];
+      const base = Math.max(1, r.isa - (r.lisa || 0));
+      const rate = (r.gIsa - (r.lisa || 0) * (r.gIsa / Math.max(1, r.isa))) / base;
+      const paidIn = r.toIsa + r.sweepIsa + r.bondsToIsa;
+      const total = bal.reduce((s, v) => s + v, 0);
+      bal = bal.map((v, i) => Math.max(0, v * (1 + rate) + paidIn * (wSum > 0 ? weight[i] / wSum : 1 / isas.length) - r.wIsa * (total > 0 ? v / total : 1 / isas.length)));
+      path.push(bal.slice());
+    }
+    const lo = path[Math.min(k, path.length - 1)], hi = path[Math.min(k + 1, path.length - 1)];
+    const mix = lo.map((v, i) => v + (hi[i] - v) * x);
+    const mixSum = mix.reduce((s, v) => s + v, 0);
+    const isaTotal = Math.max(0, row.isa - lisaTotal);
+    isas.forEach((a, i) => { out[a.id] = mixSum > 0 ? isaTotal * (mix[i] / mixSum) : isaTotal / isas.length; });
+  }
+
   // What the plan expects each account to hold `years` (may be a fraction) after its figures
   // date, on average returns. Each account takes its share of its type's projected total;
   // between two years the values are interpolated.
@@ -82,7 +115,9 @@
     const out = {};
     // Lifetime ISAs are part of the ISA total in a projection.
     const typeOf = a => (a.type === 'lisa' ? 'isa' : a.type);
+    isaShares(plan, proj, f, row, out);
     for (const type of TYPES) {
+      if (type === 'isa') continue;
       const counted = plan.accounts.filter(a => typeOf(a) === type && !a.excluded);
       const total = counted.reduce((s, a) => s + a.balance, 0);
       for (const a of counted) {

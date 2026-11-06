@@ -1110,7 +1110,8 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 .money-nav .chip[aria-current="page"] { background: var(--text); color: var(--surface); border-color: var(--text); font-weight: 600; }
 .money-nav .chip .count { opacity: 0.65; font-size: 0.78rem; }
 .io { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-.io-preview { position: sticky; top: 60px; max-height: calc(100vh - 72px); overflow-y: auto; padding-right: 2px; }
+/* follows the page down; no inner scroll, so nothing ends up hidden at the bottom */
+.io-preview { position: sticky; top: 60px; align-self: start; padding-right: 2px; }
 .io-preview .card { padding: 14px 16px; }
 .io-impact { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
 .io-impact .card-head { margin-bottom: 6px; }
@@ -1349,9 +1350,8 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 .pf-side .delta { margin-top: 4px; }
 .pf-body .pf-list { border-top: none; }
 @media (max-width: 900px) { .pf-body { grid-template-columns: 1fr; } .pf-side { position: static; justify-items: stretch; } }
-.goal-strip { display: flex; flex-wrap: wrap; }
-.goal-strip > .goal-tile { flex: 1 1 250px; }
-.goal-strip > .goal-tile.add { flex: 0 0 110px; min-height: 0; }
+/* goals on an even grid: a goal on its own in a row keeps the same width */
+.goal-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 .io-sum { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .io-goes { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 1px; font-size: 0.78rem; color: var(--text-2); }
 .io-goes li { display: flex; justify-content: space-between; gap: 8px; }
@@ -1391,6 +1391,55 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 }
 
 .pf-toggle { white-space: nowrap; }
+
+.isa-each { grid-column: 1 / -1; }
+.isa-each > select { max-width: 260px; }
+.isa-rows { display: grid; gap: 8px; margin-top: 4px; }
+.isa-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 200px); gap: 12px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.isa-row > span { display: grid; }
+.isa-row small { color: var(--muted); font-size: 0.76rem; }
+
+.market-same { display: flex; align-items: center; gap: 6px; color: var(--good-text); }
+.market-same .glyph { width: 14px; height: 14px; }
+
+/* portfolio: two columns; groups fold open */
+.pf-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 28px; }
+.pf-visual { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 20px; align-items: center; width: 100%; }
+.pf-visual .pf-mix { position: static; }
+.pf-donut { width: 100%; }
+.pf-row.access { cursor: pointer; border-bottom: 1px solid var(--grid); padding: 12px 6px 12px 0; }
+.pf-row.access:hover { background: var(--hover); }
+.pf-row.access .pf-name { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+.pf-class-btn { border: none; background: none; padding: 2px 4px; cursor: pointer; color: var(--muted); font: inherit; }
+.pf-class-btn .chev { display: inline-block; transition: transform 0.15s; }
+.pf-row.access.open .pf-class-btn .chev { transform: rotate(90deg); }
+@media (max-width: 1150px) { .pf-body > .pf-list { grid-column: auto; grid-row: auto; } }
+@media (max-width: 1000px) { .pf-body { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .pf-visual { grid-template-columns: 1fr; } }
+/* goals carousel: four at a time on a wide screen */
+.goal-strip { display: block; }
+.carousel.goals .car-track { grid-auto-columns: calc((100% - 36px) / 4); padding: 4px 2px 10px; }
+.carousel.goals .goal-tile { height: 100%; }
+@media (max-width: 1100px) { .carousel.goals .car-track { grid-auto-columns: calc((100% - 24px) / 3); } }
+@media (max-width: 860px) { .carousel.goals .car-track { grid-auto-columns: calc((100% - 12px) / 2); } }
+@media (max-width: 640px) { .carousel.goals .car-track { grid-auto-columns: 86%; } }
+/* money in and out: suggested split */
+.io-split { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; padding: 12px 14px; border-radius: 12px; background: var(--accent-soft); margin-bottom: 12px; }
+.io-split-head { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.io-split-head small { color: var(--text-2); }
+.io-split ol { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.io-split li { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--surface); }
+.io-split li > span { display: grid; }
+.io-split li small { color: var(--muted); font-size: 0.74rem; }
+.io-split li strong { font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .io-split { grid-template-columns: 1fr; } }
+/* market card */
+.mk-table { margin: 6px 0 10px; }
+.mk-table td, .mk-table th { vertical-align: top; }
+.mk-why { color: var(--text-2); font-size: 0.82rem; white-space: normal; }
+
+/* grid columns never grow past the screen because of a wide table inside */
+.money-page.io > * { min-width: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }

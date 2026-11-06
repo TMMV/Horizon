@@ -372,8 +372,9 @@
     { key: 'debt', label: 'Mortgage & loans', color: '--s8' },
   ];
 
-  // Types whose accounts are shown on Home (collapsed by default).
+  // Types whose accounts are shown on Home, and groups (available now, locked…) opened; all folded at first.
   const pfOpen = new Set();
+  const pfClassOpen = new Set();
 
   function renderPortfolio() {
     const p = plan();
@@ -396,9 +397,11 @@
     const totalOwed = owed ? classTotal(owed) : 0;
     const ring = portfolioDonut(classes.filter(c => c.key !== 'owed').map(c => c.groups.map(g => ({ key: g.key, label: g.label, color: g.color, value: typeTotal(g.key), group: c.label }))),
       totalAssets, key => {
-        const g = PF_GROUPS.find(x => x.key === key);
-        if (!g || !p.accounts.filter(a => a.type === key).length || p.accounts.filter(a => a.type === key).length === 1) return;
-        if (pfOpen.has(key)) pfOpen.delete(key); else pfOpen.add(key);
+        const c = classes.find(x => x.types.includes(key));
+        const many = p.accounts.filter(a => a.type === key).length > 1;
+        const shown = c && pfClassOpen.has(c.key) && (!many || pfOpen.has(key));
+        if (shown) { if (many) pfOpen.delete(key); else pfClassOpen.delete(c.key); }
+        else { if (c) pfClassOpen.add(c.key); if (many) pfOpen.add(key); }
         renderPortfolio();
       });
     // Accounts under their type, and types under when the money can be used.
@@ -450,13 +453,16 @@
       classes.map(c => {
         const owed = c.key === 'owed';
         const now = classTotal(c), was = c.groups.reduce((x, g) => x + typeWas(g.key), 0);
+        const open = pfClassOpen.has(c.key);
+        const toggle = () => { if (open) pfClassOpen.delete(c.key); else pfClassOpen.add(c.key); renderPortfolio(); };
         return [
-          h('div', { class: `pf-row access ${c.key}`, role: 'row', 'data-access': c.key },
-            h('span', { class: 'pf-name', role: 'cell' }, h('span', { class: 'pf-two' }, h('strong', {}, c.label), h('small', {}, c.note))),
+          h('div', { class: `pf-row access ${c.key}${open ? ' open' : ''}`, role: 'row', 'data-access': c.key, 'data-types': c.groups.map(g => g.key).join(' '), onclick: toggle },
+            h('span', { class: 'pf-name', role: 'cell' }, h('button', { type: 'button', class: 'pf-class-btn', 'aria-expanded': String(open), 'aria-label': `${open ? 'Hide' : 'Show'} ${c.label}`, onclick: e => { e.stopPropagation(); toggle(); } },
+              h('span', { class: 'chev', 'aria-hidden': 'true' }, '▸')), h('span', { class: 'pf-two' }, h('strong', {}, c.label), h('small', {}, c.note))),
             h('span', { class: 'pf-was', role: 'cell' }, signed(was, owed)),
             h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(now, owed)),
               !owed && totalAssets > 0 ? h('small', { class: 'muted' }, `${Math.round((now / totalAssets) * 100)}% of what you own`) : null)),
-          c.groups.map(typeRows),
+          open ? c.groups.map(typeRows) : null,
         ];
       }));
     const readings = Object.keys(est.reading).length;
@@ -485,14 +491,13 @@
             : h('div', { class: `delta ${delta >= 0 ? 'pos' : 'neg'}` }, glyph(delta >= 0 ? 'trend' : 'trend-down'), `${delta >= 0 ? '+' : '−'}${money(Math.abs(delta))} since your last update (${fmtDate(lastUpdate)})`),
           readings && Math.abs(vsPlan) >= 1 ? h('div', { class: `delta vs-plan ${vsPlan >= 0 ? 'pos' : 'neg'}`, id: 'pfVsPlan' }, glyph(vsPlan >= 0 ? 'good' : 'warn'),
             `${money(Math.abs(vsPlan))} ${vsPlan >= 0 ? 'ahead of' : 'behind'} the plan on the ${readings} balance${readings === 1 ? '' : 's'} you updated`) : null),
-        // How the net worth is made up, so the numbers add up.
-        h('dl', { class: 'pf-sum', id: 'pfSum' },
+        // How the net worth is made up, so the numbers add up, beside the donut.
+        h('div', { class: 'pf-visual' }, h('div', { class: 'pf-mix' }, ring), h('dl', { class: 'pf-sum', id: 'pfSum' },
           h('div', {}, h('dt', {}, 'What you own'), h('dd', {}, money(totalAssets))),
           avail ? h('div', { class: 'sub-line' }, h('dt', {}, 'of which available now'), h('dd', {}, money(classTotal(avail)))) : null,
           h('div', {}, h('dt', {}, 'What you owe'), h('dd', {}, `−${money(totalOwed)}`)),
-          h('div', { class: 'total' }, h('dt', {}, 'Net worth'), h('dd', {}, money(totalAssets - totalOwed)))),
+          h('div', { class: 'total' }, h('dt', {}, 'Net worth'), h('dd', {}, money(totalAssets - totalOwed))))),
         readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null),
-      h('div', { class: 'pf-mix' }, ring),
       list),
     ].filter(Boolean));
   }
@@ -526,6 +531,7 @@
     const show = x => {
       for (const a of arcs) { a.el.classList.toggle('on', a.x === x); a.el.classList.toggle('dim', !!x && a.x !== x); }
       for (const row of $$('#homePortfolio .pf-row[data-type]')) row.classList.toggle('hl', !!x && row.dataset.type === x.key);
+      for (const row of $$('#homePortfolio .pf-row[data-types]')) row.classList.toggle('hl', !!x && row.dataset.types.split(' ').includes(x.key) && !row.classList.contains('open'));
       if (x) { label.textContent = x.label; value.textContent = money(x.value); note.textContent = `${Math.round((x.value / Math.max(1, total)) * 100)}% of what you own · ${x.group.toLowerCase()}`; }
       else { label.textContent = 'What you own'; value.textContent = fmtCompact(total); note.textContent = `${items.length} kinds of account`; }
     };
@@ -553,6 +559,12 @@
         const x = items.find(i => i.key === row.dataset.type);
         if (!x) continue;
         row.addEventListener('pointerenter', () => show(x));
+        row.addEventListener('pointerleave', () => show(null));
+      }
+      // A folded group: hovering it lights up all its slices.
+      for (const row of $$('#homePortfolio .pf-row[data-types]')) {
+        const keys = row.dataset.types.split(' ');
+        row.addEventListener('pointerenter', () => { for (const a of arcs) { a.el.classList.toggle('on', keys.includes(a.x.key)); a.el.classList.toggle('dim', !keys.includes(a.x.key)); } });
         row.addEventListener('pointerleave', () => show(null));
       }
     });
@@ -759,7 +771,7 @@
   function renderGoalStrip() {
     const box = $('#ovGoalStrip');
     if (!model.goals.length) { setKids(box, goalEmpty()); return; }
-    setKids(box, ...model.goals.map(res => {
+    setKids(box, carousel(model.goals.map(res => {
       const g = res.goal;
       const st = goalStatus(res.probability);
       const prog = goalProgress(res);
@@ -779,7 +791,7 @@
             h('span', {}, `${fmtCompact(prog.cur)} of ${fmtCompact(prog.target)}${prog.perYear ? ' a year' : ''} today`)) : null)),
       (() => { const a = goalActions(res).find(x => x.main); return a ? h('p', { class: 'gt-action' }, h('span', {}, 'This year'), h('strong', {}, `${a.label} ${a.value}`)) : null; })(),
       driverLine(g.id));
-    }), h('button', { type: 'button', class: 'goal-tile add', id: 'ovAddGoal', onclick: () => openGoalWizard() }, h('span', { class: 'plus' }, '+'), h('span', {}, 'Add a goal')));
+    }), 'Goals', 'goals'));
   }
 
   // ---- what moves your goals: each typical change simulated against every goal
@@ -1590,7 +1602,7 @@
     const travel = p.expenses.find(e => e.key === 'life:travel');
     gw.retire = {
       ages: people().map(x => x.retireAge),
-      mode: s.retireSpending === 0 ? 'list' : preset || 'custom',
+      mode: s.retireSpending === 0 ? 'list' : s.retireSpending === withMargin(p, p1.retireAge) ? 'margin' : preset || 'custom',
       custom: s.retireSpending || std.moderate,
       travelExtra: travel ? travel.amount : 0,
       travelYears: travel ? Math.max(1, travel.endAge - p1.retireAge) : 10,
@@ -1602,8 +1614,18 @@
     if (gw.goal) gw.goal.age = E.retiree(p, gw.goal).retireAge;
   }
 
-  function retireSpendingOf(r) {
-    return r.mode === 'list' ? 0 : r.mode === 'custom' ? r.custom : plsa()[r.mode];
+  // The spending list as it stands when the first person retires (today's money), and the same
+  // with a margin on top: room for the unexpected, and for spending more while you are able.
+  const RETIRE_MARGIN = 50;
+  function listAtRetire(p, age) {
+    const p1 = p.household.people[0];
+    const tr = Math.max(0, Math.min(E.horizon(p), age - p1.age));
+    return p.expenses.filter(e => !(e.key || '').startsWith('life:')).reduce((acc, e) => acc + E.streamAt(e, p, tr), 0) / Math.pow(1 + p.assumptions.inflation / 100, tr);
+  }
+  const withMargin = (p, age) => Math.round((listAtRetire(p, age) * (1 + RETIRE_MARGIN / 100)) / 100) * 100;
+
+  function retireSpendingOf(r, p = plan()) {
+    return r.mode === 'list' ? 0 : r.mode === 'custom' ? r.custom : r.mode === 'margin' ? withMargin(p, r.ages[0]) : plsa()[r.mode];
   }
 
   function applyRetire(p) {
@@ -1615,7 +1637,7 @@
       x.retireAge = r.ages[i];
       x.statePension = r.statePension[i];
     });
-    p.strategy.retireSpending = retireSpendingOf(r);
+    p.strategy.retireSpending = retireSpendingOf(r, p);
     p.strategy.slowDownAge = r.slowDownAge > 0 ? r.slowDownAge : 0;
     p.strategy.slowDownPct = r.slowDownAge > 0 ? r.slowDownPct : 100;
     p.expenses = p.expenses.filter(e => e.key !== 'life:travel');
@@ -1661,8 +1683,7 @@
     const moneyIn = (get, set, label) => moneyInputPlain(get, v => { set(v); changed(); }, label);
 
     // Spending options: the list as it stands at retirement, PLSA standards, or your own.
-    const tr = Math.max(0, Math.min(model.proj.pre.N, r.ages[0] - p1.age));
-    const listAtRetire = p.expenses.filter(e => !(e.key || '').startsWith('life:')).reduce((acc, e) => acc + E.streamAt(e, p, tr), 0) / Math.pow(1 + p.assumptions.inflation / 100, tr);
+    const listThen = listAtRetire(p, r.ages[0]);
     const std = plsa();
     const option = (mode, title, amount, text) => h('button', {
       type: 'button', class: 'spend-option', 'aria-pressed': String(r.mode === mode),
@@ -1685,13 +1706,14 @@
           h('p', { class: 'hint' }, `Pensions can be drawn from ${people().map(x => `${x.pensionAccessAge}`).filter((v, i, a) => a.indexOf(v) === i).join(' / ')}; State Pension from ${people().map(x => `${x.name} ${x.statePensionAge}`).join(', ')}. Retiring before then means living on ISAs and savings.`)),
         sec(2, 'What would you like to spend each year?',
           h('div', { class: 'spend-options' },
-            option('list', 'Keep my spending list', listAtRetire, 'What you spend now, minus items that stop before then (like childcare).'),
+            option('list', 'Keep my spending list', listThen, 'What you spend now, minus items that stop before then (like childcare).'),
+            option('margin', `My list + ${RETIRE_MARGIN}%`, withMargin(p, r.ages[0]), 'Your list then, with room on top for the unexpected and for doing more while you can.'),
             option('minimum', 'Minimum', std.minimum, PLSA_TEXT.minimum),
             option('moderate', 'Moderate', std.moderate, PLSA_TEXT.moderate),
             option('comfortable', 'Comfortable', std.comfortable, PLSA_TEXT.comfortable),
             option('custom', 'My own amount', null, 'Type a figure, or use “What could we spend?” on the right.')),
           customBox,
-          h('p', { class: 'hint' }, `Minimum, moderate and comfortable are the PLSA Retirement Living Standards 2025 for a ${people().length > 1 ? 'couple' : 'single person'}: after tax, in today’s money, with no mortgage or rent. ${debtFree ? (debtFree <= retireYear ? `Your mortgage is paid off in ${debtFree}, before you retire.` : `Your mortgage runs to ${debtFree}, after you retire: its payments come on top.`) : ''}`)),
+          h('p', { class: 'hint' }, `Every amount rises with prices each year, so it buys the same as it would today. Minimum, moderate and comfortable are the PLSA Retirement Living Standards 2025 for a ${people().length > 1 ? 'couple' : 'single person'}: after tax, in today’s money, with no mortgage or rent. ${debtFree ? (debtFree <= retireYear ? `Your mortgage is paid off in ${debtFree}, before you retire.` : `Your mortgage runs to ${debtFree}, after you retire: its payments come on top.`) : ''}`)),
         sec(3, 'The active early years',
           h('div', { class: 'fields' },
             h('label', { class: 'field' }, h('span', {}, 'Extra for travel & hobbies (a year)'), moneyIn(() => r.travelExtra, v => { r.travelExtra = v; }, 'Extra travel a year')),
@@ -1726,7 +1748,7 @@
       const st = goalStatus(mc.successRate);
       const tr = Math.max(0, Math.min(proj.pre.N, p1.retireAge - p1.age));
       const lastAge = p1.age + proj.pre.N;
-      const spend = retireSpendingOf(r);
+      const spend = retireSpendingOf(r, p);
       const conf = gw.goal.confidence / 100;
       const chartBox = h('div', { class: 'rq-chart' });
       const answers = h('div', { class: 'rq-answers' });
@@ -3054,20 +3076,52 @@
     });
   }
 
+  // Where every pound goes, year by year (expected path, nominal): tax, spending, the mortgage and
+  // each kind of saving. Take-home pay is grossed up to estimate the tax and NI already taken from it,
+  // so the stack adds up to what comes in before tax; above that line, savings pay the difference.
+  function flowSeries() {
+    const p = plan(), pre = model.proj.pre;
+    return model.proj.rows.slice(0, -1).map((r, t) => {
+      const g = r.thresholdFactor || 1;
+      const payTax = p.household.ignoreTax ? 0 : pre.people.reduce((acc, P) => acc + (P.netPay[t] > 0 ? Math.max(0, R.grossFromTakeHome(P.netPay[t] / g, p.household.region) * g - P.netPay[t]) : 0), 0);
+      const employee = Math.max(0, r.saved - (r.extraPension || 0) - r.toCash - r.toIsa - r.toGia - (r.toLisa || 0));
+      return {
+        year: r.year, t,
+        inn: r.earnings + r.otherIncome + r.statePension + payTax + (r.pensionIn - employee),
+        tax: r.taxes + payTax, payTax, spending: r.spending, mortgage: r.debtRegular + r.lumpOverpay, overpay: r.overpay,
+        pension: r.pensionIn, lisa: r.toLisa || 0, isa: r.toIsa, gia: r.toGia, cash: r.toCash, fromSavings: r.withdrawals,
+      };
+    });
+  }
+
   function renderInOut() {
     const box = $('#ovInOut');
     if (!box) return;
     const s = inOutSeries();
     const now = s[0];
     const xs = s.map(x => x.year);
+    // Actual pounds of each year unless you choose today's money (costs then rise with prices, as in a spreadsheet).
+    const todays = !!ws.settings.inOutReal;
+    const D = (val, t) => (todays ? val / model.proj.pre.deflator[t] : val);
     const v = f => s.map(x => D(f(x), x.t));
-    const areas = [
+    const all = ws.settings.inOutView === 'all';
+    const fl = all ? flowSeries() : null;
+    const fv = f => fl.map(x => D(f(x), x.t));
+    const areas = all ? [
+      { label: 'Tax & NI', color: '--s7', values: fv(x => x.tax) },
+      { label: 'Spending', color: '--s5', values: fv(x => x.spending) },
+      { label: 'Mortgage', color: '--s8', values: fv(x => x.mortgage + x.overpay) },
+      { label: 'Pensions', color: '--s4', values: fv(x => x.pension) },
+      { label: 'ISAs', color: '--s2', values: fv(x => x.isa + x.lisa) },
+      { label: 'General account', color: '--s3', values: fv(x => x.gia) },
+      { label: 'Cash savings', color: '--s1', values: fv(x => x.cash) },
+    ].filter(a => a.values.some(y => y > 0.5)) : [
       { label: 'Everyday spending', color: '--s5', values: v(x => x.everyday) },
       { label: 'Future costs', color: '--s7', values: v(x => x.future) },
       { label: 'One-off costs', color: '--s3', values: v(x => x.oneOff) },
       { label: 'Mortgage', color: '--s8', values: v(x => x.mortgage) },
     ].filter(a => a.values.some(y => y > 0.5));
-    const inn = v(x => x.inn);
+    const inn = all ? fv(x => x.inn) : v(x => x.inn);
     const p = plan();
     const markers = p.events.filter(e => e.kind === 'expense' && e.year >= xs[0] && e.year <= xs[xs.length - 1]).map(e => ({ x: e.year, label: e.name, color: '--s3' }));
     const debtEnd = s.find((x, i) => i > 0 && s[0].mortgage > 0.5 && x.mortgage <= 0.5);
@@ -3084,7 +3138,17 @@
     const host = h('div', { class: 'chart', id: 'ovInOutChart' });
     setKids(box,
       h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Money in and out'),
-        h('p', { class: 'sub' }, `This month, and over the years on average, in ${unitLabel()}: what comes in after tax and pension contributions (the line) against what goes out (the stack). Above the stack is what is left to save; below it, savings pay the difference.`))),
+        h('p', { class: 'sub' }, all
+          ? `Where every pound goes, year by year on average: everything that comes in before tax, pension contributions included (the line), split into tax, spending, the mortgage and what is saved where (the stack). Saving rises once the mortgage is paid off; where the stack is above the line, savings pay the difference. ${fl.some(x => x.payTax > 0.5) ? 'Tax on take-home pay is estimated from the take-home figure. ' : ''}`
+          : `This month, and over the years on average: what comes in after tax and pension contributions (the line) against what goes out (the stack). Above the stack is what is left to save; below it, savings pay the difference. `,
+          todays ? h('strong', {}, `In today’s money: costs that only keep up with prices (${plan().assumptions.inflation}% a year) stay level.`)
+            : h('strong', {}, `In the actual pounds of each year: spending rises with prices (${plan().assumptions.inflation}% a year), as in a spreadsheet.`))),
+        h('div', { class: 'controls' }, h('div', { class: 'seg mini', role: 'group', 'aria-label': 'Show' },
+          [['spend', 'Spending'], ['all', 'Where it all goes']].map(([val, label]) => h('button', { type: 'button', 'aria-pressed': String((all ? 'all' : 'spend') === val), 'data-view': val,
+            onclick: () => { ws.settings.inOutView = val; save(); renderInOut(); } }, label))),
+          h('div', { class: 'seg mini', role: 'group', 'aria-label': 'Show amounts in' },
+          [[false, 'Actual £ each year'], [true, 'Today’s money']].map(([val, label]) => h('button', { type: 'button', 'aria-pressed': String(todays === val), 'data-io': val ? 'today' : 'actual',
+            onclick: () => { ws.settings.inOutReal = val; save(); renderInOut(); } }, label))))),
       h('div', { class: 'io-sum' },
         h('div', { class: 'io-fig in' }, h('span', {}, 'Coming in'), h('strong', {}, m(now.inn)), h('small', {}, 'a month, after tax')),
         h('div', { class: 'io-fig out' }, h('span', {}, 'Going out'), h('strong', {}, m(out0)), h('small', {}, [now.mortgage > 0.5 ? `incl. ${m(now.mortgage)} mortgage` : null, now.oneOff > 0.5 ? `${m(now.oneOff)} one-offs` : null].filter(Boolean).join(', ') || 'spending')),
@@ -3093,27 +3157,106 @@
           later && laterSave > 0.5 ? h('small', {}, `From ${later.year}, mortgage paid off: about ${money(laterSave)} a month`) : null,
           h('button', { type: 'button', class: 'linkish', onclick: () => navigate('finances/saving') }, 'Set your amounts')),
         mp.pension > 0.5 ? h('div', { class: 'io-fig pen' }, h('span', {}, 'Into pensions'), h('strong', {}, money(mp.pension)), h('small', {}, 'a month through payroll, you and your employer')) : null),
+      suggestedSplitCard(),
       host,
       h('div', { class: 'legend', id: 'ovInOutLegend' }));
     const c = new Chart(host, { height: 260, label: 'Money coming in and going out by year', name: 'money-in-out' });
     c.set({
       xs, areas, markers,
-      lines: [{ label: 'Coming in', color: '--text', values: inn }],
-      tooltip: i => ({
+      lines: [{ label: all ? 'Coming in before tax' : 'Coming in', color: '--text', values: inn }],
+      tooltip: all ? i => {
+        const x = fl[i];
+        const saved = x.pension + x.lisa + x.isa + x.gia + x.cash + x.overpay;
+        return {
+          title: titleAt(i),
+          rows: [
+            { label: 'Coming in before tax', color: '--text', shape: 'line', text: `${money(inn[i] / 12)} a month`, strong: true },
+            ...areas.filter(a => a.values[i] > 0.5).map(a => ({ label: a.label, color: a.color, text: `${money(a.values[i] / 12)} a month` })),
+            saved > 0.5 ? { label: 'Saved in all', text: `${money(D(saved, x.t) / 12)} a month (${Math.round((saved / Math.max(1, x.inn)) * 100)}% of what comes in)` } : null,
+            x.fromSavings > 0.5 ? { label: 'From savings', text: `${money(D(x.fromSavings, x.t) / 12)} a month` } : null,
+          ].filter(Boolean),
+        };
+      } : i => ({
         title: titleAt(i),
         rows: [
           { label: 'Coming in', color: '--text', shape: 'line', text: `${money(inn[i] / 12)} a month`, strong: true },
           ...areas.filter(a => a.values[i] > 0.5).map(a => ({ label: a.label, color: a.color, text: `${money(a.values[i] / 12)} a month` })),
           { label: s[i].left >= 0 ? 'Left to save' : 'From savings', text: `${money(Math.abs(D(s[i].left, s[i].t)) / 12)} a month` },
-        ],
+          todays && i > 0 ? { label: `Going out in ${xs[i]} pounds`, text: `${money((s[i].everyday + s[i].future + s[i].oneOff + s[i].mortgage) / 12)} a month` } : null,
+        ].filter(Boolean),
       }),
-      table: () => ({
+      table: all ? () => ({
+        headers: ['Year', 'Coming in before tax', 'Tax & NI', 'Spending', 'Mortgage', 'Overpaying', 'Pensions', 'Lifetime ISAs', 'ISAs', 'General account', 'Cash', 'From savings'],
+        rows: fl.map(x => [x.year, ...[x.inn, x.tax, x.spending, x.mortgage, x.overpay, x.pension, x.lisa, x.isa, x.gia, x.cash, x.fromSavings].map(val => D(val, x.t))]),
+        formats: [String, ...Array(11).fill(money)],
+      }) : () => ({
         headers: ['Year', 'Coming in', 'Everyday spending', 'Future costs', 'One-off costs', 'Mortgage', 'Left (− from savings)'],
         rows: s.map(x => [x.year, D(x.inn, x.t), D(x.everyday, x.t), D(x.future, x.t), D(x.oneOff, x.t), D(x.mortgage, x.t), D(x.left, x.t)]),
         formats: [String, money, money, money, money, money, money],
       }),
     });
-    legend($('#ovInOutLegend'), [{ label: 'Coming in', color: '--text', shape: 'line' }, ...areas.map(a => ({ label: a.label, color: a.color }))], c);
+    legend($('#ovInOutLegend'), [{ label: all ? 'Coming in before tax' : 'Coming in', color: '--text', shape: 'line' }, ...areas.map(a => ({ label: a.label, color: a.color }))], c);
+  }
+
+  // A suggested way to split what is left each month, in the usual UK order for this household:
+  // an emergency fund first, then pension where it gets higher-rate relief, Lifetime ISAs, ISAs.
+  function suggestedSplit() {
+    const p = plan(), st = p.strategy, r0 = model.proj.rows[0];
+    let left = inOutSeries()[0].left / 12;
+    if (left <= 1) return null;
+    const all = left;
+    const out = [];
+    // Amounts under £25 a month are left for the ISAs rather than listed.
+    const take = (key, label, want, note, extra) => { const x = Math.max(0, Math.min(left, want)); if (x >= 25) { out.push({ key, label, amount: x, note, ...extra }); left -= x; } };
+    const monthlyOut = (r0.spending + r0.debtRegular) / 12;
+    if (st.cashReserve < 3 * monthlyOut) take('cash', 'Emergency fund', (3 * monthlyOut - st.cashReserve) / 12, `until cash covers 3 months (${money(3 * monthlyOut)})`);
+    const region = p.household.region;
+    for (const x of people()) {
+      if (p.household.ignoreTax || x.retireAge <= x.age) continue;
+      const pay = p.income.filter(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 0) > 0);
+      const gross = pay.reduce((acc, i) => acc + (i.tax === 'uk' ? E.incomeAfterCosts(i, p, 0) : i.tax === 'none' ? R.grossFromTakeHome(E.incomeAfterCosts(i, p, 0), region) : 0), 0);
+      const rate = v => (R.incomeTax(v + 100, region) - R.incomeTax(v, region)) / 100;
+      if (!gross || rate(gross) < 0.4) continue;
+      let lo = 0, hi = gross;
+      for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (rate(mid) >= 0.4) hi = mid; else lo = mid; }
+      const over = Math.max(0, gross - hi) / 12;           // gross pay a month taxed at the higher rate
+      const cost = over * (1 - rate(gross));                 // what putting it in costs from take-home pay
+      // At most half of what is left, so some stays within reach before pensions can be drawn.
+      const pen = Math.min(cost, all / 2);
+      take(`pension-${x.id}`, `Pension for ${x.name}`, pen, `from take-home pay; with ${Math.round(rate(gross) * 100)}% relief about ${money(pen / (1 - rate(gross)))} goes in${pen < cost - 1 ? `. Up to ${money(cost)} would get that relief` : ''}`, { person: x.id });
+    }
+    for (const x of people()) {
+      const has = p.accounts.some(a => a.type === 'lisa' && a.owner === x.id && !a.excluded);
+      if (x.age >= 18 && (x.age < R.LISA.openBefore || has) && x.age < R.LISA.payUntil) take(`lisa-${x.id}`, `Lifetime ISA for ${x.name}`, R.LISA.maxContribution / 12, `+25% bonus, from 60`, { person: x.id });
+    }
+    take('isa', 'ISAs', left, 'tax-free, available any time');
+    return out;
+  }
+
+  function suggestedSplitCard() {
+    const parts = suggestedSplit();
+    if (!parts || !parts.length) return null;
+    const tryIt = () => {
+      const q = E.clonePlan(plan());
+      for (const x of parts) {
+        if (x.key.startsWith('pension-')) q.household.people.find(y => y.id === x.person).extraPension = Math.round(x.amount);
+        if (x.key.startsWith('lisa-') && !q.accounts.some(a => a.type === 'lisa' && a.owner === x.person)) {
+          const who = q.household.people.find(y => y.id === x.person);
+          q.accounts.push({ id: E.uid(), name: `${who.name} Lifetime ISA`, type: 'lisa', owner: who.id, balance: 0, contribution: R.LISA.maxContribution, purpose: 'retirement' });
+        }
+      }
+      const name = `${scenario().name}: suggested split`;
+      ws.scenarios = ws.scenarios.filter(sc => sc.name !== name);
+      ws.scenarios.push({ id: E.uid(), name, plan: E.normalizePlan(q) });
+      save();
+      renderScenarioPicker();
+      navigate('scenarios');
+      toast(`Added “${name}”: compare it with your plan on every goal.`);
+    };
+    return h('div', { class: 'io-split', id: 'ioSplit' },
+      h('div', { class: 'io-split-head' }, h('strong', {}, 'Suggested split of what is left'), h('small', {}, 'The usual UK order for your household. Rules of thumb, not advice.')),
+      h('ol', {}, parts.map(x => h('li', {}, h('span', {}, h('b', {}, x.label), h('small', {}, x.note)), h('strong', {}, `${money(x.amount)}`)))),
+      h('button', { type: 'button', class: 'btn small', onclick: tryIt }, 'Try it as a scenario'));
   }
 
   // ---- Finances: each item as a plain line; edit one at a time
@@ -3187,7 +3330,7 @@
         lisas.map(a => h('div', { class: 'field' }, h('span', {}, `${a.name} (Lifetime ISA)`),
           moneyInput(() => Math.round(a.contribution / 12), v => { a.contribution = Math.min(R.LISA.maxContribution, Math.max(0, v * 12)); }, { label: `${a.name} a month` }),
           h('span', { class: 'hint' }, `Up to ${money(R.LISA.maxContribution / 12)} a month (${money(R.LISA.maxContribution)} a year) gets the 25% bonus, until 50.`))),
-        autoOrSet('isaMonthly', 'ISAs', `Automatic: everything left, up to ${money(s.isaAllowance)} each a year.`),
+        isaAmounts(p),
         autoOrSet('giaMonthly', 'General investment account', 'Automatic: whatever is left once the ISAs are full.'),
         people().map(x => field(`Extra into ${x.name}’s pension`, moneyInput(...bind(x, 'extraPension'), { label: `Extra pension for ${x.name} a month` }),
           'From take-home pay until retirement; 20% tax relief is added, and higher-rate relief is claimed back. Salary sacrifice (on the salary in Income) saves NI too.'))),
@@ -3197,6 +3340,31 @@
         renderSection('accounts'); renderSection('saving'); schedule();
       } }, `+ Lifetime ISA for ${x.name}`))) : null,
     ];
+  }
+
+  // ISAs: automatic, or your own amount a month for each ISA (within each person's allowance).
+  function isaAmounts(p) {
+    const s = p.strategy;
+    const isas = p.accounts.filter(a => a.type === 'isa' && !a.excluded);
+    const set = isas.some(a => a.monthly !== null);
+    const lisaOf = owner => p.accounts.filter(a => a.type === 'lisa' && a.owner === owner && !a.excluded).reduce((acc, a) => acc + a.contribution, 0);
+    const toggle = h('select', { 'aria-label': 'ISAs: automatic or an amount for each', onchange: e => {
+      const each = e.target.value === 'set';
+      const n = Math.max(1, isas.length);
+      for (const a of isas) a.monthly = each ? Math.round((model.monthly.isa || 0) / n) : null;
+      s.isaMonthly = null;
+      renderSection('saving'); schedule();
+    } }, h('option', { value: 'auto', selected: !set }, 'Automatic'), h('option', { value: 'set', selected: set }, 'An amount for each ISA'));
+    if (!isas.length) return h('div', { class: 'field' }, h('span', {}, 'ISAs'), h('span', { class: 'hint' }, 'No ISA accounts yet: add one under Portfolio. Until then the plan still saves into an ISA for you.'), h('span', { class: 'hint flow', 'data-flow': 'isaMonthly' }));
+    return h('div', { class: 'field wide isa-each' }, h('span', {}, 'ISAs'),
+      toggle,
+      set ? h('div', { class: 'isa-rows' }, isas.map(a => {
+        const room = Math.max(0, s.isaAllowance - lisaOf(a.owner)) / 12;
+        return h('div', { class: 'isa-row' },
+          h('span', {}, h('strong', {}, a.name), h('small', {}, `${ownerName(p, a.owner)} · up to ${money(room)} a month${lisaOf(a.owner) ? ' after the Lifetime ISA' : ''}`)),
+          moneyInput(() => a.monthly || 0, v => { a.monthly = Math.max(0, v); }, { label: `${a.name} a month` }));
+      })) : h('span', { class: 'hint' }, `Automatic: everything left, up to ${money(s.isaAllowance)} each a year, shared between the ISAs.`),
+      h('span', { class: 'hint flow', 'data-flow': 'isaMonthly' }));
   }
 
   // What the plan does this year with each amount (beside the inputs).
@@ -3849,6 +4017,22 @@
     ];
   }
 
+  // What "Use suggested values" would change; if nothing would, it says so instead.
+  function marketSuggest() {
+    const a = plan().assumptions, sg = MARKET.suggested;
+    const diff = [['inflation', 'Inflation'], ['cashRate', 'Cash interest'], ['bondReturn', 'Bond returns']]
+      .filter(([k]) => a[k] !== sg[k].value).map(([k, label]) => ({ k, label, from: a[k], to: sg[k].value }));
+    if (!diff.length) return h('p', { class: 'hint market-same' }, glyph('good'), ' Your plan already uses these values.');
+    return h('div', { class: 'add-row' },
+      h('span', { class: 'hint' }, diff.map(d => `${d.label} ${d.from}% → ${d.to}%`).join(' · ')),
+      h('button', { type: 'button', class: 'btn small', onclick: () => {
+        const A = plan().assumptions;
+        for (const d of diff) A[d.k] = d.to;
+        renderSection('market'); refresh();
+        toast(`Updated: ${diff.map(d => `${d.label.toLowerCase()} ${d.to}%`).join(', ')}.`);
+      } }, 'Use suggested values'));
+  }
+
   function renderMarket() {
     const a = plan().assumptions;
     const out = [sectionHead('market', 'Markets & inflation', 'Long-run averages. The main ones are below; the rest are under “More options”.')];
@@ -3857,17 +4041,22 @@
       out.push(h('div', { class: 'market-card' },
         h('h3', {}, `Latest UK data (as of ${MARKET.asOf})`),
         h('ul', {}, Object.values(MARKET.series).map(sr => h('li', {}, h('span', {}, sr.label, ' ', h('a', { href: sr.source, target: '_blank', rel: 'noopener noreferrer' }, 'source')), h('strong', {}, `${sr.value}% (${sr.date})`)))),
-        h('p', { class: 'sub' }, `Suggested planning assumptions: inflation ${sg.inflation.value}%, cash ${sg.cashRate.value}%, bonds ${sg.bondReturn.value}%. ${sg.inflation.why}`),
-        h('div', { class: 'add-row' }, h('button', { type: 'button', class: 'btn small', onclick: () => {
-          a.inflation = sg.inflation.value; a.cashRate = sg.cashRate.value; a.bondReturn = sg.bondReturn.value;
-          renderSection('market'); refresh();
-        } }, 'Use suggested values'))));
+        h('p', { class: 'sub' }, 'Today’s figures move a lot from year to year; a plan over decades needs long-run averages instead:'),
+        h('div', { class: 'table-wrap' }, h('table', { class: 'data mk-table' },
+          h('thead', {}, h('tr', {}, ['', 'Today', 'For your plan', 'Why'].map(t => h('th', { scope: 'col' }, t)))),
+          h('tbody', {}, [
+            ['Inflation', MARKET.series.cpi, sg.inflation.value, `The Bank of England aims for 2%. Over decades inflation has mostly averaged near the target, so the plan uses 2% plus a third of today’s gap above it.`],
+            ['Cash interest', MARKET.series.bankRate, sg.cashRate.value, 'Easy-access savings usually pay a little below Bank Rate.'],
+            ['Bond returns', MARKET.series.gilt10y || Object.values(MARKET.series)[2], sg.bondReturn.value, 'Today’s gilt yield is the best guide to what bonds return over the long run.'],
+          ].map(([label, now, plan, why]) => h('tr', {}, h('th', { scope: 'row' }, label), h('td', {}, now ? `${now.value}%` : '—'), h('td', {}, h('strong', {}, `${plan}%`)), h('td', { class: 'mk-why' }, why)))))),
+        h('div', { id: 'mkSuggest' }, marketSuggest())));
     }
     out.push(h('div', { class: 'fields' },
       field('Inflation', numInput(...bind(a, 'inflation'), { step: 0.1, suffix: '%/yr' })),
       field('Stock returns', numInput(...bind(a, 'stockReturn'), { step: 0.1, suffix: '%/yr' }), 'Average, before inflation.'),
-      field('Stocks now', numInput(...bind(a, 'stockPctNow'), { min: 0, max: 100, step: 5, suffix: '%' })),
-      field('Stocks at retirement', numInput(...bind(a, 'stockPctRetire'), { min: 0, max: 100, step: 5, suffix: '%' }), 'Moves gradually between the two.'),
+      field('In shares now', numInput(...bind(a, 'stockPctNow'), { min: 0, max: 100, step: 5, suffix: '%', label: 'Share of investments in shares now' }), 'Of your ISAs, general account and pensions; the rest is in bonds. A global tracker fund is 100% shares.'),
+      field('In shares by retirement', numInput(...bind(a, 'stockPctRetire'), { min: 0, max: 100, step: 5, suffix: '%', label: 'Share of investments in shares by retirement' }),
+        `The plan moves from one to the other a little each year until you retire. Fewer shares later means a crash near retirement hurts less, but growth is lower: on average about ${(a.stockPctNow / 100 * a.stockReturn + (1 - a.stockPctNow / 100) * a.bondReturn).toFixed(1)}% a year now and ${(a.stockPctRetire / 100 * a.stockReturn + (1 - a.stockPctRetire / 100) * a.bondReturn).toFixed(1)}% by retirement, before fees.`),
       field('Cash interest', numInput(...bind(a, 'cashRate'), { step: 0.1, suffix: '%/yr' })),
       field('Fund & platform fees', numInput(...bind(a, 'fees'), { step: 0.01, min: 0, max: 3, suffix: '%/yr' }), 'Taken off ISA, GIA and pension growth, e.g. a global tracker’s charge plus the platform’s fee.')));
     out.push(more('market-returns', 'Use your own return for investments or pensions',
@@ -4183,7 +4372,7 @@
   }
 
   // A row of cards you swipe or step through, one or a few at a time (scroll-snap, arrows, dots).
-  function carousel(slides, label) {
+  function carousel(slides, label, kind) {
     const n = slides.length;
     const track = h('div', { class: 'car-track', tabindex: '0', 'aria-label': label }, slides.map((s, i) => h('div', { class: 'car-slide', role: 'group', 'aria-roledescription': 'slide', 'aria-label': `${i + 1} of ${n}` }, s)));
     const goTo = i => { const el = track.children[Math.max(0, Math.min(n - 1, i))]; if (el) track.scrollTo({ left: el.offsetLeft - track.offsetLeft, behavior: 'smooth' }); };
@@ -4207,8 +4396,12 @@
     track.addEventListener('keydown', e => { if (e.key === 'ArrowRight') { e.preventDefault(); goTo(at() + 1); } if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(at() - 1); } });
     requestAnimationFrame(update);
     new ResizeObserver(update).observe(track);
-    return h('div', { class: 'carousel', role: 'region', 'aria-roledescription': 'carousel', 'aria-label': label },
-      track, n > 1 ? h('div', { class: 'car-nav' }, prev, dots, next) : null);
+    const nav = n > 1 ? h('div', { class: 'car-nav' }, prev, dots, next) : null;
+    // No arrows when everything already fits.
+    const fit = () => { if (nav) nav.hidden = track.scrollWidth <= track.clientWidth + 4; };
+    requestAnimationFrame(fit);
+    new ResizeObserver(fit).observe(track);
+    return h('div', { class: `carousel${kind ? ` ${kind}` : ''}`, role: 'region', 'aria-roledescription': 'carousel', 'aria-label': label }, track, nav);
   }
 
   // Everything worth doing next, as one row of cards: plan checks, saving ideas and guides not done.
@@ -4228,8 +4421,10 @@
       out.push({ id, tone: 'tip', icon: 'pension', eyebrow: 'Saving idea', title: `${a.title.replace(/^\d+\.\s*/, '')}: ${a.amount}`, text: a.text, action: a.action, rank: 1 });
     }
     const g = ws.guides;
+    // A guide a plan check already points to (e.g. Future costs) is not suggested twice.
+    const pointed = new Set(B.insights(plan(), model.proj).filter(i => !hidden.has(i.id) && i.tone !== 'good').map(i => i.action).filter(Boolean));
     const guideSlide = (id, icon, title, text, open, show) => {
-      if (!show || hidden.has(`guide-${id}`)) return;
+      if (!show || hidden.has(`guide-${id}`) || pointed.has(id)) return;
       out.push({ id: `guide-${id}`, tone: 'guide', icon, eyebrow: 'Guide · a few minutes', title, text, action: ['Start', open], rank: 2 });
     };
     const due = RV.due(ws);
@@ -4803,6 +4998,7 @@
     updateAccountFigures();
     updateSavingFigures();
     updateSummaries();
+    if (MARKET && $('#mkSuggest')) setKids($('#mkSuggest'), marketSuggest());
     renderSavedNote();
     renderNotifications();
     renderScenarioPicker();
@@ -4923,6 +5119,7 @@
 
     $('#lwNext').addEventListener('click', lifeNext);
     $('#gdNext').addEventListener('click', guideNext);
+    $('#ovAddGoal').addEventListener('click', () => openGoalWizard());
     $('#gdBack').addEventListener('click', () => { if (guide && guide.step > 0) { guide.step--; renderGuide(); } });
     $('#gdClose').addEventListener('click', () => $('#guideDlg').close());
     $('#lwBack').addEventListener('click', () => { if (lw.step > 0) { lw.step--; renderLifeWizard(); } });

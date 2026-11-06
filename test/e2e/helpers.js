@@ -60,4 +60,10 @@ async function editAll(page, section) {
   for (let i = 0; i < 40 && await rows.count(); i++) { await rows.first().click(); await page.waitForTimeout(20); }
 }
 
-module.exports = { APP_URL, openApp, tab, go, openGoal, asTable, settle, editAll };
+// Home portfolio: groups (available now, locked away…) start folded; open them all.
+async function openGroups(page) {
+  const rows = page.locator('#homePortfolio .pf-row.access:not(.open)');
+  for (let i = 0; i < 8 && await rows.count(); i++) { await rows.first().click(); await page.waitForTimeout(30); }
+}
+
+module.exports = { APP_URL, openApp, tab, go, openGoal, asTable, settle, editAll, openGroups };

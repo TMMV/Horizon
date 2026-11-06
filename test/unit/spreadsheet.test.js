@@ -59,7 +59,7 @@ test('the bundled example plan file imports cleanly', () => {
 
 test('a full workspace survives export and import unchanged', () => {
   const ws = E.normalizeWorkspace(E.defaultWorkspace());
-  ws.settings = { realDollars: false, runs: 2000, seed: 7, theme: 'dark', confidence: 85, lastSaved: '2026-11-01', showTo: 0 };
+  ws.settings = { realDollars: false, runs: 2000, seed: 7, theme: 'dark', confidence: 85, lastSaved: '2026-11-01', showTo: 0, inOutReal: true, inOutView: 'all' };
   ws.scenarios[0].plan.household.ignoreTax = true;
   ws.scenarios[0].plan.assumptions.investReturn = 9.5;
   ws.scenarios[0].plan.accounts[0].excluded = true;

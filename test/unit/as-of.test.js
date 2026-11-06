@@ -168,3 +168,25 @@ test('charts over years stop at the chosen year; tables keep every year', () => 
   assert.equal(ws.settings.showTo, 85);
   assert.equal(E.normalizeWorkspace({ ...ws, settings: { ...ws.settings, showTo: 0 } }).settings.showTo, 0);
 });
+
+test('each ISA can have its own monthly amount, within each person’s allowance', () => {
+  const RV2 = require('../../src/review');
+  const p = E.clonePlan(E.defaultPlan(2026));
+  const [alex, sam] = p.accounts.filter(a => a.type === 'isa');
+  alex.monthly = 500; sam.monthly = 100;
+  const q = E.normalizePlan(p);
+  const r0 = E.project(q).rows[0];
+  assert.ok(Math.abs(r0.toIsa - 7200) < 1, 'paid in: 12 × (500 + 100)');
+  // Each estimate follows its own money: Alex's ISA pulls ahead of a split by balance.
+  const est = RV2.expectedBalances(q, 1);
+  const a = est.byId[q.accounts.find(x => x.name === alex.name).id], b = est.byId[q.accounts.find(x => x.name === sam.name).id];
+  assert.ok(a - alex.balance > (b - sam.balance) * 2);
+  assert.ok(Math.abs(a + b - est.row.isa) < 1, 'the ISAs add up to the projection');
+  // Over the allowance: capped at £20,000 a year for that person.
+  const big = E.clonePlan(q);
+  big.accounts.filter(x => x.type === 'isa')[0].monthly = 3000;
+  const r1 = E.project(E.normalizePlan(big)).rows[0];
+  assert.ok(r1.toIsa <= 20000 + 1200 + 1, String(r1.toIsa));
+  // Automatic again when no ISA has an amount.
+  assert.equal(E.normalizePlan({ ...q, accounts: q.accounts.map(x => ({ ...x, monthly: null })) }).accounts.find(x => x.type === 'isa').monthly, null);
+});
