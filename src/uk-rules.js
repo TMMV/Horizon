@@ -90,14 +90,19 @@
   // before Normal Pension Age (factors from 1 October 2024, uss.co.uk "Factors used by USS").
   const USS_EARLY = [100, 94.8, 90, 85.5, 81.4, 77.5, 74, 70.6, 67.5, 64.6, 61.8, 59.3, 56.8, 54.5, 52.4, 50.3, 48.4];
 
+  // Public service career average schemes (NHS, teachers, local government, civil service) cut a
+  // pension taken before Normal Pension Age by actuarial factors: roughly 5% for each year early,
+  // compounding (% kept, 0–16 years early). Each scheme's own table differs a little by age.
+  const PUBLIC_EARLY = [100, 95.2, 90.6, 86.3, 82.2, 78.2, 74.5, 70.9, 67.5, 64.3, 61.2, 58.3, 55.5, 52.8, 50.3, 47.9, 45.6];
   const DB_SCHEMES = {
     // USS Normal Pension Age follows State Pension age (66 in 2026; uss.co.uk glossary).
     uss: { label: 'USS (universities)', accrual: 75, lump: 3, age: 'spa', early: USS_EARLY },
-    saul: { label: 'SAUL (university staff)', accrual: 75, lump: 3, age: 65 },
-    lgps: { label: 'Local Government (LGPS Scotland)', accrual: 49, lump: 0, age: 'spa' },
-    teachers: { label: 'Scottish Teachers (STPS)', accrual: 57, lump: 0, age: 'spa' },
-    nhs: { label: 'NHS Scotland (2015 scheme)', accrual: 54, lump: 0, age: 'spa' },
-    other: { label: 'Other', accrual: 60, lump: 0, age: 'spa' },
+    saul: { label: 'SAUL (university staff)', accrual: 75, lump: 3, age: 65, early: PUBLIC_EARLY },
+    lgps: { label: 'Local Government (LGPS)', accrual: 49, lump: 0, age: 'spa', early: PUBLIC_EARLY },
+    teachers: { label: 'Teachers (2015 scheme)', accrual: 57, lump: 0, age: 'spa', early: PUBLIC_EARLY },
+    nhs: { label: 'NHS (2015 scheme)', accrual: 54, lump: 0, age: 'spa', early: PUBLIC_EARLY },
+    civil: { label: 'Civil Service (alpha)', accrual: 43, lump: 0, age: 'spa', early: PUBLIC_EARLY },
+    other: { label: 'Other', accrual: 60, lump: 0, age: 'spa', early: PUBLIC_EARLY },
   };
 
   // State Pension age under current legislation (approximate around transition dates).

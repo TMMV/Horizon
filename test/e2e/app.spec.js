@@ -845,6 +845,7 @@ test.describe('Horizon app', () => {
     await go(page, 'finances/income');
     await page.click('#sec-income button:has-text("+ Defined benefit pension")');
     const db = page.locator('#sec-income .item').last();
+    await db.locator('select[aria-label="Scheme"]').selectOption('uss');
     await db.locator('summary:has-text("Estimate it")').click();
     await db.locator('input[aria-label="Year joined"]').fill('2016');
     await db.locator('input[aria-label="Salary for the estimate"]').fill('45000');
@@ -1046,6 +1047,7 @@ test.describe('Horizon app', () => {
     const card = page.locator('#sec-income .item').first();
     await expect(card.locator('.pay-prog')).toContainText('Pay progression');
     await card.locator('input[aria-label="Pay rises until age"]').fill('45');
+    await card.locator('input[aria-label="Pay rises until age"]').blur();
     await settle(page);
     await card.locator('input[aria-label="Pay rise after that age"]').fill('2.5');
     await page.locator('#sec-income .item').first().locator('button:has-text("Add a promotion")').click();
@@ -1620,7 +1622,7 @@ test.describe('getting started', () => {
     await ed().locator('select[aria-label="Ends"]').selectOption('year');
     await ed().locator('input[aria-label="Year it stops"]').fill('2030');
     await ed().locator('.edit-done button').click();
-    await expect(page.locator('#sec-expenses .sum-row', { hasText: 'Rent' })).toContainText('until 2030');
+    await expect(page.locator('#sec-expenses .sum-row', { hasText: 'Rent' })).toContainText('last paid in 2029');
     // Your own situation: a gift from family for the deposit, with a note, in the year of the purchase.
     await panel.locator('.st-jump').selectOption({ label: '11. Your own situation' });
     await expect(panel.locator('.st-group[open]')).not.toHaveCount(0);
@@ -1653,6 +1655,7 @@ test.describe('closer to retirement', () => {
     await card.locator('details.more > summary', { hasText: 'More options' }).click();
     const defer = card.locator('input[aria-label="Years to put off the State Pension"]');
     await defer.fill('2');
+    await defer.blur();
     await expect(card.locator('label.field:has-text("Put off the State Pension")')).toContainText('more');
     const p0 = await plan();
     expect(p0.household.people[0].spDefer).toBe(2);
@@ -1672,6 +1675,51 @@ test.describe('closer to retirement', () => {
     expect(a).toMatchObject({ cost: 100000, amount: 6500, tax: 'uk', inflationLinked: false });
     const bought = await page.evaluate(() => window.__horizon.model.proj.rows.reduce((s, r) => s + (r.annuityBought || 0), 0));
     expect(bought).toBeGreaterThan(100000);
+    expect(problems).toEqual([]);
+  });
+});
+
+test.describe('fixes from the pretend-user tests', () => {
+  test('typing a year keeps the cursor; a defined benefit scheme takes the pay’s contributions; copies get their own names', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/spending');
+    const plan = () => page.evaluate(() => window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan);
+    // A year typed digit by digit (the section used to redraw after the first one).
+    await page.locator('#sec-expenses .sum-row').first().click();
+    await page.locator('#sec-expenses [data-editing] select[aria-label="Ends"]').selectOption('year');
+    const year = page.locator('#sec-expenses [data-editing] input[aria-label="Year it stops"]');
+    await year.click();
+    await year.press('Control+a');
+    await page.keyboard.type('2035', { delay: 30 });
+    await expect(year).toHaveValue('2035');
+    await expect(page.locator('#sec-expenses [data-editing] .timing-year small')).toHaveText('Not paid in 2035: 2034 is the last year.');
+    expect((await plan()).expenses[0].toYear).toBe(2035);
+    // A defined benefit pension for someone whose pay has pot contributions: one click stops the double count.
+    await go(page, 'finances/income');
+    await page.locator('#sec-income .add-row button', { hasText: '+ Defined benefit pension' }).click();
+    const db = page.locator('#sec-income [data-editing]').last();
+    await expect(db.locator('.db-pay')).toContainText('counted twice');
+    await db.locator('.db-pay button').click();
+    expect((await plan()).income.filter(i => i.kind === 'salary' && i.owner === 'p1').every(i => i.pensionTo === 'db')).toBe(true);
+    await expect(page.locator('#sec-income [data-editing] .db-pay')).toHaveCount(0);
+    // Copies of a scenario get their own names.
+    await go(page, 'scenarios');
+    await page.click('#dupScenario');
+    await page.click('#dupScenario');
+    const names = await page.evaluate(() => window.__horizon.ws.scenarios.map(s => s.name));
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.some(n => / \(copy 2\)$/.test(n))).toBe(true);
+    expect(problems).toEqual([]);
+  });
+
+  test('Home: set aside never shows more than the account holds', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan;
+      const bank = p.accounts.find(a => a.type === 'cash');
+      p.reserves = [{ id: 'ef', kind: 'emergency', name: 'Emergency fund', accountId: bank.id, amount: bank.balance + 5000 }];
+      window.__horizon.refresh();
+    });
+    await expect(page.locator('#pfReserves .pf-res-head')).toContainText('still to put aside');
     expect(problems).toEqual([]);
   });
 });

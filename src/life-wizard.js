@@ -11,17 +11,22 @@
 
   function defaults(plan) {
     const p1 = plan.household.people[0];
+    // Typical amounts scale with what the household earns (full at £70,000 a year and up, half at £35,000).
+    const income = plan.income.filter(i => i.kind === 'salary' || i.kind === 'self').reduce((acc, i) => acc + E.incomeAfterCosts(i, plan, 0), 0);
+    const k = Math.min(1, Math.max(0.5, income / 70000));
+    const r = (v, step) => Math.round((v * k) / step) * step;
+    const scot = plan.household.region === 'scotland';
     return {
       children: [],                 // [{ name, age }]
-      schoolCost: 1500,             // per child per year until 18: uniforms, trips, clubs
-      uniPerYear: 6000,             // support while at university (Scottish students pay no tuition in Scotland)
-      uniYears: 4,
+      schoolCost: r(1500, 100),     // per child per year until 18: uniforms, trips, clubs
+      uniPerYear: r(6000, 500),     // help with living costs at university (tuition: free in Scotland, a loan elsewhere)
+      uniYears: scot ? 4 : 3,
       carAt17: 3000,                // driving lessons and a first car
       weddingHelp: 0,
       depositHelp: 0,
       helpAge: 30,                  // age of the child for wedding / deposit help
-      cars: 1, carEvery: 8, carCost: 20000, carNext: plan.startYear + 3,
-      homeEvery: 10, homeCost: 15000, homeNext: plan.startYear + 5,
+      cars: 1, carEvery: 8, carCost: r(20000, 1000), carNext: plan.startYear + 3,
+      homeEvery: 10, homeCost: r(15000, 1000), homeNext: plan.startYear + 5,
       travelExtra: 0, travelYears: 10,
       slowDownAge: 0, slowDownPct: 80,
       careAge: 0, careYears: 3, careCost: 40000,

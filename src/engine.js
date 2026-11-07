@@ -34,7 +34,7 @@
     'wCash', 'wGia', 'wIsa', 'wPension', 'toIsa', 'toGia', 'toCash', 'overpay', 'pensionIn',
     'cgt', 'gCash', 'gIsa', 'gGia', 'gPension', 'gBonds', 'gProperty',
     'debtInterest', 'debtRegular', 'lumpOverpay', 'bondsMatured', 'bondsToIsa', 'propSold', 'extraPension', 'flatTax',
-    'sweepIsa', 'sweepGia', 'nonWork', 'homeBuy', 'studentLoan', 'annuityBought',
+    'sweepIsa', 'sweepGia', 'nonWork', 'homeBuy', 'studentLoan', 'annuityBought', 'propBought', 'debtNew', 'debtForgiven', 'withdrawTax', 'hiDebtPay',
     'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension', 'sacrificed',
   ];
 
@@ -311,6 +311,9 @@
   }
 
   const RESERVE_KINDS = ['emergency', 'saving', 'budget'];
+  const HIGH_RATE = 0.08;   // debts at this rate or more are paid off before saving
+  const NOISE_SLOTS = 8;    // independent year-to-year swings available to incomes that vary
+  const noiseSlot = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % NOISE_SLOTS; };
   const RESERVE_ACCOUNTS = ['cash', 'isa', 'gia', 'bonds'];
 
   function normalizePlan(p) {
@@ -361,6 +364,8 @@
           mortRate: Math.max(0, num(a.mortRate, 4.5)),
           mortYears: Math.min(40, Math.max(1, Math.round(num(a.mortYears, 30)))),
         } : {}),
+        // A loan written off in a year (e.g. family forgiving the rest when a home is bought).
+        forgiveYear: type === 'debt' ? Math.round(num(a.forgiveYear, 0)) : 0,
         note: note(a.note),
         // A balance read since the plan's figures date (e.g. from a banking app). It shows on
         // the home page and feeds the next yearly review; the projection keeps the figures.
@@ -402,6 +407,10 @@
       employeePension: Math.max(0, num(i.employeePension)),
       employerPension: Math.max(0, num(i.employerPension)),
       sacrifice: !!i.sacrifice,
+      // Workplace pension contributions build a pot ('pot') or pay for a defined benefit scheme ('db').
+      pensionTo: oneOf(i.pensionTo, ['pot', 'db'], 'pot'),
+      // How much it can swing from year to year (± %, typical), e.g. self-employed profit.
+      vary: Math.min(60, Math.max(0, num(i.vary))),
       note: note(i.note),
     }));
 
@@ -425,6 +434,8 @@
       kind: oneOf(e.kind, ['expense', 'income', 'overpay'], 'expense'),
       year: Math.round(num(e.year, startYear + 1)),
       amount: Math.max(0, num(e.amount)),
+      // A lump sum off a particular loan ('' = the dearest first).
+      debtId: e.kind === 'overpay' ? str(e.debtId, '') : '',
       note: note(e.note),
     }));
 
@@ -602,6 +613,13 @@
     for (const a of p.accounts.filter(x => x.type === 'lisa' && x.purpose === 'home' && lisaHomeYear(p, x))) {
       const home = p.accounts.find(x => x.type === 'property' && x.buyYear === lisaHomeYear(p, a));
       if (home && home.balance * Math.pow(1 + home.rate / 100, home.buyYear - p.startYear) > R.LISA.homePriceCap) out.push(`“${a.name}”: ${home.name} will cost more than £${R.LISA.homePriceCap.toLocaleString('en-GB')}, the most a Lifetime ISA can be used for without losing 25%.`);
+    }
+    // Pay with workplace contributions into a pot, for someone in a defined benefit scheme and with no pot.
+    for (const person of p.household.people) {
+      const db = p.income.some(i => i.kind === 'dbpension' && i.owner === person.id);
+      const pot = p.accounts.some(a => a.type === 'pension' && a.owner === person.id);
+      const pay = p.income.filter(i => i.kind === 'salary' && i.owner === person.id && i.pensionTo !== 'db' && (i.employeePension > 0 || i.employerPension > 0));
+      if (db && !pot && pay.length) out.push(`${person.name}: the workplace pension on “${pay[0].name}” builds a pension pot, and there is also a defined benefit pension. If the contributions go into that scheme, set “Pays into” on the pay to the defined benefit scheme, or they count twice.`);
     }
     for (const x of p.income.filter(i => i.kind === 'annuity')) {
       const owner = p.household.people[personIndex(p, x.owner)];
@@ -798,7 +816,9 @@
     if (!isActive(item, plan, t)) return 0;
     const g = econ ? growthFactor(item, plan, t, econ) : expectedGrowth(item, plan, t);
     const price = econ ? econ.price[t] : Math.pow(1 + plan.assumptions.inflation / 100, t);
-    const gross = annual(item) * g * item.fx;
+    // An income that varies: a good or bad year in a simulation (the expected path uses the average).
+    const swing = econ && econ.noise && item.vary > 0 ? Math.max(0, 1 + item.vary / 100 * econ.noise[t * NOISE_SLOTS + noiseSlot(item.id)]) : 1;
+    const gross = annual(item) * g * item.fx * swing;
     return Math.max(0, gross * (1 - item.costPct / 100) - item.fixedCosts * price);
   }
 
@@ -894,6 +914,10 @@
     const e = newEcon(N);
     for (let t = 0; t <= N; t++) e.stockW[t] = stockWeight(plan, t);
     for (let t = 0; t < N; t++) e.mean[t] = (e.stockW[t] * a.stockReturn + (1 - e.stockW[t]) * a.bondReturn) / 100;
+    // Incomes that swing from year to year (e.g. self-employed profit) get their own draws, only when
+    // there are any, so other plans keep the same simulated futures.
+    const varies = plan.income.some(i => i.vary > 0);
+    if (varies) e.noise = new Float64Array(N * NOISE_SLOTS);
     return function draw() {
       let pi = mu;
       e.price[0] = 1; e.surprise[0] = 1; e.wage[0] = 1;
@@ -910,6 +934,7 @@
         e.wage[t + 1] = sdW > 0 ? e.wage[t] * Math.max(0.5, 1 + sdW * normal()) : 1;
         e.house[t] = dev + (sdH > 0 ? sdH * normal() : 0);
         e.rateShift[t] = link * dev;
+        if (varies) for (let k = 0; k < NOISE_SLOTS; k++) e.noise[t * NOISE_SLOTS + k] = normal();
       }
       return e;
     };
@@ -932,6 +957,7 @@
       ages: people.map(() => []),
       taxFree: zeros(), flatTax: zeros(), expenses: zeros(), eventsIn: zeros(), eventsOut: zeros(), eventsOverpay: zeros(),
       annuityBuy: people.map(() => zeros()),   // pension pot spent on annuities in year t, per person
+      overpayTo: [],                            // lump sums off a particular loan: [t] = { debtId: amount }
       keepCash: zeros(),   // money set aside in cash on top of the buffer (today's money), e.g. repairs building up
       people: people.map(() => ({
         gross: zeros(),        // gross salary paid in cash (before employee contributions)
@@ -1007,7 +1033,8 @@
         }
         if (item.kind === 'salary' && P) {
           const [ee, er] = pensionContrib(item, v, plan, t, econ);
-          P.contrib[t] += ee + er;
+          // Paid into a defined benefit scheme: it comes off pay but builds that pension, not a pot.
+          if (item.pensionTo !== 'db') P.contrib[t] += ee + er;
           P.ee[t] += ee;
           if (tax === 'uk') {
             P.gross[t] += v;
@@ -1114,6 +1141,7 @@
         if (e.year !== plan.startYear + t) continue;
         const v = e.amount * price;
         if (e.kind === 'income') pre.eventsIn[t] += v;
+        else if (e.kind === 'overpay' && e.debtId) (pre.overpayTo[t] = pre.overpayTo[t] || {})[e.debtId] = ((pre.overpayTo[t] || {})[e.debtId] || 0) + v;
         else if (e.kind === 'overpay') pre.eventsOverpay[t] += v;
         else pre.eventsOut[t] += v;
       }
@@ -1254,6 +1282,7 @@
           varFrom: x.fixedUntil ? x.fixedUntil - plan.startYear + 1 : Infinity,
           after: x.rateAfterFix === null ? x.rate / 100 : x.rateAfterFix / 100,
           keepTerm: x.afterFix === 'term',
+          forgive: x.forgiveYear ? x.forgiveYear - plan.startYear : Infinity,
         });
       }
     }
@@ -1314,13 +1343,15 @@
           b.bal = 0;
         }
       }
-      let gProperty = 0, propSold = 0, homeBuy = 0;
+      let gProperty = 0, propSold = 0, homeBuy = 0, propBought = 0, debtNew = 0;
       for (const p of props) {
         if (!p.owned && t === p.buy) {
           // Bought at the start of the year, at that year's price.
           p.owned = true;
           const loan = p.mort ? p.val * (1 - p.deposit) : 0;
           homeBuy += p.val - loan;
+          propBought += p.val;
+          debtNew += loan;
           if (p.mort) {
             // Yearly payments that clear it over its term (the plan adds interest once a year).
             const i = p.mort.rate, m = p.years;
@@ -1355,8 +1386,9 @@
         extraOut += P.extraOut[t];
       }
 
-      // 3. Debts: interest, regular payments, then any lump-sum overpayment
-      let debtRegular = 0, debtInterest = 0, lumpOverpay = 0;
+      // 3. Debts: anything written off, interest, regular payments, then any lump-sum overpayment
+      let debtRegular = 0, debtInterest = 0, lumpOverpay = 0, debtForgiven = 0;
+      for (const d of debts) if (t === d.forgive && d.bal > 0) { debtForgiven += d.bal; d.bal = 0; }
       const debtStart = debts.map(d => d.bal);
       debts.forEach((d, k) => {
         const rate = t >= d.varFrom ? Math.max(0, d.after + dr) : d.rate;
@@ -1375,6 +1407,14 @@
         debtInterest += interest;
       });
       let lump = pre.eventsOverpay[t];
+      // Lump sums meant for a particular loan go to it; anything over goes to the dearest.
+      for (const [id, v] of Object.entries(pre.overpayTo[t] || {})) {
+        const d = debts.find(x => x.id === id);
+        const x = d ? Math.min(v, d.bal) : 0;
+        if (d) d.bal -= x;
+        lumpOverpay += x;
+        lump += v - x;
+      }
       for (const d of debts) {
         if (lump <= 0) break;
         const x = Math.min(lump, d.bal);
@@ -1404,8 +1444,18 @@
       const drawn = people.map(() => 0), taxFreeTaken = people.map(() => 0);
       let gains = 0;
 
+      let hiDebtPay = 0;
       if (net >= 0) {
         let left = net;
+        // Expensive debt (credit cards, loans at 8% or more) is cleared first: nothing saved or
+        // invested earns that much for sure.
+        for (const d of debts) {
+          if (left <= 0 || d.bal <= 0 || d.rate < HIGH_RATE) continue;
+          const x = Math.min(left, d.bal);
+          d.bal -= x;
+          left -= x;
+          hiDebtPay += x;
+        }
         toCash = Math.max(0, Math.min(left, cashTarget - cash));
         cash += toCash;
         left -= toCash;
@@ -1596,12 +1646,17 @@
         out.wCash[t] = wCash; out.wGia[t] = wGia; out.wIsa[t] = wIsa; out.wPension[t] = wPension;
         out.spending[t] = pre.expenses[t] + pre.eventsOut[t] + homeBuy;
         out.homeBuy[t] = homeBuy;
-        out.annuityBought[t] = annuityBought + annuityShort;
+        out.annuityBought[t] = annuityBought;
         out.studentLoan[t] = pre.people.reduce((acc, P) => acc + P.loanPaid[t], 0);
         out.taxes[t] = baseTax + extraTax + lisaCharge;
         out.flatTax[t] = pre.flatTax[t];
         out.cgt[t] = cgt;
-        out.debtPay[t] = debtRegular + lumpOverpay + overpay;
+        out.debtPay[t] = debtRegular + lumpOverpay + overpay + hiDebtPay;
+        out.hiDebtPay[t] = hiDebtPay;
+        out.propBought[t] = propBought;
+        out.debtNew[t] = debtNew;
+        out.debtForgiven[t] = debtForgiven;
+        out.withdrawTax[t] = extraTax;
         out.debtRegular[t] = debtRegular;
         out.debtInterest[t] = debtInterest;
         out.lumpOverpay[t] = lumpOverpay;
@@ -1666,11 +1721,12 @@
     const r = proj.rows[0];
     return {
       isa: r.toIsa / 12, gia: r.toGia / 12, overpay: (r.overpay + r.lumpOverpay) / 12, cash: r.toCash / 12,
+      hiDebt: (r.hiDebtPay || 0) / 12,
       lisa: (r.toLisa || 0) / 12,
       pension: r.pensionIn / 12,
       toPension: (r.toPension || 0) / 12,
       invest: (r.toIsa + r.toGia + (r.toLisa || 0) + (r.toPension || 0)) / 12,
-      surplus: (r.toIsa + r.toGia + (r.toLisa || 0) + (r.toPension || 0) + r.overpay + r.toCash) / 12,
+      surplus: (r.toIsa + r.toGia + (r.toLisa || 0) + (r.toPension || 0) + r.overpay + r.toCash + (r.hiDebtPay || 0)) / 12,
       shortfall: (r.withdrawals + r.unfunded) / 12,
     };
   }
@@ -2139,7 +2195,7 @@
   }
 
   // A Lifetime ISA can only buy a first home: not for anyone who already owns one.
-  const ownsHome = plan => plan.accounts.some(a => a.type === 'property' && !a.excluded && a.balance > 0);
+  const ownsHome = plan => plan.accounts.some(a => a.type === 'property' && !a.excluded && a.balance > 0 && !(a.buyYear >= plan.startYear));
 
   // The person a retirement goal is about.
   const retiree = (plan, goal) => plan.household.people.find(x => x.id === goal.owner) || plan.household.people[0];

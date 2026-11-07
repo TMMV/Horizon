@@ -197,6 +197,8 @@ test('USS taken before its Normal Pension Age is cut by USS early retirement fac
   const full = E.dbPensionAt(db, q, 68 - sam.age);
   const early = E.dbPensionAt({ ...db, startAge: 60 }, q, 68 - sam.age);
   near(early / full, 0.675, 1e-9);
-  // Other schemes are not reduced here.
-  assert.equal(E.dbEarly({ ...db, dbScheme: 'lgps', startAge: 60 }, sam).factor, 1);
+  // Other schemes are cut by about 5% a year (public service schemes' actuarial reduction).
+  near(E.dbEarly({ ...db, dbScheme: 'nhs', startAge: 60 }, sam).factor, 0.675, 1e-9);
+  near(E.dbEarly({ ...db, dbScheme: 'lgps', startAge: 66 }, sam).factor, 0.906, 1e-9);
+  assert.equal(E.dbEarly({ ...db, dbScheme: 'nhs', startAge: 68 }, sam).factor, 1);
 });

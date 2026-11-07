@@ -200,6 +200,14 @@
       }
     }
 
+    // 1b. Expensive debt: cleared before anything else (the plan does this with any surplus).
+    const dear = plan.accounts.filter(a => a.type === 'debt' && !a.excluded && a.balance > 0 && a.rate >= 8).sort((x, y) => y.rate - x.rate);
+    if (dear.length) {
+      const cost = dear.reduce((acc, a) => acc + a.balance * a.rate / 100, 0);
+      out.push({ id: 'dear-debt', tone: 'warn', title: `${dear.map(a => a.name).join(' and ')}: ${dear.map(a => `${a.rate}%`).join(' and ')} costs about ${money(cost)} a year`, action: 'strategy',
+        text: `No saving or investment reliably earns that, so the plan pays it off first with anything left over, before building cash or investing; keep only a small cash cushion meanwhile. A 0% balance transfer card, or paying from savings that earn less, clears it faster.` });
+    }
+
     // 2. Saving rate
     if (m.takeHome > 0) {
       const keep = (m.takeHome - r0.spending - m.debtPay) / m.takeHome;
@@ -313,7 +321,7 @@
     const eligible = plan.household.people.filter(x => x.age < R.LISA.openBefore && !lisaOwners.has(x.id));
     if (eligible.length) {
       const house = plan.goals.some(g => g.icon === 'home');
-      const owner = plan.accounts.some(a => a.type === 'property' && !a.excluded && a.balance > 0);
+      const owner = plan.accounts.some(a => a.type === 'property' && !a.excluded && a.balance > 0 && !(a.buyYear >= plan.startYear));
       out.push({ id: 'lisa', tone: 'tip', title: 'A Lifetime ISA adds a 25% bonus', action: 'compare:sacrifice-lisa',
         text: `${eligible.map(x => `${x.name} (40 in ${plan.startYear + R.LISA.openBefore - x.age})`).join(' and ')} can open one before turning 40, and keep paying in once it is open: up to ${money(R.LISA.maxContribution)} a year (within the ISA allowance) gets ${money(R.LISA.maxContribution * R.LISA.bonus)} from the government, until 50. ${owner ? 'As you already own a home, it is for retirement: it can be used from 60' : `It can be used from 60, or ${house ? 'for your first home (up to £450,000)' : 'for a first home up to £450,000'}`}; other withdrawals lose 25%. Scenarios compares it with salary sacrifice into a pension.` });
     }
@@ -367,7 +375,9 @@
 
     // 12. Inheritance tax on what is left at the end (today's money; pensions count from April 2027).
     const ih = inheritance(plan, proj);
-    if (taxOn && ih && kids.length) {
+    // Only worth raising once it is near enough to plan for, or the estate already passes the allowances.
+    const oldest = Math.max(...plan.household.people.map(x => x.age));
+    if (taxOn && ih && kids.length && (oldest >= 50 || r0.netWorth / proj.rows[0].deflator > ih.free / 2)) {
       const { estate, free, tax, n } = ih;
       if (tax > 10000) out.push({ id: 'iht', tone: tax > 250000 ? 'tip' : 'info', title: `Inheritance tax could take about ${money(tax)}`, action: 'guide:estate',
         text: `The plan leaves about ${money(estate)} in today’s money at the end, homes and pensions included (unused pensions count from April 2027). Above ${money(free)} of allowances${n > 1 ? ' for a couple' : ''}${estate > R.IHT.taperFrom ? ' (the home allowance shrinks above £2 million)' : ''}, 40% is due. To pass on more: regular gifts from surplus income are free of tax if they don’t lower your standard of living; ${money(R.IHT.annualGift)} a year each can be given anyway; larger gifts are free after 7 years; Junior ISAs and pensions for children; or spend more yourselves. Wills and pension nominations matter too (Guides, Protection & paperwork).` });
