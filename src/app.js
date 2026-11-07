@@ -1123,7 +1123,7 @@
       if (t <= 0 || t >= N) return;
       add(rows[t].year, `${x.name} retires at ${x.retireAge}`, `Pay and pension contributions stop.${x.retireAge < x.pensionAccessAge ? ` Pensions can be drawn from ${x.pensionAccessAge}; until then savings and ISAs pay the way.` : ''}`, ['Can I retire then?', () => openGuide('retire', { who: x.id })]);
       const sp = pre.people[i].statePension.findIndex((v, k) => k < N && v > 0);
-      if (sp > 0) add(rows[sp].year, `${x.name}: claim the State Pension`, `From ${x.statePensionAge}: about ${m(pre.people[i].statePension[sp])} a month. It is not paid automatically: claim it at gov.uk about 4 months before.`, null);
+      if (sp > 0) add(rows[sp].year, `${x.name}: claim the State Pension`, `From ${E.spStart(x)}${x.spDefer ? ` (put off ${x.spDefer} year${x.spDefer === 1 ? '' : 's'}, so about ${Math.round((E.spDeferUplift(x) - 1) * 100)}% more for life)` : ''}: about ${m(pre.people[i].statePension[sp])} a month. It is not paid automatically: claim it at gov.uk about 4 months before.`, null);
       for (const db of p.income.filter(it => it.kind === 'dbpension' && it.owner === x.id)) {
         const k = db.startAge - x.age;
         if (k > 0 && k < N) add(rows[k].year, `${x.name}: claim the ${db.dbScheme === 'uss' ? 'USS' : 'workplace'} pension`, `From ${db.startAge}: about ${money(E.incomeAfterCosts(db, p, k) / 12)} a month${db.lumpMultiple > 0 ? `, plus a tax-free lump sum of about ${money(E.incomeAfterCosts(db, p, k) * db.lumpMultiple)}` : ''}. Tell the scheme a few months before.`, null);
@@ -1561,7 +1561,7 @@
   // What stopping work at their planned age means for one person, in plan `p`.
   function retireConsequences(p, x) {
     const out = [];
-    if (x.retireAge < x.statePensionAge) out.push(`No State Pension for ${x.statePensionAge - x.retireAge} years after stopping work (it starts at ${x.statePensionAge}). A full State Pension needs 35 qualifying years of National Insurance: check the record at gov.uk/check-state-pension; voluntary contributions can fill gaps.`);
+    if (x.retireAge < E.spStart(x)) out.push(`No State Pension for ${E.spStart(x) - x.retireAge} years after stopping work (it starts at ${E.spStart(x)}). A full State Pension needs 35 qualifying years of National Insurance: check the record at gov.uk/check-state-pension; voluntary contributions can fill gaps.`);
     if (p.accounts.some(a => a.type === 'pension' && a.owner === x.id && !a.excluded)) {
       out.push(x.retireAge < x.pensionAccessAge
         ? `Personal and workplace pensions can’t be drawn until ${x.pensionAccessAge}: ${x.pensionAccessAge - x.retireAge} years living on ISAs, savings and other income first.`
@@ -1665,7 +1665,7 @@
         item('Spending in retirement', s.retireSpending ? `${money(s.retireSpending)} a year (today’s £)` : 'As your spending list'),
         travel ? item('Extra in the early years', `${money(travel.amount)} a year to age ${travel.endAge}`) : null,
         s.slowDownAge ? item('Spending later on', `${s.slowDownPct}% from age ${s.slowDownAge}`) : null,
-        people().map(x => item(`${x.name}'s State Pension`, `${money(x.statePension)} a year from ${x.statePensionAge}`)),
+        people().map(x => item(`${x.name}'s State Pension`, `${money(x.statePension * E.spDeferUplift(x))} a year from ${E.spStart(x)}`)),
         dbs.map(i => item(i.name, `${money(i.amount)} a year built up, paid from ${i.startAge}`))),
       lasting);
   }
@@ -2134,7 +2134,7 @@
     const customBox = h('div', { class: 'field', hidden: r.mode !== 'custom' }, h('span', {}, 'Your amount (a year, today’s money)'), moneyIn(() => r.custom, v => { r.custom = v; }, 'Retirement spending'));
     const debtFree = E.debtFreeYear(model.proj);
     const retireYear = p.startYear + (r.ages[0] - p1.age);
-    const sps = people().map((x, i) => h('label', { class: 'field' }, h('span', {}, `${x.name} (from ${x.statePensionAge})`), moneyIn(() => r.statePension[i], v => { r.statePension[i] = v; }, `${x.name} State Pension`)));
+    const sps = people().map((x, i) => h('label', { class: 'field' }, h('span', {}, `${x.name} (from ${E.spStart(x)})`), moneyIn(() => r.statePension[i], v => { r.statePension[i] = v; }, `${x.name} State Pension`)));
     const dbs = p.income.filter(i => i.kind === 'dbpension');
 
     return h('div', { class: 'rq' },
@@ -2145,7 +2145,7 @@
               onclick: () => { gw.goal.owner = x.id; changed(); renderGoalWizard(); } }, `${x.name} retiring`)))) : null,
           h('div', { class: 'fields' }, people().map((x, i) => h('label', { class: 'field' }, h('span', {}, `${x.name} retires at`),
             num(() => r.ages[i], v => { r.ages[i] = Math.round(v); }, { min: x.age, max: 80, suffix: 'years', label: `${x.name} retirement age` })))),
-          h('p', { class: 'hint' }, `Pensions can be drawn from ${people().map(x => `${x.pensionAccessAge}`).filter((v, i, a) => a.indexOf(v) === i).join(' / ')}; State Pension from ${people().map(x => `${x.name} ${x.statePensionAge}`).join(', ')}. Retiring before then means living on ISAs and savings.`)),
+          h('p', { class: 'hint' }, `Pensions can be drawn from ${people().map(x => `${x.pensionAccessAge}`).filter((v, i, a) => a.indexOf(v) === i).join(' / ')}; State Pension from ${people().map(x => `${x.name} ${E.spStart(x)}`).join(', ')}. Retiring before then means living on ISAs and savings.`)),
         sec(2, 'What would you like to spend each year?',
           h('div', { class: 'spend-options' },
             option('list', 'Keep my spending list', listThen, 'What you spend now, minus items that stop before then (like childcare).'),
@@ -4102,6 +4102,7 @@
           field('Plan until age', numInput(...bind(p, 'endAge'), { min: 50, max: 120 })),
           field('State Pension (£/year, today)', moneyInput(...bind(p, 'statePension')), `Full new State Pension is ${money(R.STATE_PENSION_FULL)}. Forecast at gov.uk/check-state-pension.`),
           field('State Pension age', numInput(...bind(p, 'statePensionAge'), { min: 60, max: 75 }), `Born ${plan().startYear - p.age}: ${R.statePensionAge(plan().startYear - p.age)} under current law.`),
+          field('Put off the State Pension', numInput(...bind(p, 'spDefer'), { min: 0, max: 10, suffix: 'years', label: 'Years to put off the State Pension', rerender: 'household' }), spDeferText(p)),
           field('Can access pension from', numInput(...bind(p, 'pensionAccessAge'), { min: 50, max: 75 }), 'Minimum pension age is 57 from April 2028.'),
           field('Student loan', selectInput([['', 'None'], ...Object.entries(R.STUDENT_LOANS).map(([k, v]) => [k, v.label])], () => p.loanPlan, v => {
             p.loanPlan = v;
@@ -4124,6 +4125,15 @@
         hh.ignoreTax ? null : field('Tax rules', selectInput([['scotland', 'Scotland'], ['ruk', 'England, Wales & NI']], ...bind(hh, 'region'), { rerender: 'tax' }))),
       h('div', { class: 'people' }, cards),
     ];
+  }
+
+  // Putting off the State Pension: what it adds and how long it takes to catch up.
+  function spDeferText(x) {
+    const pct = R.SP_DEFER_PER_YEAR * 100;
+    if (!x.spDefer) return `0 = take it at ${x.statePensionAge}. Each year put off adds about ${pct.toFixed(1)}% for life (1% every 9 weeks); it is worth it if you live long and do not need it yet.`;
+    const more = x.statePension * (E.spDeferUplift(x) - 1);
+    const missed = x.statePension * x.spDefer;
+    return `From ${E.spStart(x)}: about ${money(x.statePension * E.spDeferUplift(x))} a year (today’s money), ${money(more)} more. The ${money(missed)} not taken is made up after about ${Math.round(missed / more)} years, at ${E.spStart(x) + Math.round(missed / more)}. Leaving it unclaimed defers it; it is not paid automatically.`;
   }
 
   // "£30 a month now; paid off in 2041" or "written off in 2054 with about £60,000 left".
@@ -4210,12 +4220,22 @@
     }
   }
 
-  const KIND_LABELS = [['salary', 'Salary'], ['self', 'Self-employed'], ['rental', 'Rent'], ['other', 'Other income'], ['dbpension', 'Defined benefit pension (e.g. USS)']];
+  const KIND_LABELS = [['salary', 'Salary'], ['self', 'Self-employed'], ['rental', 'Rent'], ['other', 'Other income'], ['dbpension', 'Defined benefit pension (e.g. USS)'], ['annuity', 'Annuity']];
   const kindLabel = k => (KIND_LABELS.find(x => x[0] === k) || [k, k])[1];
 
   function setKind(item, v) {
     item.kind = v;
     if (v === 'self') { item.tax = 'uk'; if (item.owner === 'joint') item.owner = 'p1'; }
+    if (v === 'annuity') {
+      const person = people()[E.personIndex(plan(), item.owner === 'joint' ? 'p1' : item.owner)];
+      if (item.owner === 'joint') item.owner = person.id;
+      item.startAge = Math.max(person.age, person.retireAge, R.MIN_PENSION_AGE);
+      item.freq = 'year';
+      item.tax = 'uk';
+      item.inflationLinked = false;
+      if (!item.cost) item.cost = 100000;
+      if (!item.amount) item.amount = Math.round(item.cost * 0.07);
+    }
     if (v === 'dbpension') {
       const person = people()[E.personIndex(plan(), item.owner === 'joint' ? 'p1' : item.owner)];
       if (item.owner === 'joint') item.owner = person.id;
@@ -4254,6 +4274,33 @@
         field('Tax', selectInput(taxOptions(item.kind), ...bind(item, 'tax'), { rerender: 'income' }))),
       h('p', { class: 'hint calc', 'data-calc': item.id }, dbWorking(item, p)),
       dbEstimator(item, p, person));
+  }
+
+  // An annuity: part of a pension pot swapped for an income for life.
+  function annuityWorking(item, p) {
+    const person = people()[E.personIndex(p, item.owner)];
+    const rate = item.cost > 0 ? (item.amount / item.cost) * 100 : 0;
+    const t = Math.max(0, item.startAge - person.age);
+    const f = Math.pow(1 + p.assumptions.inflation / 100, t);
+    return `At ${item.startAge} (${p.startYear + t}): about ${money(item.cost * f)} from ${person.name}’s pension pot buys ${money(item.amount * f)} a year${item.inflationLinked ? ', rising with prices' : ', fixed in pounds'}, for life: a rate of ${rate.toFixed(1)}%. Taxed as income like any pension. Net worth falls by the price when it is bought: the income is not something you own, but it cannot run out.`;
+  }
+
+  function renderAnnuity(item, p) {
+    const person = people()[E.personIndex(p, item.owner)];
+    return h('div', { class: 'item', style: `--item-color:${cssVar('--s4')}` },
+      h('div', { class: 'item-head' },
+        h('input', { type: 'text', class: 'name', value: item.name, 'aria-label': 'Income name', oninput: e => { item.name = e.target.value; schedule(); } }),
+        h('span', { class: 'tag' }, 'Annuity'),
+        deleteButton(`Remove ${item.name}`, () => removeFrom(p.income, item, 'income'))),
+      h('div', { class: 'fields' },
+        field('Whose', selectInput(ownerOptions(false), ...bind(item, 'owner'), { rerender: 'income' })),
+        field('Pension pot spent on it', moneyInput(...bind(item, 'cost'), { label: 'Pot spent on the annuity' }), 'In today’s money. Many people take their 25% tax-free cash first and buy with the rest.'),
+        field('Income a year', moneyInput(...bind(item, 'amount'), { label: 'Annuity income a year' }), 'From a quote, in today’s money. Around 7% of the pot fixed, or 5% rising with prices, at 65 (2026); more with health conditions. Shop around: you do not have to buy from your own provider.'),
+        field('Bought at age', numInput(...bind(item, 'startAge'), { min: Math.max(50, person.age), max: 90, label: 'Annuity age' }), `${person.name} can use the pot from ${person.pensionAccessAge}.`),
+        h('div', { class: 'field' }, h('span', {}, 'Once bought'), switchInput('Rises with prices', ...bind(item, 'inflationLinked'), { rerender: 'income' }), h('span', { class: 'hint' }, 'Fixed is higher at first; rising with prices keeps its value.')),
+        field('Tax', selectInput(taxOptions('other'), ...bind(item, 'tax'), { rerender: 'income' })),
+        noteField(item)),
+      h('p', { class: 'hint calc', 'data-annuity': item.id }, annuityWorking(item, p)));
   }
 
   // "Don't know what's built up?" Estimate it from the scheme, year joined and salary.
@@ -4337,6 +4384,7 @@
     const ignore = p.household.ignoreTax;
     const editorOf = item => {
       if (item.kind === 'dbpension') return renderDbPension(item, p);
+      if (item.kind === 'annuity') return renderAnnuity(item, p);
       const isSalary = item.kind === 'salary';
       const owner = item.owner === 'joint' ? people()[0] : people()[E.personIndex(p, item.owner)];
       const hasCosts = item.fx !== 1 || item.costPct > 0 || item.fixedCosts > 0;
@@ -4383,16 +4431,16 @@
           h('p', { class: 'trend-caption sub' })));
     };
     const line = item => {
-      const grow = item.kind === 'dbpension' ? `paid from ${item.startAge}` : item.inflationLinked ? 'rises with prices' : `rises ${item.growth}% a year${item.growthUntilAge ? ` to ${item.growthUntilAge}, then ${item.growthAfter}%` : ''}${(item.raises || []).length ? `, ${item.raises.length} promotion${item.raises.length === 1 ? '' : 's'}` : ''}`;
+      const grow = item.kind === 'annuity' ? `from ${item.startAge}, ${item.inflationLinked ? 'rising with prices' : 'fixed'}` : item.kind === 'dbpension' ? `paid from ${item.startAge}` : item.inflationLinked ? 'rises with prices' : `rises ${item.growth}% a year${item.growthUntilAge ? ` to ${item.growthUntilAge}, then ${item.growthAfter}%` : ''}${(item.raises || []).length ? `, ${item.raises.length} promotion${item.raises.length === 1 ? '' : 's'}` : ''}`;
       const db = item.kind === 'dbpension' ? (() => { const x = people()[E.personIndex(p, item.owner)]; const t = Math.max(0, item.startAge - x.age); return E.incomeAfterCosts(item, p, t) / Math.pow(1 + p.assumptions.inflation / 100, t); })() : 0;
       return {
         name: item.name,
-        sub: [kindLabel(item.kind), ownerName(p, item.owner), item.kind === 'dbpension' ? null : untilText(item, p), grow, noteText(item)].filter(Boolean).join(' · '),
-        value: item.kind === 'dbpension' ? `${money(db)} a year` : incomeTag(item, p).replace('/month now', ' a month'),
-        valueSub: item.kind === 'dbpension' ? `from ${item.startAge}, today’s money` : item.tax === 'none' ? (item.kind === 'salary' ? 'take-home' : 'no tax') : item.tax === 'uk' ? 'before tax' : `after ${item.taxRate}% tax`,
+        sub: [kindLabel(item.kind), ownerName(p, item.owner), item.kind === 'dbpension' || item.kind === 'annuity' ? null : untilText(item, p), grow, noteText(item)].filter(Boolean).join(' · '),
+        value: item.kind === 'dbpension' ? `${money(db)} a year` : item.kind === 'annuity' ? `${money(item.amount)} a year` : incomeTag(item, p).replace('/month now', ' a month'),
+        valueSub: item.kind === 'dbpension' || item.kind === 'annuity' ? `from ${item.startAge}, today’s money` : item.tax === 'none' ? (item.kind === 'salary' ? 'take-home' : 'no tax') : item.tax === 'uk' ? 'before tax' : `after ${item.taxRate}% tax`,
       };
     };
-    const items = p.income.map(item => viewOrEdit(item.id, 'income', item.kind === 'dbpension' ? '--s4' : '--s1', line(item), () => editorOf(item)));
+    const items = p.income.map(item => viewOrEdit(item.id, 'income', item.kind === 'dbpension' || item.kind === 'annuity' ? '--s4' : '--s1', line(item), () => editorOf(item)));
     return [
       sectionHead('income', 'Income', 'Salaries, rent, gifts and pensions, as at the date above; each grows from there. Click one to change it.'),
       sectionSummary('income', () => [['Coming in this year', `${money(inOutSeries()[0].inn / 12)} a month`, 'after tax and pension contributions'], ['From work', `${money(p.income.filter(i => i.kind === 'salary').reduce((acc, i) => acc + E.incomeAfterCosts(i, p, 0), 0) / 12)} a month`, 'as entered'], ['Other income', `${money(p.income.filter(i => i.kind !== 'salary').reduce((acc, i) => acc + E.incomeAfterCosts(i, p, 0), 0) / 12)} a month`, 'rent, gifts, pensions now']]),
@@ -4419,6 +4467,7 @@
     const p = plan();
     for (const el of $$('[data-net]')) { const it = p.income.find(i => i.id === el.dataset.net); if (it) el.textContent = incomeTag(it, p); }
     for (const el of $$('[data-calc]')) { const it = p.income.find(i => i.id === el.dataset.calc); if (it) el.textContent = it.kind === 'dbpension' ? dbWorking(it, p) : incomeWorking(it, p); }
+    for (const el of $$('[data-annuity]')) { const it = p.income.find(i => i.id === el.dataset.annuity); if (it) el.textContent = annuityWorking(it, p); }
     for (const el of $$('[data-buy]')) { const a = p.accounts.find(x => x.id === el.dataset.buy); if (a) el.textContent = buyWorking(a); }
     for (const el of $$('[data-loan]')) { const x = people().find(q => q.id === el.dataset.loan); if (x) el.textContent = loanWorking(x); }
     for (const el of $$('[data-dbest]')) { const it = p.income.find(i => i.id === el.dataset.dbest); if (it) el.textContent = dbEstimateText(it, people()[E.personIndex(p, it.owner)]); }
@@ -4540,7 +4589,10 @@
     // Moving from a home you own (sold that year), or buying while renting.
     const selling = p.accounts.find(x => x.type === 'property' && x !== a && !x.buyYear && x.sellYear === a.buyYear);
     const renting = !p.accounts.some(x => x.type === 'property' && x !== a && !x.excluded && !x.buyYear);
-    return `In ${a.buyYear} it costs about ${money(price)}: ${money(price - loan)} paid from ${selling ? `the sale of ${selling.name} and your savings` : 'your savings'}${loan > 0 ? ` and a ${money(loan)} mortgage, about ${money(pay)} a month for ${a.mortYears} years` : ''}.${multiple} Add stamp duty and moving costs as a one-off event${renting ? ', and end your rent that year' : ''}.`;
+    // A Lifetime ISA saved for a first home is paid out that year.
+    const lisa = p.accounts.filter(x => x.type === 'lisa' && !x.excluded && x.purpose === 'home' && E.lisaHomeYear(p, x) === a.buyYear);
+    const lisaText = lisa.length ? (price > R.LISA.homePriceCap ? ` The home costs more than ${money(R.LISA.homePriceCap)}, so the Lifetime ISA cannot be used for it without losing 25%.` : ' Your Lifetime ISA, with its bonus, is paid out towards it.') : '';
+    return `In ${a.buyYear} it costs about ${money(price)}:${lisaText} ${money(price - loan)} paid from ${selling ? `the sale of ${selling.name} and your savings` : 'your savings'}${loan > 0 ? ` and a ${money(loan)} mortgage, about ${money(pay)} a month for ${a.mortYears} years` : ''}.${multiple} Add stamp duty and moving costs as a one-off event${renting ? ', and end your rent that year' : ''}.`;
   }
 
   // A note on any item, for arrangements the plan cannot spell out (who it is with, what was agreed).
@@ -4565,7 +4617,12 @@
         main.push(field('Pay in each year', moneyInput(...bind(a, 'contribution')), `Up to ${money(R.LISA.maxContribution)}; the government adds 25%. Paid from your surplus before other ISAs, until 50.`));
         // Only someone who has never owned a home can use it for one.
         if (!E.ownsHome(plan()) || a.purpose === 'home') extra.push(field('Saving for', selectInput([['retirement', 'Retirement (from 60)'], ['home', 'A first home']], ...bind(a, 'purpose'), { rerender: 'accounts' })));
-        if (a.purpose === 'home') extra.push(field('Buying in', numInput(...bind(a, 'homeYear'), { min: plan().startYear, max: plan().startYear + 40, label: 'First home year' }), `Paid out that year with no charge if the home costs up to ${money(R.LISA.homePriceCap)}. Add the purchase itself as a one-off event.`));
+        if (a.purpose === 'home') {
+          const home = plan().accounts.find(x => x.type === 'property' && !x.excluded && x.buyYear >= plan().startYear);
+          extra.push(field('Buying in', numInput(...bind(a, 'homeYear'), { min: 0, max: plan().startYear + 40, label: 'First home year' }),
+            home ? `0 = when you buy ${home.name} (${home.buyYear}). Paid out that year towards the deposit, with no charge if the home costs up to ${money(R.LISA.homePriceCap)}.`
+              : `Paid out that year with no charge if the home costs up to ${money(R.LISA.homePriceCap)}. Add the home under Accounts as “Buying it later” for the deposit and mortgage.`));
+        }
         extra.push(h('p', { class: 'hint' }, `Withdrawals before 60 for anything else lose 25%, so the plan only uses it that way as a last resort. It counts within the ${money(R.ISA_ALLOWANCE)} ISA allowance and must be opened before 40.`));
       }
       if (a.type === 'gia') extra.push(field('Amount you paid in', moneyInput(...bind(a, 'basis')), 'Used to work out capital gains.'));
@@ -5283,7 +5340,7 @@
     });
     {
       const a = p.assumptions;
-      const sp = Math.max(...ps.map(x => x.statePensionAge - x.age));
+      const sp = Math.max(...ps.map(x => E.spStart(x) - x.age));
       const k = Math.min(proj.pre.N - 1, Math.max(1, sp));
       const cover = proj.rows[k] && proj.rows[k].spending > 0 ? proj.rows[k].nonWork / proj.rows[k].spending : 0;
       const mixes = { growth: [100, 80], balanced: [100, 60], cautious: [70, 40] };
@@ -6158,6 +6215,8 @@
         add: [['Help from family', () => { goIncome(); addIncomeOf('other', { owner: 'joint', name: 'Help from family', tax: 'none', endRef: 'year', toYear: yearsFrom(3) }); }]] },
       { title: 'Child maintenance, paid or received', how: 'Received: other income with no tax (child maintenance is not taxed), until the year it stops. Paid: spending until that year.',
         add: [['Maintenance received', () => { goIncome(); addIncomeOf('other', { owner: 'joint', name: 'Child maintenance received', tax: 'none', endRef: 'year', toYear: yearsFrom(10) }); }], ['Maintenance paid', () => { goSpend(); addCostOf({ name: 'Child maintenance paid', amount: 0, freq: 'month', endRef: 'year', toYear: yearsFrom(10) }); }]] },
+      { title: 'Another adult at home', how: 'Horizon plans for one or two people. An adult child or a parent living with you fits as money in and out: what they pay you towards the house is other income with no tax, and what you pay for them is spending, each until a year. Their own savings and pensions stay out of your plan.',
+        add: [['They pay towards the house', () => { goIncome(); addIncomeOf('other', { owner: 'joint', name: 'Keep from family at home', tax: 'none', endRef: 'year', toYear: yearsFrom(3) }); }], ['We pay for them', () => { goSpend(); addCostOf({ name: 'Costs for family at home', amount: 0, freq: 'month', endRef: 'year', toYear: yearsFrom(3) }); }]] },
       { title: 'A child’s savings you look after', how: 'A Junior ISA or savings in a child’s name are theirs, so list them without counting them: add the account and, under More options, turn off “Count this account”.',
         add: [['Child’s savings (not counted)', () => { goAccounts(); addAccountOf('cash', { name: 'Child’s savings', excluded: true, note: 'In the child’s name' }); }]] },
       { title: 'An inheritance you may get', how: 'A one-off amount received in a year, in today’s money (after any inheritance tax). Because it is uncertain, most people leave it out of their plan and try it in a copy (Scenarios → Duplicate).',
@@ -6249,6 +6308,7 @@
             sField('Can access pension from', 'The earliest age you can take money from a workplace or personal pension. 57 for most people from April 2028; some older schemes allow 55.'),
           ),
           sField('Student loan', 'Also under More options. Repaid through your payslip: 9% of pay above a threshold (6% for a postgraduate loan), until it is paid off or written off. Choose your plan, what you owe and the year it is written off: Horizon works out the repayments, and when it ends your take-home pay rises.', stage() === 'starting' || stage() === 'building' ? 'Your plan, balance and write-off year are in your Student Loans Company account.' : null),
+          stage() === 'nearing' || stage() === 'retired' ? sField('Put off the State Pension', `Also under More options. If you do not need it yet, putting it off adds about ${(R.SP_DEFER_PER_YEAR * 100).toFixed(1)}% a year for life. It takes about 17 years of the higher amount to catch up, so it pays if you are healthy and have other income meanwhile.`) : null,
           stage() === 'retired' ? sTip('Already retired? Set the retirement age to your age now: Horizon then plans from pensions and savings straight away.') : null,
           stage() === 'nearing' ? sTip('With retirement in sight, the State Pension forecast matters most: get yours (and your partner’s) at gov.uk/check-state-pension. If there are gaps in your National Insurance record, the forecast says whether buying extra years is worth it.') : null,
           stage() === 'starting' ? sTip('Starting out: put the age you would like to stop work (it can be far off; 67 or 68 is the State Pension age for you). The point is to see what today’s choices do.') : null,
@@ -6283,7 +6343,7 @@
         const other = plan().income.filter(i => i.kind !== 'salary');
         return [
           sText('Anything else coming in now or later. Skip what you do not have.'),
-          stage() === 'nearing' || stage() === 'retired' ? sTip('Pensions that pay a set income (NHS, teachers, civil service, USS, older “final salary” schemes) go here as a defined benefit pension; pots of money go with the accounts. An annuity you have bought: add it as Other income, rising with prices or not, for good.') : null,
+          stage() === 'nearing' || stage() === 'retired' ? sTip('Pensions that pay a set income (NHS, teachers, civil service, USS, older “final salary” schemes) go here as a defined benefit pension; pots of money go with the accounts. An annuity you have bought already: add it as Other income, rising with prices or not, for good (one you may buy later is with the pension pots).') : null,
           sAdds(sAdd('+ Rent', () => addIncomeOf('rental', { owner: 'joint', name: 'Rent', tax: 'uk', endRef: 'end' })),
             sAdd('+ Defined benefit pension', () => addIncomeOf('dbpension', { owner: people()[people().length - 1].id })),
             sAdd('+ Other income', () => addIncomeOf('other', { owner: 'joint', endRef: 'end' }))),
@@ -6331,13 +6391,16 @@
       render: () => [
         sText('Workplace and personal pensions that build up a pot of money (defined contribution, SIPPs). Pensions that pay a set income go under Other income instead.'),
         sAdds(...people().map(x => sAdd(`+ ${poss(x.name)} pension`, () => addAccountOf('pension', { owner: x.id, name: `${x.name} pension` })))),
+        stage() === 'nearing' || stage() === 'retired' ? sAdds(sAdd('+ Buy an annuity with part of a pot', () => { navigate('finances/income'); addIncomeOf('annuity', { owner: people()[0].id, name: 'Annuity' }); })) : null,
         sFields(
+          stage() === 'nearing' || stage() === 'retired' ? sField('Annuity', 'Swapping part of a pension pot for an income for life, so it cannot run out. Enter the part of the pot, the income a quote gives (about 7% of the pot fixed, or 5% rising with prices, at 65) and the age. The rest of the pot stays invested and is drawn as needed.') : null,
           sField('Balance', 'The pot’s value today, from the provider’s app or latest statement. Add up several pots, or add one line each.'),
           sField('Whose', 'Each pension belongs to one person: it is taxed as their income when drawn.'),
           sField('Count this account', 'Under More options. Turn off for a pot you want listed but not counted yet, e.g. one with nothing in it.'),
         ),
         stage() === 'nearing' || stage() === 'retired' ? sTip(`Tax-free cash: Horizon takes a quarter of each pension withdrawal tax-free (up to ${money(R.LUMP_SUM_ALLOWANCE)} each over a lifetime) and taxes the rest as income, which usually pays less tax than taking it all at once. Old pots you have lost track of: the government’s Pension Tracing Service can find them.`) : null,
-        sHave(accountsOf('pension').map(a => `${a.name}: ${money(a.balance)}${a.excluded ? ' (not counted)' : ''}`)),
+        sHave([...accountsOf('pension').map(a => `${a.name}: ${money(a.balance)}${a.excluded ? ' (not counted)' : ''}`),
+          ...plan().income.filter(i => i.kind === 'annuity').map(i => `${i.name}: ${money(i.cost)} of the pot for ${money(i.amount)} a year from ${i.startAge}`)]),
       ],
     },
     {

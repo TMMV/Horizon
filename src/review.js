@@ -35,7 +35,12 @@
     const before = plan.household.people;
     for (const it of p.income) {
       const g = itemGrowth(it);
-      if (it.kind === 'dbpension') {
+      if (it.kind === 'annuity') {
+        // Not bought yet: still in today's money. Bought: fixed in pounds unless it rises with prices.
+        const person = before[E.personIndex(plan, it.owner)];
+        const bought = person.age >= it.startAge;
+        if (!bought) { it.amount *= infl; it.cost *= infl; } else if (it.inflationLinked) it.amount *= infl;
+      } else if (it.kind === 'dbpension') {
         const person = before[E.personIndex(plan, it.owner)];
         const worked = Math.max(0, Math.min(years, person.retireAge - person.age));
         it.amount = (it.amount + it.dbAccrual * worked) * infl;
@@ -72,7 +77,7 @@
   // Keep pounds tidy after growing (whole pounds for big amounts, pence for small).
   function round(p) {
     const r = v => (Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 100) / 100);
-    for (const it of p.income) { it.amount = r(it.amount); it.dbAccrual = r(it.dbAccrual); it.fixedCosts = r(it.fixedCosts); it.employeePension = r(it.employeePension); it.employerPension = r(it.employerPension); }
+    for (const it of p.income) { it.amount = r(it.amount); it.cost = r(it.cost); it.dbAccrual = r(it.dbAccrual); it.fixedCosts = r(it.fixedCosts); it.employeePension = r(it.employeePension); it.employerPension = r(it.employerPension); }
     for (const e of p.expenses) e.amount = r(e.amount);
     for (const ev of p.events) ev.amount = r(ev.amount);
     for (const person of p.household.people) { person.statePension = r(person.statePension); person.extraPension = r(person.extraPension); }

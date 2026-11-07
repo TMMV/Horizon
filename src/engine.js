@@ -24,7 +24,7 @@
   const ACCOUNT_TYPES = ['cash', 'isa', 'lisa', 'gia', 'pension', 'bonds', 'property', 'asset', 'debt'];
   const OWNED_TYPES = ['isa', 'lisa', 'pension'];
   const GOAL_TYPES = ['netWorth', 'debtFree', 'retire', 'passiveIncome', 'emergency'];
-  const INCOME_KINDS = ['salary', 'self', 'rental', 'other', 'dbpension'];
+  const INCOME_KINDS = ['salary', 'self', 'rental', 'other', 'dbpension', 'annuity'];
   const TAX_TREATMENTS = ['uk', 'none', 'flat'];
   const BASIC_RELIEF = 0.2; // relief at source added to personal pension contributions
 
@@ -34,7 +34,7 @@
     'wCash', 'wGia', 'wIsa', 'wPension', 'toIsa', 'toGia', 'toCash', 'overpay', 'pensionIn',
     'cgt', 'gCash', 'gIsa', 'gGia', 'gPension', 'gBonds', 'gProperty',
     'debtInterest', 'debtRegular', 'lumpOverpay', 'bondsMatured', 'bondsToIsa', 'propSold', 'extraPension', 'flatTax',
-    'sweepIsa', 'sweepGia', 'nonWork', 'homeBuy', 'studentLoan',
+    'sweepIsa', 'sweepGia', 'nonWork', 'homeBuy', 'studentLoan', 'annuityBought',
     'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension', 'sacrificed',
   ];
 
@@ -245,8 +245,15 @@
       loanEndYear: Math.round(num(p.loanEndYear, 0)),
       loanThreshold: optNum(p.loanThreshold),
       loanRate: optNum(p.loanRate),
+      // Years the State Pension is put off after State Pension age (it then pays more, for life).
+      spDefer: Math.min(10, Math.max(0, Math.round(num(p.spDefer, 0)))),
     };
   }
+
+  // When the State Pension starts, and what putting it off adds: 1% for every 9 weeks (about
+  // 5.8% a year), for life, on the new State Pension.
+  const spStart = p => p.statePensionAge + (p.spDefer || 0);
+  const spDeferUplift = p => 1 + R.SP_DEFER_PER_YEAR * (p.spDefer || 0);
 
   function normalizeTiming(item, defStart, defEnd) {
     return {
@@ -378,6 +385,8 @@
       dbScheme: str(i.dbScheme, ''),                    // defined benefit estimate: scheme, year joined, salary now
       dbJoined: Math.round(num(i.dbJoined, 0)),
       dbSalary: Math.max(0, num(i.dbSalary)),
+      // Annuity: the part of the pension pot spent on it (today's money), taken from the pot when it starts.
+      cost: Math.max(0, num(i.cost)),
       amount: Math.max(0, num(i.amount)),
       freq: oneOf(i.freq, ['month', 'year'], 'year'),
       // A defined benefit pension rises with prices once paid (see dbPensionAt), whatever is stored.
@@ -590,6 +599,14 @@
     for (const a of p.accounts.filter(x => x.type === 'property' && x.buyYear && x.buyYear < p.startYear)) {
       out.push(`“${a.name}”: the year it is bought has passed, so it is counted as owned now. Set the year to 0 and add its mortgage as a loan.`);
     }
+    for (const a of p.accounts.filter(x => x.type === 'lisa' && x.purpose === 'home' && lisaHomeYear(p, x))) {
+      const home = p.accounts.find(x => x.type === 'property' && x.buyYear === lisaHomeYear(p, a));
+      if (home && home.balance * Math.pow(1 + home.rate / 100, home.buyYear - p.startYear) > R.LISA.homePriceCap) out.push(`“${a.name}”: ${home.name} will cost more than £${R.LISA.homePriceCap.toLocaleString('en-GB')}, the most a Lifetime ISA can be used for without losing 25%.`);
+    }
+    for (const x of p.income.filter(i => i.kind === 'annuity')) {
+      const owner = p.household.people[personIndex(p, x.owner)];
+      if (x.startAge < owner.pensionAccessAge) out.push(`“${x.name}”: a pension pot can only buy an annuity from ${owner.pensionAccessAge}.`);
+    }
     for (const person of p.household.people.filter(x => x.loanPlan && x.loanBalance > 0 && !x.loanEndYear)) {
       out.push(`${person.name}: add the year the student loan is written off (in the Student Loans Company account), or it never ends.`);
     }
@@ -609,6 +626,13 @@
       }
     });
     return out;
+  }
+
+  // The year a Lifetime ISA for a first home is used: its own year, or else the first home to buy.
+  function lisaHomeYear(plan, a) {
+    if (a.homeYear) return a.homeYear;
+    const buy = plan.accounts.filter(x => x.type === 'property' && !x.excluded && x.buyYear >= plan.startYear).map(x => x.buyYear).sort((x, y) => x - y)[0];
+    return buy || 0;
   }
 
   // ---------------------------------------------------------------- timing helpers
@@ -732,6 +756,17 @@
   };
   const taxRules = plan => (plan.household.ignoreTax ? NO_TAX : R);
 
+  // An annuity bought with part of a pension pot: from its start age, for life. Its income is in
+  // today's money until it is bought; then it is fixed in pounds, or rises with prices.
+  function annuityAt(item, plan, t, econ) {
+    const person = ownerOf(plan, item);
+    const t0 = item.startAge - person.age;
+    if (t < t0) return 0;
+    const price = econ ? econ.price : null;
+    const p = k => (price ? price[Math.max(0, Math.min(price.length - 1, k))] : Math.pow(1 + plan.assumptions.inflation / 100, Math.max(0, k)));
+    return annual(item) * (item.inflationLinked ? p(t) : p(Math.max(0, t0)));
+  }
+
   // Defined benefit pension (e.g. USS): what is built up so far plus what each further year of
   // work adds, paid from the scheme's pension age and rising with prices.
   function dbPensionAt(item, plan, t, econ) {
@@ -759,6 +794,7 @@
   // Income after currency conversion and costs, in pounds, for year t.
   function incomeAfterCosts(item, plan, t, econ) {
     if (item.kind === 'dbpension') return dbPensionAt(item, plan, t, econ);
+    if (item.kind === 'annuity') return annuityAt(item, plan, t, econ);
     if (!isActive(item, plan, t)) return 0;
     const g = econ ? growthFactor(item, plan, t, econ) : expectedGrowth(item, plan, t);
     const price = econ ? econ.price[t] : Math.pow(1 + plan.assumptions.inflation / 100, t);
@@ -895,6 +931,7 @@
       years: [], deflator: econ.price, g: zeros(), price: econ.price,
       ages: people.map(() => []),
       taxFree: zeros(), flatTax: zeros(), expenses: zeros(), eventsIn: zeros(), eventsOut: zeros(), eventsOverpay: zeros(),
+      annuityBuy: people.map(() => zeros()),   // pension pot spent on annuities in year t, per person
       keepCash: zeros(),   // money set aside in cash on top of the buffer (today's money), e.g. repairs building up
       people: people.map(() => ({
         gross: zeros(),        // gross salary paid in cash (before employee contributions)
@@ -965,6 +1002,9 @@
         if (item.kind === 'dbpension' && item.lumpMultiple > 0 && ownerOf(plan, item).age + t === item.startAge) {
           pre.eventsIn[t] += item.lumpMultiple * v; // tax-free lump sum in the first year
         }
+        if (item.kind === 'annuity' && ownerOf(plan, item).age + t === item.startAge) {
+          pre.annuityBuy[personIndex(plan, item.owner)][t] += item.cost * price;
+        }
         if (item.kind === 'salary' && P) {
           const [ee, er] = pensionContrib(item, v, plan, t, econ);
           P.contrib[t] += ee + er;
@@ -1001,8 +1041,8 @@
       people.forEach((p, i) => {
         const P = pre.people[i];
         const age = p.age + t;
-        if (age >= p.statePensionAge) {
-          P.statePension[t] = p.statePension * price * Math.pow(1 + a.statePensionRealGrowth / 100, t);
+        if (age >= spStart(p)) {
+          P.statePension[t] = p.statePension * spDeferUplift(p) * price * Math.pow(1 + a.statePensionRealGrowth / 100, t);
         }
         if (p.extraPension > 0 && age < p.retireAge) {
           P.extraOut[t] = p.extraPension * 12 * price;
@@ -1194,7 +1234,8 @@
           bal: x.balance, owner, pay: Math.min(x.contribution, R.LISA.maxContribution),
           // Can pay in only if it is already open or the owner is still under 40.
           canOpen: x.balance > 0 || people[owner].age < R.LISA.openBefore,
-          home: x.purpose === 'home' && x.homeYear ? x.homeYear - plan.startYear : Infinity,
+          // Saving for a first home: paid out in its year, or the year the home to buy is bought.
+          home: x.purpose === 'home' && lisaHomeYear(plan, x) ? lisaHomeYear(plan, x) - plan.startYear : Infinity,
         });
       }
       else if (x.type === 'bonds') bonds.push({ bal: x.balance, rate: x.rate / 100, t: x.maturityYear ? x.maturityYear - plan.startYear : Infinity, inIsa: x.inIsa, payout: x.coupons === 'payout' });
@@ -1293,6 +1334,17 @@
         if (t === p.t && p.val > 0 && p.owned) { propSold += p.val; p.val = 0; }
       }
 
+      // An annuity is bought with the pension pot; if the pot is short, the rest comes from savings.
+      let annuityShort = 0, annuityBought = 0;
+      for (let i = 0; i < n; i++) {
+        const buy = pre.annuityBuy[i][t];
+        if (buy <= 0) continue;
+        const x = Math.min(buy, pension[i]);
+        pension[i] -= x;
+        annuityBought += x;
+        annuityShort += buy - x;
+      }
+
       // 2. Pension contributions
       let pensionIn = 0, extraOut = 0;
       for (let i = 0; i < n; i++) {
@@ -1344,7 +1396,7 @@
       }
       other += pre.taxFree[t] + pre.eventsIn[t] + propSold;
       const net = earnings - employee - extraOut + other + statePension - baseTax
-        - pre.expenses[t] - pre.eventsOut[t] - debtRegular - lumpOverpay - homeBuy;
+        - pre.expenses[t] - pre.eventsOut[t] - debtRegular - lumpOverpay - homeBuy - annuityShort;
 
       let extraTax = 0, cgt = 0, unfunded = 0, sweepIsa = 0, sweepGia = 0;
       let toCash = 0, overpay = 0, toIsa = 0, toGia = 0, toLisa = 0, lisaBonus = 0, wLisa = 0, lisaCharge = 0, toPension = 0;
@@ -1544,6 +1596,7 @@
         out.wCash[t] = wCash; out.wGia[t] = wGia; out.wIsa[t] = wIsa; out.wPension[t] = wPension;
         out.spending[t] = pre.expenses[t] + pre.eventsOut[t] + homeBuy;
         out.homeBuy[t] = homeBuy;
+        out.annuityBought[t] = annuityBought + annuityShort;
         out.studentLoan[t] = pre.people.reduce((acc, P) => acc + P.loanPaid[t], 0);
         out.taxes[t] = baseTax + extraTax + lisaCharge;
         out.flatTax[t] = pre.flatTax[t];
@@ -1633,7 +1686,7 @@
       const add = (age, label, kind) => { const y = yearAt(i, age); if (inRange(y)) list.push({ year: y, label: `${who}${label}`.replace(/^./, c => c.toUpperCase()), kind }); };
       add(p.retireAge, people.length > 1 ? 'retires' : 'Retire', 'retire');
       add(p.pensionAccessAge, people.length > 1 ? 'can access pension' : 'Pension access', 'pension');
-      add(p.statePensionAge, people.length > 1 ? 'starts State Pension' : 'State Pension starts', 'sp');
+      add(spStart(p), people.length > 1 ? 'starts State Pension' : 'State Pension starts', 'sp');
     });
     // Mortgage-free: the first year with nothing owed after borrowing (now, or for a home bought later).
     const owing = rows.findIndex(x => x.debt > 0.5);
@@ -2329,7 +2382,7 @@
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,
     solveRetirement, solveSpending, solveRetirementSpending, solveDebtFree, solveNetWorth,
-    shiftRetirement, retiree, ownsHome, scaleSpending, variant, summarize, sweep,
+    shiftRetirement, retiree, ownsHome, scaleSpending, variant, summarize, sweep, spStart, spDeferUplift, lisaHomeYear, annuityAt,
     makeCheckin, checkinReview, rollForward,
     mulberry32, makeNormal, lognormal, percentile, clonePlan, grossUp,
   };

@@ -1645,6 +1645,37 @@ test.describe('getting started', () => {
   });
 });
 
+test.describe('closer to retirement', () => {
+  test('putting off the State Pension and buying an annuity with part of a pot', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/assumptions');
+    const plan = () => page.evaluate(() => window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan);
+    const card = page.locator('#sec-household .people .item').first();
+    await card.locator('details.more > summary', { hasText: 'More options' }).click();
+    const defer = card.locator('input[aria-label="Years to put off the State Pension"]');
+    await defer.fill('2');
+    await expect(card.locator('label.field:has-text("Put off the State Pension")')).toContainText('more');
+    const p0 = await plan();
+    expect(p0.household.people[0].spDefer).toBe(2);
+    const spAge = p0.household.people[0].statePensionAge;
+    // The first person's State Pension now starts two years after State Pension age.
+    await expect.poll(() => page.evaluate(() => Array.from(window.__horizon.model.proj.pre.people[0].statePension).findIndex(v => v > 0)))
+      .toBe(spAge + 2 - p0.household.people[0].age);
+    // An annuity: from the income page, with its working.
+    await go(page, 'finances/income');
+    await page.locator('#sec-income .add-row button', { hasText: '+ Annuity' }).click();
+    const ed = page.locator('[data-editing]').last();
+    await ed.locator('input[aria-label="Pot spent on the annuity"]').fill('100000');
+    await ed.locator('input[aria-label="Annuity income a year"]').fill('6500');
+    await expect(ed.locator('[data-annuity]')).toContainText('a rate of 6.5%');
+    await ed.locator('.edit-done button').click();
+    const a = (await plan()).income.find(i => i.kind === 'annuity');
+    expect(a).toMatchObject({ cost: 100000, amount: 6500, tax: 'uk', inflationLinked: false });
+    const bought = await page.evaluate(() => window.__horizon.model.proj.rows.reduce((s, r) => s + (r.annuityBought || 0), 0));
+    expect(bought).toBeGreaterThan(100000);
+    expect(problems).toEqual([]);
+  });
+});
+
 test.describe('mobile layout', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

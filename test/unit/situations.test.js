@@ -156,3 +156,62 @@ test('notes are kept on accounts, income, spending and one-offs', () => {
   assert.equal(E.normalizePlan({ expenses: [{ note: 42 }] }).expenses[0].note, '');
   assert.equal(E.normalizePlan({ expenses: [{ note: 'x'.repeat(900) }] }).expenses[0].note.length, 500);
 });
+
+test('putting off the State Pension: it starts later and pays about 5.8% more a year for life', () => {
+  const mk = spDefer => E.normalizePlan({ startYear: 2026, household: { region: 'scotland', people: [{ name: 'Sam', age: 66, retireAge: 66, statePensionAge: 67, statePension: 12000, spDefer }] }, accounts: [], income: [], expenses: [], events: [], goals: [] });
+  const now = E.precompute(mk(0)).people[0], later = E.precompute(mk(2)).people[0];
+  assert.ok(now.statePension[1] > 0);
+  assert.equal(later.statePension[1], 0);
+  assert.equal(later.statePension[2], 0);
+  near(later.statePension[3] / now.statePension[3], 1 + 2 * 52 / 9 / 100, 1e-9);
+  assert.equal(E.spStart(mk(2).household.people[0]), 69);
+  assert.ok(E.milestones(mk(2), E.project(mk(2))).some(m => m.kind === 'sp' && m.year === 2029));
+  assert.equal(E.normalizePlan({ household: { people: [{ spDefer: 40 }] } }).household.people[0].spDefer, 10);
+});
+
+test('an annuity is bought with part of the pension pot and pays a taxable income for life', () => {
+  const p = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Pat', age: 64, retireAge: 64, statePensionAge: 67 }] },
+    accounts: [{ type: 'pension', owner: 'p1', balance: 300000 }, { type: 'cash', balance: 20000 }],
+    income: [{ kind: 'annuity', name: 'Annuity', owner: 'p1', tax: 'uk', amount: 7000, freq: 'year', cost: 100000, startAge: 66, inflationLinked: false }],
+    expenses: [], events: [], goals: [],
+  });
+  const it = p.income[0];
+  assert.deepEqual([it.kind, it.cost, it.startAge], ['annuity', 100000, 66]);
+  const infl = p.assumptions.inflation / 100;
+  // Nothing before 66; then fixed in the pounds of the year it is bought.
+  assert.equal(E.incomeAfterCosts(it, p, 1), 0);
+  near(E.incomeAfterCosts(it, p, 2), 7000 * Math.pow(1 + infl, 2), 0.01);
+  near(E.incomeAfterCosts(it, p, 10), 7000 * Math.pow(1 + infl, 2), 0.01);
+  near(E.incomeAfterCosts({ ...it, inflationLinked: true }, p, 10), 7000 * Math.pow(1 + infl, 10), 0.01);
+  const pr = E.project(p);
+  near(pr.rows[2].annuityBought, 100000 * Math.pow(1 + infl, 2), 1);
+  // Taxed as income.
+  assert.ok(E.precompute(p).people[0].other[2] > 7000);
+  // Too early for a pension: flagged.
+  assert.ok(E.validatePlan(E.normalizePlan({ ...p, income: [{ ...it, startAge: 50 }] })).some(w => /annuity/.test(w)));
+  // A year on, an annuity already bought keeps its pounds; one not bought yet moves with prices.
+  const q = RV.rollPlan(E.normalizePlan({ ...p, household: { ...p.household, people: [{ ...p.household.people[0], age: 70 }] }, income: [{ ...it, startAge: 66 }] }), 1);
+  assert.equal(q.income[0].amount, 7000);
+  const r = RV.rollPlan(p, 1);
+  near(r.income[0].cost, 100000 * (1 + infl), 1);
+});
+
+test('a Lifetime ISA for a first home is paid out when the home to buy is bought', () => {
+  const p = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ name: 'Robin', age: 25, retireAge: 67 }] },
+    accounts: [
+      { id: 'lisa', type: 'lisa', owner: 'p1', balance: 8000, contribution: 0, purpose: 'home' },
+      { id: 'flat', type: 'property', balance: 500000, rate: 3, buyYear: 2029, deposit: 10 },
+      { type: 'cash', balance: 60000 },
+    ],
+    income: [{ kind: 'salary', owner: 'p1', tax: 'uk', amount: 120000, freq: 'year' }], expenses: [], events: [], goals: [],
+  });
+  assert.equal(E.lisaHomeYear(p, p.accounts[0]), 2029);
+  const pr = E.project(p);
+  assert.ok(pr.rows.find(r => r.year === 2029).lisaHome > 8000);
+  // Over £450,000 the Lifetime ISA cannot be used without the charge: flagged.
+  assert.ok(E.validatePlan(p).some(w => /Lifetime ISA can be used/.test(w)));
+});

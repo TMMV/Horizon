@@ -81,6 +81,7 @@
     plan5: { label: 'Plan 5 (England, started from Aug 2023)', threshold: 25000, pct: 9, extra: 0.5, frozenUntil: 2027, writeOff: 40 },
     pg: { label: 'Postgraduate loan', threshold: 21000, pct: 6, extra: 3.5, frozenUntil: 0, writeOff: 30 },
   };
+  const SP_DEFER_PER_YEAR = 52 / 9 / 100;     // new State Pension put off: +1% every 9 weeks
   const LISA = { maxContribution: 4000, bonus: 0.25, openBefore: 40, payUntil: 50, accessAge: 60, charge: 0.25, homePriceCap: 450000 };
 
   // Defined benefit (career average) schemes: pension added per year = salary / accrual,
@@ -187,7 +188,7 @@
     TAX_YEAR, PERSONAL_ALLOWANCE, PA_TAPER_START, INCOME_TAX, NI, CGT, IHT,
     ISA_ALLOWANCE, STATE_PENSION_FULL, LUMP_SUM_ALLOWANCE, PENSION_TAX_FREE_SHARE,
     MIN_PENSION_AGE, PENSION_ANNUAL_ALLOWANCE, FREEZE_UNTIL, SACRIFICE_NI_CAP, SACRIFICE_NI_CAP_FROM,
-    CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, DB_SCHEMES, USS_EARLY, LISA, CLASS4, STUDENT_LOANS, selfEmployedNI,
+    CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, DB_SCHEMES, USS_EARLY, LISA, CLASS4, STUDENT_LOANS, selfEmployedNI, SP_DEFER_PER_YEAR,
     statePensionAge, grossFromTakeHome, personalAllowance, incomeTax, marginalRate, nationalInsurance,
     capitalGainsTax, bandTable,
   };
