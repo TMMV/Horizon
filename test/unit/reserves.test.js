@@ -135,3 +135,35 @@ test('money to be spent is locked: in its account, not in net worth', () => {
   const q = base([{ kind: 'emergency', accountId: 'bank' }]);
   assert.equal(E.project(q).rows[2].netWorth, none.rows[2].netWorth);
 });
+
+test('the yearly review explains the gap in parts that add up', () => {
+  const p = base([{ id: 'tr', kind: 'budget', name: 'Trips', expenseId: 'trips', accountId: 'bank' }]);
+  const ws = E.normalizeWorkspace({ scenarios: [{ id: 'a', name: 'A', plan: p }], activeId: 'a' });
+  const draft = RV.start(ws, { year: 2027, date: '2027-01-01' });
+  const sum = x => x.parts.reduce((s, q) => s + q.diff, 0);
+  let x = RV.explain(draft);
+  assert.ok(Math.abs(x.total) < 1, 'nothing typed in: on plan');
+  // Investments 3,000 up, house 10,000 down; 1,000 of trips not spent and kept.
+  const isa = draft.plan.accounts.find(a => a.id === 'isa');
+  RV.setValue(draft, 'accounts', 'isa', isa.balance + 3000);
+  const house = draft.plan.accounts.find(a => a.id === 'house');
+  RV.setValue(draft, 'accounts', 'house', house.balance - 10000);
+  RV.setReserve(draft, 'tr', { spent: 2000, keep: true });
+  x = RV.explain(draft);
+  assert.ok(Math.abs(sum(x) - x.total) < 0.01, 'the parts add up');
+  const part = k => (x.parts.find(q => q.key === k) || { diff: 0 }).diff;
+  assert.ok(Math.abs(part('investments') - 3000) < 1);
+  assert.ok(Math.abs(part('property') + 10000) < 1);
+  assert.ok(Math.abs(part('budgets') - 1000) < 1);
+  assert.ok(Math.abs(part('setAside') + 1000) < 1, 'kept to spend, so not counted');
+  assert.equal(x.parts[0].key, 'property', 'biggest first');
+  // Saying what was paid in splits markets from saving.
+  draft.paidIn = x.expectedPaidIn + 1000;
+  x = RV.explain(draft);
+  const q = k => (x.parts.find(r => r.key === k) || { diff: 0 }).diff;
+  assert.ok(Math.abs(q('paidIn') - 1000) < 1);
+  assert.ok(Math.abs(q('markets') - 2000) < 1);
+  assert.ok(Math.abs(sum(x) - x.total) < 0.01);
+  // The review keeps the budget's leftover in the plan it saves.
+  assert.equal(draft.plan.reserves.find(r => r.id === 'tr').left, 1000);
+});

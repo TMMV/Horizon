@@ -111,6 +111,7 @@
     compareDirty = true;
     explorerBase = null;
     renderResults();
+    refreshSetup();
   }
 
   // ------------------------------------------------------------------ shared labels
@@ -398,7 +399,7 @@
   }
   function reservesPanel(list, when) {
     const held = list.reduce((acc, r) => acc + r.held, 0);
-    const tag = r => (r.kind === 'budget' ? 'available until spent · not in net worth' : r.kind === 'saving' ? 'locked · not in net worth' : 'keep · counts in net worth');
+    const tag = r => (r.kind === 'budget' ? 'available until spent · not in net worth' : r.kind === 'saving' ? 'spoken for · not in net worth' : 'keep · counts in net worth');
     return h('div', { class: 'pf-reserves', id: 'pfReserves' },
       h('div', { class: 'pf-res-head' }, h('h3', {}, 'Set aside'), h('span', { class: 'muted' }, `${money(held)} held ${when}`)),
       list.map(r => h('div', { class: `pf-res-row ${r.kind}`, 'data-reserve': r.id },
@@ -424,7 +425,7 @@
     const resTag = a => {
       const v = heldIn[a.id] || 0;
       if (v < 0.5) return null;
-      const parts = res.filter(r => r.accountId === a.id && r.held >= 0.5).map(r => `${r.name} ${money(r.held)}${r.kind === 'saving' ? ' (locked)' : r.kind === 'budget' ? ' (to spend)' : ''}`);
+      const parts = res.filter(r => r.accountId === a.id && r.held >= 0.5).map(r => `${r.name} ${money(r.held)}${r.kind === 'saving' ? ' (spoken for)' : r.kind === 'budget' ? ' (to spend)' : ''}`);
       const free = est.byId[a.id] - v;
       const over = free < -Math.max(50, v * 0.01);
       return h('span', { class: `pf-res-tag${over ? ' over' : ''}`, title: over ? 'More is set aside than the account holds: move money in or set aside less.' : 'How this balance splits: money set aside, and what is free to use.' },
@@ -759,6 +760,14 @@
   // ---- "i" explanations and suggestion markers, added to labels as the page is drawn
   // Each term matches a label, a card or section heading, or a figure's caption by its text.
   const TERMS = [
+    { match: /^Why you are where you are$/, title: 'Why you are where you are',
+      text: () => 'Your net worth on the review date next to what the plan expected for that date, split into the reasons: markets, money put in, the home’s value, the mortgage, pensions, budgets not spent, money kept set aside, and cash with everything else (whatever is left over). The parts always add up to the difference. Markets and money put in can only be told apart if you say how much you paid in.' },
+    { match: /^Paid into ISAs and investments/, title: 'Paid into ISAs and investments',
+      text: () => 'Add up what went into your ISAs, Lifetime ISAs and general investment accounts since your last figures, minus anything you took out. Your provider’s app usually shows this as “contributions” or in the transaction history. Leave it empty if you are not sure: the review then shows markets and money put in together.' },
+    { match: /^Your plan, step by step$/, title: 'Your plan, step by step',
+      text: () => 'Worked out from your plan, not typed in: the monthly amounts to set up now, the dates when something changes (a fixed rate ending, a gilt maturing, someone retiring) and the jobs to do every year. Change the plan and the list follows.' },
+    { match: /^Worth a look$/, title: 'Worth a look',
+      text: () => 'Suggestions from rules of thumb (not financial advice) and step-by-step guides, most important first. Hide one with “Already sorted” or “Not now”; “Show hidden” brings them back.' },
     { match: /^Set aside to spend$/, title: 'Set aside to spend',
       text: () => 'Money you expect to spend: savings building up for a planned cost (like repairs every few years, kept invested until needed) and what is left of a yearly budget (like holidays, in the bank until spent). It is already spoken for, so it is left out of net worth, and of goals measured on net worth or savings. The emergency fund is not here: it is not meant to be spent, so it still counts.' },
     { match: /^(Set aside|set aside|free to use|Money set aside)$/, title: 'Money set aside',
@@ -906,7 +915,7 @@
     return b;
   }
 
-  const INFO_SPOTS = '.pf-res-head > h3, .field > span:first-child, .card-head h2, .section-head h2, .io-fig > span:first-child, .pf-two > strong, .hero-label, .pf-sum dt, .sub-fields > h3, .io-split h3';
+  const INFO_SPOTS = '.rv-explain h3, .do-head h3, .pf-res-head > h3, .field > span:first-child, .card-head h2, .section-head h2, .io-fig > span:first-child, .pf-two > strong, .hero-label, .pf-sum dt, .sub-fields > h3, .io-split h3';
   function decorate(root) {
     if (!root || !root.querySelectorAll) return;
     const spots = [...(root.matches && root.matches(INFO_SPOTS) ? [root] : []), ...root.querySelectorAll(INFO_SPOTS)];
@@ -943,7 +952,7 @@
     for (const b of $$('.tip-btn')) { const w = b.parentElement; b.remove(); if (w && w.classList.contains('sum-wrap')) { const row = w.querySelector('.sum-row'); if (row) w.replaceWith(row); } }
     for (const el of $$('[data-info]')) delete el.dataset.info;
     for (const el of $$('[data-tip-done]')) delete el.dataset.tipDone;
-    for (const b of $$('.info-btn')) b.remove();
+    for (const b of $$('.info-btn:not(.keep)')) b.remove();   // the guide's own stay
     decorate(document.body);
   }
   let decorating = false;
@@ -1137,7 +1146,7 @@
     for (const r of pots) {
       const where = accountName(r.accountId) || 'an account';
       if (r.kind === 'emergency') add('now', `Keep ${money(r.amount)} in ${where} as the emergency fund`, 'Marked on Home as set aside: not for spending or investing. It rises with prices.', go('Set aside', 'finances/saving'));
-      else if (r.kind === 'saving' && r.dueYear) add('now', `Count about ${money(r.perYear / 12)} a month in ${where} as for ${r.name.toLowerCase()}`, `It is already part of what goes in each month. Home shows it building up to ${money(r.target)} for ${r.dueYear}, locked and left out of net worth; then it is taken out to pay.`, go('Set aside', 'finances/saving'));
+      else if (r.kind === 'saving' && r.dueYear) add('now', `Count about ${money(r.perYear / 12)} a month in ${where} as for ${r.name.toLowerCase()}`, `It is already part of what goes in each month. Home shows it building up to ${money(r.target)} for ${r.dueYear}, spoken for and left out of net worth; then it is taken out to pay.`, go('Set aside', 'finances/saving'));
     }
     add('yearly', 'By 5 April: use the tax-year allowances', 'ISAs, pension top-ups and moving the general account into ISAs. Unused allowances are lost.', ['Tax year-end check', () => openGuide('tax')]);
     add('yearly', 'Each autumn: the yearly review', 'Swap the estimates for real balances so the plan tracks what actually happened.', ['Start review', () => openReview()]);
@@ -1159,8 +1168,8 @@
       h('div', { class: 'todo-body' }, h('strong', {}, i.title), h('p', {}, i.text),
         i.action ? h('button', { type: 'button', class: 'linkish', onclick: i.action[1] }, i.action[0]) : null));
     setKids(box,
-      h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'What to do, and when'),
-        h('p', { class: 'sub' }, 'Worked out from your plan: what to pay where now, what to change along the way, and how much to take in retirement. Amounts a month, in the pounds of that year; change the plan and the list follows.'))),
+      h('div', { class: 'do-head' }, h('h3', {}, 'Your plan, step by step'),
+        h('p', { class: 'sub' }, 'What to pay where now, what changes along the way, and how much to take in retirement. Amounts a month, in the pounds of that year; change the plan and the list follows.')),
       h('ol', { class: 'todo' }, soon.map(row)),
       later.length ? more('home-todo-later', `Later on (${later.length})`, h('ol', { class: 'todo' }, later.map(row))) : null);
   }
@@ -3084,33 +3093,31 @@
     if (!(o.reserves || []).length) return null;
     const list = E.reservesAt(o, RV.yearsBetween(E.asOfDate(o), d.date));
     const lastYear = d.years > 0 ? E.reservesAt(o, 0) : [];
-    rv.reserves = rv.reserves || {};
-    const seg = (st, key, opts, label) => h('div', { class: 'seg mini', role: 'group', 'aria-label': label }, opts.map(([v, l]) => h('button', {
-      type: 'button', 'aria-pressed': String(st[key] === v),
-      onclick: e => { st[key] = v; for (const x of e.currentTarget.parentElement.children) x.setAttribute('aria-pressed', String(x === e.currentTarget)); },
+    const input = id => d.reserveInputs[id] || {};
+    const set = (id, values) => { RV.setReserve(d, id, values); rv.evals = null; updateReviewNote(); };
+    const seg = (id, key, opts, label) => h('div', { class: 'seg mini', role: 'group', 'aria-label': label }, opts.map(([v, l]) => h('button', {
+      type: 'button', 'aria-pressed': String(input(id)[key] === v),
+      onclick: e => { set(id, { [key]: v }); for (const x of e.currentTarget.parentElement.children) x.setAttribute('aria-pressed', String(x === e.currentTarget)); },
     }, l)));
     const rows = list.map(r => {
       const where = accountName(r.accountId) ? ` in ${accountName(r.accountId)}` : '';
       if (r.kind === 'emergency') {
-        const st = rv.reserves[r.id] || (rv.reserves[r.id] = { amount: Math.round(r.amount) });
         return h('div', { class: 'rv-reserve', 'data-reserve': r.id },
           h('div', { class: 'rv-name' }, h('strong', {}, r.name), h('span', { class: 'muted' }, `The plan kept ${money(r.amount)}${where}.`)),
-          field('In the emergency fund now', moneyInputPlain(() => st.amount, v => { st.amount = v; }, `${r.name} now`), 'Whatever you count as untouchable. From now on it rises with prices.'));
+          field('In the emergency fund now', moneyInputPlain(() => input(r.id).amount, v => set(r.id, { amount: v }), `${r.name} now`), 'Whatever you count as untouchable. From now on it rises with prices.'));
       }
       if (r.kind === 'saving') {
-        const st = rv.reserves[r.id] || (rv.reserves[r.id] = { saved: Math.round(r.amount) });
         return h('div', { class: 'rv-reserve', 'data-reserve': r.id },
           h('div', { class: 'rv-name' }, h('strong', {}, r.name), h('span', { class: 'muted' }, r.dueYear ? `The plan expected ${money(r.amount)} put aside${where}, towards ${money(r.target)} in ${r.dueYear}.` : 'No planned cost ahead.')),
-          r.dueYear ? field('Put aside so far', moneyInputPlain(() => st.saved, v => { st.saved = v; }, `${r.name} put aside so far`), 'It builds up from here to the full amount by when it is due.') : null);
+          r.dueYear ? field('Put aside so far', moneyInputPlain(() => input(r.id).saved, v => set(r.id, { saved: v }), `${r.name} put aside so far`), 'It builds up from here to the full amount by when it is due.') : null);
       }
       const last = lastYear.find(x => x.id === r.id);
       if (!last) return null;
-      const st = rv.reserves[r.id] || (rv.reserves[r.id] = { spent: Math.round(last.amount), keep: true });
       return h('div', { class: 'rv-reserve', 'data-reserve': r.id },
         h('div', { class: 'rv-name' }, h('strong', {}, `${r.name} ${o.startYear}`), h('span', { class: 'muted' }, `${money(last.amount)} budgeted${last.left ? `, with ${money(last.left)} kept from the year before` : ''}${where}. The plan counted it all as spent.`)),
-        field('How much did you spend?', moneyInputPlain(() => st.spent, v => { st.spent = v; }, `${r.name} spent`), 'What is left is still in the account, so it is part of the balance above.'),
+        field('How much did you spend?', moneyInputPlain(() => input(r.id).spent, v => set(r.id, { spent: v }), `${r.name} spent`), 'What is left is still in the account, so it is part of the balance above.'),
         h('div', { class: 'field' }, h('span', {}, 'What is left'),
-          seg(st, 'keep', [[true, 'Keep it for next year'], [false, 'Free it up to invest']], `What to do with what is left of ${r.name}`)));
+          seg(r.id, 'keep', [[true, 'Keep it for next year'], [false, 'Free it up to invest']], `What to do with what is left of ${r.name}`)));
     }).filter(Boolean);
     if (!rows.length) return null;
     return h('div', { class: 'rv-reserves', id: 'rvReserves' },
@@ -3176,19 +3183,22 @@
   }
 
   // Horizontal diverging bars (actual minus prediction), with a table view.
-  function divergingBars(rows, baseLabel) {
+  function divergingBars(rows, baseLabel, opts = {}) {
     const max = Math.max(1, ...rows.map(r => Math.abs(r.diff)));
     const bars = h('div', { class: 'divbars', role: 'list' }, rows.map(r => {
       const pos = r.diff >= 0;
       const flat = Math.abs(r.diff) < 5; // rounding noise: on plan
       const w = flat ? 0 : Math.max(0.5, (Math.abs(r.diff) / max) * 50);
       const sign = flat ? 'On plan' : `${pos ? '+' : '−'}${fmtCompact(Math.abs(r.diff))}`;
-      return h('div', { class: 'divbar', role: 'listitem', tabindex: '0', title: `${r.label}: ${baseLabel} ${money(r.base)}, actual ${money(r.actual)}${r.type === 'debt' ? ' (owed)' : ''}` },
-        h('span', { class: 'db-label' }, r.type === 'debt' ? `${r.label} (less owed = +)` : r.label),
+      return h('div', { class: 'divbar' + (r.why ? ' has-why' : ''), role: 'listitem', tabindex: '0', title: r.why ? `${r.label}: ${r.why}` : `${r.label}: ${baseLabel} ${money(r.base)}, actual ${money(r.actual)}${r.type === 'debt' ? ' (owed)' : ''}` },
+        h('span', { class: 'db-label' }, r.type === 'debt' ? `${r.label} (less owed = +)` : r.label, r.why ? h('small', { class: 'db-why' }, r.why) : null),
         h('span', { class: 'db-track' }, h('span', { class: 'db-mid' }), h('span', { class: `db-bar ${pos ? 'pos' : 'neg'}`, style: `${pos ? 'left' : 'right'}:50%;width:${w}%` })),
         h('span', { class: `db-val${flat ? ' flat' : ''}` }, sign));
     }));
-    const tbl = table(['', baseLabel, 'Actual', 'Difference'], rows.map(r => ({ cells: [r.label, money(r.base), money(r.actual), { text: `${r.diff >= 0 ? '+' : '−'}${money(Math.abs(r.diff))}`, cls: r.diff >= 0 ? 'pos' : 'neg' }] })));
+    const signed = r => ({ text: `${r.diff >= 0 ? '+' : '−'}${money(Math.abs(r.diff))}`, cls: r.diff >= 0 ? 'pos' : 'neg' });
+    const tbl = opts.why
+      ? table(['', 'Difference', 'Why'], rows.map(r => ({ cells: [r.label, signed(r), r.why || ''] })))
+      : table(['', baseLabel, 'Actual', 'Difference'], rows.map(r => ({ cells: [r.label, money(r.base), money(r.actual), signed(r)] })));
     return viewToggle(bars, h('div', { class: 'table-wrap' }, tbl));
   }
 
@@ -3217,8 +3227,10 @@
         h('div', { class: `rv-delta ${t.diff >= 0 ? 'pos' : 'neg'}` },
           h('span', {}, `${t.diff >= 0 ? '+' : '−'}${money(Math.abs(t.diff))}`),
           t.pct != null ? h('small', {}, `${t.diff >= 0 ? '+' : '−'}${Math.abs(t.pct * 100).toFixed(1)}% · ${verdict}`) : null)),
-      h('h3', { class: 'chart-title' }, v.mode === 'prediction' ? 'What made the difference (actual minus prediction)' : v.mode === 'lastYear' ? `Change since your ${d.prev.year} check-in (no breakdown was saved with that prediction)` : 'Difference from what the plan expected'),
-      divergingBars(v.rows, baseLabel),
+      rvExplain(),
+      h('details', { class: 'more rv-bytype' }, h('summary', {}, 'By type of account'),
+        h('h3', { class: 'chart-title' }, v.mode === 'prediction' ? 'What made the difference (actual minus prediction)' : v.mode === 'lastYear' ? `Change since your ${d.prev.year} check-in (no breakdown was saved with that prediction)` : 'Difference from what the plan expected'),
+        divergingBars(v.rows, baseLabel)),
     ];
 
     // Last year's projection against the updated plan, in pounds of each year.
@@ -3251,6 +3263,34 @@
         h('p', { class: 'hint' }, `${EXPLORE_RUNS} simulated futures each, same markets for both. “Invest each month now” is the figure to set up for the year ahead.`));
     }, 40);
     return out;
+  }
+
+  // Why net worth is not what the plan expected on the review date, in parts that add up, with one
+  // optional question (what was paid into ISAs and investments) to split markets from saving.
+  function rvExplain() {
+    const d = rv.draft;
+    const box = h('div', { class: 'rv-explain', id: 'rvExplain' });
+    const draw = () => {
+      const x = RV.explain(d);
+      const rows = x.parts.map(p => ({ ...p, why: p.why.replace(/\{(\w+)\}/g, (m, k) => (k in p.values ? money(p.values[k]) : m)) }));
+      const ahead = x.total >= 0;
+      const lead = Math.abs(x.total) < 50 ? 'Right where the plan expected.'
+        : `${money(Math.abs(x.total))} ${ahead ? 'ahead of' : 'behind'} the plan’s estimate for ${fmtDate(d.date)} (${money(x.expected)})${rows[0] ? `. The biggest part: ${rows[0].label.toLowerCase()}` : ''}.`;
+      setKids(box,
+        h('h3', { class: 'chart-title' }, 'Why you are where you are'),
+        h('p', { class: 'rv-lead' }, lead),
+        rows.length ? divergingBars(rows, '', { why: true }) : null,
+        h('p', { class: 'hint' }, 'The parts add up to the difference. Markets can only be split from what you put in if you say how much that was.'));
+    };
+    const ask = field('Paid into ISAs and investments since your last figures (optional)',
+      (() => {
+        const input = h('input', { type: 'text', inputmode: 'decimal', id: 'rvPaidIn', value: d.paidIn == null ? '' : plain(d.paidIn), placeholder: 'Not sure? Leave it empty', 'aria-label': 'Paid into ISAs and investments' });
+        input.addEventListener('input', () => { d.paidIn = input.value.trim() === '' ? null : parseAmount(input.value); draw(); });
+        return h('div', { class: 'adorn has-pre' }, h('span', { class: 'pre' }, '£'), input);
+      })(),
+      `Everything you put in (minus anything taken out) since ${fmtDate(E.asOfDate(d.original))}; your ISA provider shows it as contributions. The plan expected about ${money(RV.explain(d).expectedPaidIn)}. Workplace pensions are left out: they come from pay.`);
+    draw();
+    return h('div', { class: 'rv-explain-wrap' }, box, h('div', { class: 'fields rv-paidin' }, ask));
   }
 
   // The reviewed plan with any market changes from the Markets step.
@@ -3298,18 +3338,6 @@
     const d = rv.draft;
     const finish = () => {
       const goals = rv.evals.after.goals.map(g => ({ title: g.title, probability: g.probability, expectedYear: g.expectedYear }));
-      // Money set aside, as it went: the new figures date is the review date.
-      const lastYear = d.years > 0 ? E.reservesAt(d.original, 0) : [];
-      for (const [id, st] of Object.entries(rv.reserves || {})) {
-        const r = (d.plan.reserves || []).find(x => x.id === id);
-        if (!r) continue;
-        if (r.kind === 'emergency') r.amount = Math.max(0, st.amount || 0);
-        else if (r.kind === 'saving') r.saved = Math.max(0, st.saved || 0);
-        else {
-          const last = lastYear.find(x => x.id === id);
-          r.left = st.keep && last ? Math.max(0, last.amount - (st.spent || 0)) : 0;
-        }
-      }
       ws = RV.apply(ws, d, { scenarioIds: [...rv.scenarioIds], market: rv.market, date: d.date, goals, note: rv.note });
       $('#reviewWiz').close();
       rv = null;
@@ -4284,8 +4312,8 @@
               field('Contributions as', selectInput([['pct', '% of salary'], ['fixed', '£ per month']], ...bind(item, 'pensionMode'), { rerender: 'income' })),
               field('You pay', item.pensionMode === 'pct' ? numInput(...bind(item, 'employeePension'), { step: 0.5, suffix: '%' }) : moneyInput(...bind(item, 'employeePension'))),
               field('Employer pays', item.pensionMode === 'pct' ? numInput(...bind(item, 'employerPension'), { step: 0.5, suffix: '%' }) : moneyInput(...bind(item, 'employerPension'))),
-              item.tax === 'uk' && !ignore
-                ? h('div', { class: 'field' }, h('span', {}, 'Paid by'), switchInput('Salary sacrifice', ...bind(item, 'sacrifice')), h('span', { class: 'hint' }, 'Saves NI too (only on the first £2,000 a year from April 2029).'))
+              !ignore
+                ? h('div', { class: 'field' }, h('span', {}, 'Paid by'), switchInput('Salary sacrifice', ...bind(item, 'sacrifice')), h('span', { class: 'hint' }, item.tax === 'uk' ? 'Saves NI too (only on the first £2,000 a year from April 2029).' : 'Take-home pay is after your contributions; both still go into the pot. With salary sacrifice, the plan can also keep your income under £100,000.'))
                 : h('p', { class: 'hint', style: 'align-self:center' }, 'Take-home pay is after your contributions; both still go into the pot.'))) : null),
         h('details', { class: 'trend' },
           h('summary', {}, 'Typical trend'),
@@ -4432,7 +4460,7 @@
     const items = p.accounts.map(a => {
       const main = [];
       const extra = [];
-      main.push(field(a.type === 'property' ? 'Value' : a.type === 'debt' ? 'Amount owed' : 'Balance', moneyInput(...bind(a, 'balance'))));
+      main.push(field(a.type === 'property' ? 'Value' : a.type === 'debt' ? 'Amount owed' : 'Balance', moneyInput(() => a.balance, v => { a.balance = v; if (a.type !== 'gia') a.basis = v; })));
       if (E.OWNED_TYPES.includes(a.type)) main.push(field('Whose', selectInput(ownerOptions(false), ...bind(a, 'owner'))));
       if (a.type === 'lisa') {
         main.push(field('Pay in each year', moneyInput(...bind(a, 'contribution')), `Up to ${money(R.LISA.maxContribution)}; the government adds 25%. Paid from your surplus before other ISAs, until 50.`));
@@ -4484,14 +4512,7 @@
         more(`account-${a.id}`, 'More options', h('div', { class: 'fields' }, extra))));
     });
 
-    const add = type => h('button', { type: 'button', class: 'btn small', onclick: () => {
-      const acc = E.normalizePlan({ ...p, accounts: [{ name: ACCOUNT_LABELS[type], type, owner: 'p1', balance: 0 }] }).accounts[0];
-      p.accounts.push(acc);
-      editing.add(acc.id);
-      explorerValues = null;
-      renderSection('accounts');
-      refresh();
-    } }, `+ ${ACCOUNT_LABELS[type]}`);
+    const add = type => h('button', { type: 'button', class: 'btn small', onclick: () => addAccountOf(type) }, `+ ${ACCOUNT_LABELS[type]}`);
     return [
       sectionHead('accounts', 'Accounts', `What you had and owed on ${fmtDate(asOf())}. The yearly review brings them up to date; for a quick update between reviews, use Update balances on Home.`),
       sectionSummary('accounts', () => {
@@ -4530,6 +4551,25 @@
     ];
   }
 
+  // A new pot of money set aside, in the most likely account (savings in an ISA, the rest in cash).
+  function addReserveOf(kind) {
+    const p = plan();
+    const accts = p.accounts.filter(a => E.RESERVE_ACCOUNTS.includes(a.type) && !a.excluded);
+    const evNames = [...new Set(p.events.filter(e => e.kind === 'expense').map(e => e.name))];
+    const items = p.expenses.filter(e => !(e.key || '').startsWith('life:'));
+    const pick = types => (accts.find(a => types.includes(a.type)) || accts[0] || {}).id || '';
+    const base = { kind, accountId: pick(kind === 'saving' ? ['isa', 'gia'] : ['cash']) };
+    if (kind === 'saving') Object.assign(base, { eventName: evNames[0] || '', name: evNames[0] || 'Saving up' });
+    if (kind === 'budget') {
+      const e = items.find(x => x.freq === 'year' && !p.reserves.some(r => r.expenseId === x.id)) || items.find(x => x.freq === 'year') || items[0];
+      if (!e) { toast('Add the spending item first (Finances → Spending).'); return; }
+      Object.assign(base, { expenseId: e.id, name: e.name });
+    }
+    p.reserves.push(E.normalizePlan({ ...p, reserves: [base] }).reserves[0]);
+    renderSection('strategy');
+    schedule();
+  }
+
   // Money set aside: one row per pot, and buttons to add each kind.
   function reservesEditor() {
     const p = plan();
@@ -4565,18 +4605,7 @@
           h('button', { type: 'button', class: 'btn small ghost', 'aria-label': `Remove ${r.name}`, onclick: () => { p.reserves.splice(i, 1); rerender(); } }, 'Remove')),
         h('div', { class: 'fields' }, own));
     });
-    const add = kind => {
-      const pick = types => (accts.find(a => types.includes(a.type)) || accts[0] || {}).id || '';
-      const base = { kind, accountId: pick(kind === 'saving' ? ['isa', 'gia'] : ['cash']) };
-      if (kind === 'saving') Object.assign(base, { eventName: evNames[0] || '', name: evNames[0] || 'Saving up' });
-      if (kind === 'budget') {
-        const e = items.find(x => x.freq === 'year') || items[0];
-        if (!e) { toast('Add the spending item first (Finances → Spending).'); return; }
-        Object.assign(base, { expenseId: e.id, name: e.name });
-      }
-      p.reserves.push(E.normalizePlan({ ...p, reserves: [base] }).reserves[0]);
-      rerender();
-    };
+    const add = addReserveOf;
     return h('div', { class: 'reserves-edit', id: 'reservesEdit' },
       h('div', { class: 'sub-fields' }, h('h3', {}, 'Money set aside')),
       h('p', { class: 'hint' }, 'Mark the part of an account that is spoken for, so Home shows what is free to use. The plan already counts what each pot pays for (the cash buffer, one-off costs and the spending list), so nothing is taken twice.'),
@@ -5027,8 +5056,8 @@
         sg.action ? h('button', { type: 'button', class: 'btn small primary', onclick: sg.action[1] }, sg.action[0]) : null,
         h('button', { type: 'button', class: 'linkish', 'aria-label': `Hide: ${sg.title}`, onclick: () => hide(sg.id) }, sg.tone === 'guide' ? 'Not now' : 'Already sorted'))));
     setKids($('#ovInsights'),
-      h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Suggestions for you'),
-        h('p', { class: 'sub' }, `${list.length ? `${list.length} things worth a look, most important first.` : 'Nothing to look at right now.'} Rules of thumb for ${R.TAX_YEAR}, not financial advice.`))),
+      h('div', { class: 'do-head' }, h('h3', {}, 'Worth a look'),
+        h('p', { class: 'sub' }, `${list.length ? `${list.length} suggestion${list.length === 1 ? '' : 's'} and guides, most important first.` : 'Nothing to look at right now.'} Rules of thumb for ${R.TAX_YEAR}, not financial advice.`)),
       list.length ? carousel(slides, 'Suggestions') : null,
       h('div', { class: 'sg-foot' },
         more('home-guides', 'All guides', h('div', { id: 'ovGuides' })),
@@ -5773,6 +5802,14 @@
         actions: [['Update balances', openUpdate], ['Full review', () => openReview()]] });
     }
     for (const w of model.warnings) out.push({ id: `w:${w}`, icon: 'warn', tone: 'warn', title: 'Check your plan', text: w, actions: [] });
+    // Still the example, or the guide was left part-way: offer to carry on.
+    const su = ws.guides.setup && ws.guides.setup.answers;
+    const isExample = people().some(x => x.name === 'Alex') && plan().accounts.some(a => /^Alex /.test(a.name));
+    if (setupStep === null && !(su && su.done) && (isExample || su)) {
+      out.unshift({ id: 'setup', icon: 'review', tone: 'accent', title: su ? 'Carry on setting up your plan' : 'Set up your own plan',
+        text: su ? `You stopped at step ${Number(su.step) + 1} of ${SETUP_STEPS.length}: ${SETUP_STEPS[Number(su.step)] ? SETUP_STEPS[Number(su.step)].title.toLowerCase() : ''}.` : 'This is an example household. A guide goes through your own plan one part at a time, with what each figure means.',
+        actions: [[su ? 'Carry on' : 'Start the guide', () => openSetup()]] });
+    }
     return out;
   }
 
@@ -5790,7 +5827,14 @@
         h('span', { class: 'ins-ico' }, glyph(n.icon)),
         h('div', {}, h('strong', {}, n.title), h('p', {}, n.text),
           n.actions.length ? h('div', { class: 'add-row' }, n.actions.map(([label, fn], i) => h('button', { type: 'button', class: `btn small${i === 0 ? ' primary' : ''}`, onclick: () => { $('#notifyMenu').open = false; fn(); } }, label))) : null))))
-        : h('p', { class: 'sub' }, 'Nothing needs doing. Horizon will remind you when your figures are a month old and when the yearly review comes round.'));
+        : h('p', { class: 'sub' }, 'Nothing needs doing. Horizon will remind you when your figures are a month old and when the yearly review comes round.'),
+      list.length ? h('p', { class: 'notify-foot' }, 'Also at the top of Home’s to-do list.') : null);
+    // The same, at the top of Home's to-do list.
+    const needs = $('#ovNeeds');
+    if (needs) setKids(needs, list.length ? h('ul', { class: 'needs-list' }, list.map(n => h('li', { class: `needs-item ${n.tone}`, 'data-notify': n.id },
+      h('span', { class: 'ins-ico' }, glyph(n.icon)),
+      h('div', {}, h('span', { class: 'eyebrow' }, n.tone === 'warn' ? 'Check' : 'Needs you'), h('strong', {}, n.title), h('p', {}, n.text)),
+      n.actions.length ? h('div', { class: 'needs-actions' }, n.actions.map(([label, fn], i) => h('button', { type: 'button', class: `btn small${i === 0 ? ' primary' : ''}`, onclick: fn }, label))) : null))) : null);
   }
 
   function renderScenarioPicker() {
@@ -5893,6 +5937,423 @@
     refresh();
   }
 
+  // ------------------------------------------------------------------ get started: setting up a plan
+  // A panel beside the real pages that walks someone new through their plan, one part at a time:
+  // it asks a few questions (each with an "i"), adds the right kind of item with one click and opens
+  // it, and says which fields to fill in and what they mean. Everything is typed into the normal
+  // editors, so the guide can be closed and picked up again at any point.
+
+  const firstVisit = (() => { try { return !localStorage.getItem(STORE); } catch { return false; } })();
+  let setupStep = null;   // index into SETUP_STEPS while the panel is open
+
+  // Adding items, as the buttons on each page do (and opening them to fill in).
+  function addAccountOf(type, extra = {}) {
+    const p = plan();
+    const acc = E.normalizePlan({ ...p, accounts: [{ name: ACCOUNT_LABELS[type], type, owner: E.OWNED_TYPES.includes(type) ? 'p1' : 'joint', balance: 0, ...extra }] }).accounts[0];
+    p.accounts.push(acc);
+    editing.add(acc.id);
+    explorerValues = null;
+    renderSection('accounts');
+    refresh();
+    return acc;
+  }
+  function addIncomeOf(kind, extra = {}) {
+    const p = plan();
+    const item = E.normalizePlan({ ...p, income: [{ name: kind === 'dbpension' ? 'Defined benefit pension' : kind === 'salary' ? 'Salary' : kindLabel(kind), owner: 'p1', kind, tax: 'none', amount: 0, freq: kind === 'dbpension' ? 'year' : 'month', growth: kind === 'salary' ? 3 : 0, inflationLinked: kind !== 'salary', ...extra }] }).income[0];
+    setKind(item, kind);
+    if (extra.owner) item.owner = extra.owner;
+    p.income.push(item);
+    editing.add(item.id);
+    renderSection('income');
+    refresh();
+    return item;
+  }
+  function addExpenseItem(extra = {}) {
+    const p = plan();
+    const e = E.normalizePlan({ ...p, expenses: [{ name: 'New expense', amount: 0, freq: 'month', inflationLinked: true, ...extra }] }).expenses[0];
+    p.expenses.push(e);
+    editing.add(e.id);
+    renderSection('expenses');
+    refresh();
+    return e;
+  }
+  function addEventItem() {
+    const p = plan();
+    const ev = E.normalizePlan({ ...p, events: [{ name: 'New event', kind: 'expense', year: p.startYear + 1, amount: 0 }] }).events[0];
+    p.events.push(ev);
+    editing.add(ev.id);
+    renderSection('events');
+    refresh();
+    return ev;
+  }
+
+  // A term with its "i": the title and plain-English text shown when it is clicked.
+  const sInfo = (title, text) => { const b = infoBtn({ title, text: () => text }); b.classList.add('keep'); return b; };
+  // One thing to fill in: the label as it appears on the page, and what it means.
+  const sField = (label, text, note) => h('li', { class: 'st-field' }, h('span', {}, h('strong', {}, label), sInfo(label, text)), note ? h('small', {}, note) : null);
+  const sFields = (...items) => h('ul', { class: 'st-fields' }, items.filter(Boolean));
+  // A question with its "i" and choices; picking one runs it and redraws the panel.
+  function sAsk(question, why, choices) {
+    return h('div', { class: 'st-ask' },
+      h('p', { class: 'st-q' }, h('strong', {}, question), sInfo(question, why)),
+      h('div', { class: 'st-choices' }, choices.map(([label, sub, pick, on]) => h('button', {
+        type: 'button', class: 'st-choice', 'aria-pressed': String(!!on),
+        onclick: () => { pick(); renderSetup(); },
+      }, h('strong', {}, label), sub ? h('small', {}, sub) : null))));
+  }
+  // Buttons that add an item and open it on the page.
+  const sAdd = (label, fn) => h('button', { type: 'button', class: 'btn small', onclick: () => { fn(); renderSetup(); setTimeout(() => { const el = document.querySelector('.edit-wrap:last-of-type, [data-editing]'); if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 60); } }, label);
+  const sAdds = (...btns) => h('div', { class: 'st-adds' }, btns);
+  const sText = (...t) => h('p', { class: 'st-text' }, ...t);
+  const sHave = (items) => {
+    const list = items.filter(Boolean);
+    return list.length ? h('div', { class: 'st-have' }, h('span', { class: 'eyebrow' }, 'In your plan so far'), h('ul', {}, list.map(x => h('li', {}, glyph('good'), x)))) : null;
+  };
+  const namesOf = list => list.map(x => x.name).join(', ');
+  const poss = n => (n === 'You' ? 'Your' : `${n}’s`);
+  const accountsOf = (...types) => plan().accounts.filter(a => types.includes(a.type));
+  const personPay = x => plan().income.filter(i => i.kind === 'salary' && i.owner === x.id);
+  const openMoreOptions = sel => { for (const d of $$(`${sel} details.more`)) if (!d.open) d.querySelector('summary').click(); };
+
+  const SETUP_STEPS = [
+    {
+      id: 'start', title: 'Set up your own plan', route: 'home',
+      render: () => {
+        const p = plan();
+        const isExample = p.household.people.some(x => x.name === 'Alex') && p.accounts.some(a => /^Alex /.test(a.name));
+        return [
+          sText('Horizon shows where your money is heading: what you will have, whether your goals are on track and what to do each month. This guide goes through your plan one part at a time, about 30 to 45 minutes. You can close it whenever you like and carry on later (Data → Set up my plan).'),
+          h('div', { class: 'st-have' }, h('span', { class: 'eyebrow' }, 'Have these to hand'), h('ul', {}, [
+            'Bank and savings balances', 'ISA, investment and pension balances (apps or statements)', 'Payslips, or what lands in your account each month',
+            'Mortgage statement: balance, rate, monthly payment, when the fixed rate ends', 'Your State Pension forecast (gov.uk/check-state-pension)', 'A rough idea of what you spend',
+          ].map(x => h('li', {}, x)))),
+          isExample ? sAsk('Start from a blank plan?', 'Horizon opens with an example household (Alex and Sam) so you can look around. Starting blank clears it, so everything you see afterwards is yours. Nothing leaves this computer: the plan is kept in this browser, and you can save it to a file at the end.', [
+            ['Yes, start my own plan', 'Clears the example', () => startBlankPlan(), false],
+            ['Not yet, keep the example', 'You can start blank later', () => {}, true],
+          ]) : sText('Your plan is already here: the steps below go through each part, so you can check or fill in what is missing.'),
+          h('div', { class: 'st-ask' },
+            h('p', { class: 'st-q' }, h('strong', {}, 'Your figures are as at'), sInfo('Your figures are as at', 'The date the balances you are about to type in are from: usually today. Everything Horizon predicts moves on from this date, and each yearly review moves it on again. If you copy figures from a statement or a spreadsheet made on another day, use that day.')),
+            h('input', { type: 'date', value: p.asOf || today(), 'aria-label': 'Figures as at', onchange: e => { if (E.isDate(e.target.value)) { plan().asOf = e.target.value; renderPlan(); refresh(); } } })),
+          sAsk('Where do you live?', 'Scotland has its own income tax bands (19% to 48%); England, Wales and Northern Ireland share the UK bands (20% to 45%). National Insurance, capital gains tax and pensions are the same everywhere.', [
+            ['Scotland', null, () => { plan().household.region = 'scotland'; plan().household.ignoreTax = false; renderPlan(); refresh(); }, p.household.region === 'scotland'],
+            ['England, Wales or NI', null, () => { plan().household.region = 'ruk'; plan().household.ignoreTax = false; renderPlan(); refresh(); }, p.household.region === 'ruk'],
+          ]),
+        ];
+      },
+    },
+    {
+      id: 'people', title: 'Who is the plan for?', route: 'finances/assumptions', target: '#sec-household',
+      render: () => {
+        const ps = people();
+        return [
+          sAsk('Just you, or you and a partner?', 'A plan for two counts both incomes, both pensions and both State Pensions, and lets accounts be joint. If you share money with a partner, plan together: retirement only works if it works for both of you.', [
+            ['Just me', null, () => { if (people().length > 1) removePartner(); }, ps.length === 1],
+            ['Me and a partner', null, () => { if (people().length < 2) addPartner(); }, ps.length > 1],
+          ]),
+          sText('On the page, for each person:'),
+          sFields(
+            sField('Name', 'Just to label things: “Sam’s pension”, “Alex retires at 60”.'),
+            sField('Age now', 'Age today, in whole years. Everything is worked out year by year from here.'),
+            sField('Retirement age', 'When pay stops. It does not need to be right: Horizon shows how likely it is to work, and you can try other ages later.'),
+          ),
+          sText('Then open ', h('strong', {}, 'More options'), ' under each person:'),
+          sFields(
+            sField('Plan until age', 'How long the money needs to last. 95 is a cautious choice: about 1 in 4 people now in their 60s reach it.'),
+            sField('State Pension (£/year, today)', `What the State Pension will pay you a year, in today’s money. Get your forecast at gov.uk/check-state-pension: it depends on your years of National Insurance (35 years for the full ${money(R.STATE_PENSION_FULL)} a year). Enter the yearly figure.`),
+            sField('State Pension age', 'When it starts. Set by your date of birth: 66 now, rising to 67 and 68. Your forecast says yours.'),
+            sField('Can access pension from', 'The earliest age you can take money from a workplace or personal pension. 57 for most people from April 2028; some older schemes allow 55.'),
+          ),
+          h('div', { class: 'st-adds' }, h('button', { type: 'button', class: 'btn small', onclick: () => openMoreOptions('#sec-household') }, 'Open “More options”')),
+          sHave([`${ps.length === 1 ? 'Just' : 'Two people:'} ${namesOf(ps)}`]),
+        ];
+      },
+    },
+    {
+      id: 'pay', title: 'Your pay', route: 'finances/income', target: '#sec-income',
+      render: () => [
+        sText('Add each person’s pay from work. Skip anyone not working.'),
+        sAdds(...people().map(x => sAdd(`+ ${poss(x.name)} pay`, () => addIncomeOf('salary', { owner: x.id, name: `${x.name} take-home pay`, endRef: 'retire' })))),
+        sText('Then fill in, on the page:'),
+        sFields(
+          sField('Amount', 'Per month or per year: choose next to the amount.'),
+          sField('Tax', 'Easiest is take-home: what lands in your bank account after tax, National Insurance and pension (your payslip’s “net pay”). Or enter the salary before tax and Horizon works out tax and NI. Take-home is simpler and matches your bank; before tax lets Horizon test tax-saving ideas exactly.'),
+          sField('Pay rises', 'How much pay goes up each year on average, including inflation. 3–3.5% is typical while your career is progressing. “Rising like that until age” and “Then rises” let it level off later (e.g. 3.5% until 50, then 2.5%, in line with prices).'),
+          sField('Workplace pension', 'Under More options: what you and your employer pay into your pension each month, from your payslip. As a % of salary or £ a month. Leave at 0 if you have none.'),
+          sField('Salary sacrifice', 'If your payslip shows the pension coming off before tax as “salary sacrifice” (or “SMART”), switch it on: you pay no tax or NI on it. Your employer can tell you.'),
+        ),
+        sHave(people().map(x => (personPay(x).length ? `${x.name}: ${personPay(x).map(i => `${money(i.amount)} a ${i.freq}`).join(', ')}` : null))),
+      ],
+    },
+    {
+      id: 'other-income', title: 'Other income', route: 'finances/income', target: '#sec-income',
+      render: () => {
+        const other = plan().income.filter(i => i.kind !== 'salary');
+        return [
+          sText('Anything else coming in now or later. Skip what you do not have.'),
+          sAdds(sAdd('+ Rent', () => addIncomeOf('rental', { owner: 'joint', name: 'Rent', tax: 'uk', endRef: 'end' })),
+            sAdd('+ Defined benefit pension', () => addIncomeOf('dbpension', { owner: people()[people().length - 1].id })),
+            sAdd('+ Other income', () => addIncomeOf('other', { owner: 'joint', endRef: 'end' }))),
+          sFields(
+            sField('Rent', 'From a property you let out. Under it: the exchange rate if it is paid in another currency (e.g. 0.84 for euros), costs as a % (management, repairs, empty months) and how it is taxed (a flat rate if it is taxed abroad).'),
+            sField('Defined benefit pension', 'A pension that pays a set income for life, worked out from your salary and years in the scheme: USS for universities, the NHS, teachers’, civil service and other “final salary” or “career average” schemes. Enter what is built up so far (your yearly statement says), or use “Not sure what’s built up? Estimate it” with the year you joined and your salary.'),
+            sField('Other income', 'Anything else: a gift each year, a part-time job in retirement, maintenance. Choose when it starts and ends under More options.'),
+          ),
+          sHave([other.length ? `${other.length} other income${other.length === 1 ? '' : 's'}: ${namesOf(other)}` : null]),
+        ];
+      },
+    },
+    {
+      id: 'cash', title: 'Bank and savings', route: 'finances/portfolio', target: '#sec-accounts',
+      render: () => [
+        sText('Money in current accounts and savings accounts. One line per account, or one line for all of it: the plan treats cash the same.'),
+        sAdds(sAdd('+ Cash & savings', () => addAccountOf('cash', { name: 'Bank account' }))),
+        sFields(
+          sField('Balance', 'What is in it today. The date your figures are as at is at the top of the page; the yearly review brings them up to date.'),
+          sField('Count this account', 'Under More options. Turn off to list something without counting it, e.g. money that is not really yours.'),
+        ),
+        sHave(accountsOf('cash').map(a => `${a.name}: ${money(a.balance)}`)),
+      ],
+    },
+    {
+      id: 'investments', title: 'ISAs and investments', route: 'finances/portfolio', target: '#sec-accounts',
+      render: () => [
+        sText('Each ISA or investment account, with who it belongs to.'),
+        sAdds(sAdd('+ ISA', () => addAccountOf('isa', { owner: 'p1', name: `${people()[0].name} ISA` })),
+          sAdd('+ Lifetime ISA', () => addAccountOf('lisa')),
+          sAdd('+ General investment account', () => addAccountOf('gia')),
+          sAdd('+ Bonds & gilts', () => addAccountOf('bonds'))),
+        sFields(
+          sField('ISA', `A stocks & shares or cash ISA: no tax on growth or withdrawals. Each person can pay in ${money(R.ISA_ALLOWANCE)} a year. Choose whose it is under “Whose”.`),
+          sField('Lifetime ISA', 'For under-40s: the government adds 25% to up to £4,000 a year, for a first home or for after 60. Taking it out for anything else loses 25%.'),
+          sField('General investment account', 'Investments outside an ISA or pension: gains and dividends can be taxed. Enter the amount you paid in under More options, to work out capital gains.'),
+          sField('Bonds & gilts', 'Bonds or UK government gilts held directly: their interest rate (the “coupon”), the year they mature, whether they are held in an ISA (More options), and what happens to the coupons.'),
+        ),
+        sHave(accountsOf('isa', 'lisa', 'gia', 'bonds').map(a => `${a.name}: ${money(a.balance)}`)),
+      ],
+    },
+    {
+      id: 'pensions', title: 'Pension pots', route: 'finances/portfolio', target: '#sec-accounts',
+      render: () => [
+        sText('Workplace and personal pensions that build up a pot of money (defined contribution, SIPPs). Pensions that pay a set income go under Other income instead.'),
+        sAdds(...people().map(x => sAdd(`+ ${poss(x.name)} pension`, () => addAccountOf('pension', { owner: x.id, name: `${x.name} pension` })))),
+        sFields(
+          sField('Balance', 'The pot’s value today, from the provider’s app or latest statement. Add up several pots, or add one line each.'),
+          sField('Whose', 'Each pension belongs to one person: it is taxed as their income when drawn.'),
+          sField('Count this account', 'Under More options. Turn off for a pot you want listed but not counted yet, e.g. one with nothing in it.'),
+        ),
+        sHave(accountsOf('pension').map(a => `${a.name}: ${money(a.balance)}${a.excluded ? ' (not counted)' : ''}`)),
+      ],
+    },
+    {
+      id: 'home', title: 'Your home and mortgage', route: 'finances/portfolio', target: '#sec-accounts',
+      render: () => [
+        sText('Homes and other property you own, and what you owe on them.'),
+        sAdds(sAdd('+ Property', () => addAccountOf('property', { name: 'Home' })), sAdd('+ Mortgage or loan', () => addAccountOf('debt', { name: 'Mortgage' }))),
+        sFields(
+          sField('Value', 'What it would sell for today, roughly (a recent valuation or similar homes nearby).'),
+          sField('Growth', 'How much it rises in value a year on average. UK house prices have risen about 3–4% a year over the long run, roughly 1% above inflation.'),
+          sField('Amount owed', 'From your latest mortgage statement or app.'),
+          sField('Interest rate', 'The rate you pay now.'),
+          sField('Monthly payment', 'What leaves your account each month for the mortgage.'),
+          sField('Rate fixed until', 'Under More options: the year your fixed deal ends. After it, choose “Keep the end date (payment changes)” if you will remortgage onto a new deal, as most people do.'),
+        ),
+        sHave(accountsOf('property', 'debt').map(a => `${a.name}: ${a.type === 'debt' ? '−' : ''}${money(a.balance)}`)),
+      ],
+    },
+    {
+      id: 'spending', title: 'What you spend', route: 'finances/spending', target: '#sec-expenses',
+      render: () => {
+        const p = plan();
+        const now = p.expenses.reduce((acc, e) => acc + E.streamAt(e, p, 0), 0);
+        return [
+          sText('Everything you spend except the mortgage (that is with the accounts). Two ways:'),
+          sAdds(h('button', { type: 'button', class: 'btn small primary', onclick: openWizard }, 'Spending check-up'), sAdd('+ Add one item', () => addExpenseItem())),
+          sFields(
+            sField('Spending check-up', 'Goes through the usual categories (home, food, transport, children, holidays…) with typical UK amounts, so nothing is forgotten.'),
+            sField('One item at a time', 'Type the name and amount, a month or a year. Copying your own list, e.g. from a spreadsheet or your bank app, works well.'),
+            sField('a month / a year', 'Holidays, repairs and other yearly costs as a yearly amount; bills as a monthly one.'),
+            sField('Ends', 'When it stops: at retirement, at an age (e.g. childcare until a child starts school), or at the end of the plan. Under More: when it starts, and whose age it follows.'),
+          ),
+          sHave([p.expenses.length ? `${p.expenses.length} items: ${money(now / 12)} a month (${money(now)} a year)` : null]),
+        ];
+      },
+    },
+    {
+      id: 'later', title: 'Costs that come later', route: 'finances/spending', target: '#sec-events',
+      render: () => {
+        const p = plan();
+        return [
+          sText('Big costs years from now are easy to forget and change the picture a lot.'),
+          sAdds(h('button', { type: 'button', class: 'btn small primary', onclick: openLifeWizard }, 'Future costs'), sAdd('+ One-off event', () => addEventItem())),
+          sFields(
+            sField('Future costs', 'Children (school, university, a wedding), cars, home repairs every few years, care in later life and helping family, with typical UK amounts. It adds them as spending items and one-off events you can change.'),
+            sField('One-off event', 'A single cost or windfall in a given year: a new kitchen, an inheritance, a lump sum off the mortgage. In today’s money; it rises with prices to that year.'),
+          ),
+          sHave([p.events.length ? `${p.events.length} one-off events` : null, p.expenses.some(e => (e.key || '').startsWith('life:')) ? `${p.expenses.filter(e => (e.key || '').startsWith('life:')).length} future costs in spending` : null]),
+        ];
+      },
+    },
+    {
+      id: 'set-aside', title: 'Money set aside', route: 'finances/saving', target: '#reservesEdit',
+      render: () => {
+        const rs = plan().reserves;
+        const KIND = { emergency: 'Emergency fund', saving: 'Saving up', budget: 'Yearly budget' };
+        return [
+          sText('Mark the part of an account that is already spoken for, so Home shows what is free to use. Nothing is counted twice.'),
+          sAdds(sAdd('+ Emergency fund', () => addReserveOf('emergency')), sAdd('+ Saving up for a cost', () => addReserveOf('saving')), sAdd('+ Yearly budget', () => addReserveOf('budget'))),
+          sFields(
+            sField('Emergency fund', 'Money kept for the unexpected (losing a job, a big repair): usually 3–6 months of spending, in an easy-access account. Not to be spent or invested. It still counts in net worth.'),
+            sField('Saving up for a cost', 'Money building up for a cost that comes back, like home repairs every few years. It stays invested until it is needed, but it is spoken for, so it is not counted in net worth.'),
+            sField('Yearly budget', 'A yearly spending item, like holidays, that sits in the bank until spent. The plan counts it as spent; each yearly review asks how much is left.'),
+            sField('Held in', 'Which account the money is in.'),
+          ),
+          sHave(rs.map(r => `${KIND[r.kind]}: ${r.name}`)),
+        ];
+      },
+    },
+    {
+      id: 'saving', title: 'How you save', route: 'finances/saving', target: '#sec-strategy',
+      render: () => [
+        sText('What happens to money left over each month. The suggestions on the page are a good start; the main settings:'),
+        sFields(
+          sField('Cash buffer to keep', 'Cash kept in the bank before anything is invested: usually the same as the emergency fund.'),
+          sField('Spending in retirement (a year)', 'What you expect to spend a year once retired, in today’s money. 0 keeps your spending list. A common rule: your list now, without the mortgage and work costs, plus a margin.'),
+          sField('Pensions first, with tax relief', 'On the Saving & investing card above: once ISAs are full, put the rest into a pension (tax relief on the way in, locked until 57) instead of a general account.'),
+          sField('Keep income under £100,000', 'Between £100,000 and £125,140 the tax-free allowance is withdrawn, so tax reaches over 60%. Paying the part above £100,000 into the pension avoids it.'),
+          sField('Invest cash above the buffer', 'Money above the buffer (a gilt that matures, a windfall) is invested each year instead of sitting in cash.'),
+        ),
+      ],
+    },
+    {
+      id: 'assumptions', title: 'Markets and inflation', route: 'finances/assumptions', target: '#sec-market',
+      render: () => [
+        sText('Long-run averages the plan uses. The defaults are sensible; change them only if you see things differently.'),
+        sFields(
+          sField('Inflation', 'How fast prices rise on average. The Bank of England aims for 2%; 2.5% is a little cautious.'),
+          sField('Stock returns', 'Average yearly growth of shares, before inflation. 7% is close to the long-run average for global shares.'),
+          sField('In shares now', 'Share of your investments in shares (a global tracker fund is 100%); the rest in bonds.'),
+          sField('In shares by retirement', 'Many people move towards bonds as retirement nears, so a crash just before hurts less. 60% is a common mix.'),
+          sField('Fund & platform fees', 'What your investment platform and funds charge a year, together. E.g. 0.14% for a cheap global tracker with a low platform fee.'),
+          sField('Tax thresholds frozen until', 'Under More options. Tax bands are frozen until 2031 under current law, then rise with inflation.'),
+        ),
+      ],
+    },
+    {
+      id: 'goals', title: 'Your goals', route: 'home', target: '#ovGoalsCard',
+      render: () => {
+        const gs = plan().goals;
+        return [
+          sText('What you are aiming for. Horizon shows the chance of each and what moves it.'),
+          sAdds(h('button', { type: 'button', class: 'btn small primary', onclick: () => openGoalWizard(null) }, '+ Add a goal')),
+          sFields(
+            sField('Retire at an age', 'For each person: can you stop working then and keep spending what you plan to, until the end of the plan?'),
+            sField('Reach an amount', 'E.g. £1 million by a year. Choose what counts: everything, everything except pensions, or savings only.'),
+            sField('Mortgage-free by', 'The year the mortgage is paid off.'),
+            sField('Emergency fund', 'Enough set aside to cover some months of spending.'),
+          ),
+          sHave(gs.map(g => E.autoTitle(g, plan()))),
+        ];
+      },
+    },
+    {
+      id: 'questions', title: 'A few questions', route: 'home',
+      render: () => [
+        sText('Some details change the advice: how your pension is paid, where savings go once the ISAs are full, how much to hold in shares. They are asked one at a time, with what is usually recommended.'),
+        sAdds(h('button', { type: 'button', class: 'btn small primary', onclick: () => openGuide('questions') }, 'Answer the questions')),
+        sHave([(() => { const n = questionsLeft(); return n ? `${n} still to answer` : 'All answered'; })()]),
+      ],
+    },
+    {
+      id: 'save', title: 'Save a copy', route: 'home',
+      render: () => [
+        sText('Your plan is kept in this browser only. Save it to a file and keep it somewhere safe: it is how you open it on another computer, and a backup if the browser is cleared.'),
+        sAdds(h('button', { type: 'button', class: 'btn small primary', onclick: exportFile }, 'Save to a file')),
+        sFields(
+          sField('Each year', 'Each autumn, the yearly review swaps the estimates for your real balances and shows how close the plan was. Home reminds you.'),
+          sField('In between', 'Update a few balances whenever you like (Home → Update balances): the plan moves on from them.'),
+        ),
+        sText('That is everything. Home now shows where you are heading and what to do.'),
+      ],
+    },
+  ];
+
+  function startBlankPlan() {
+    const id = E.uid();
+    const blank = E.normalizePlan({ startYear: E.currentYear(), asOf: today(), household: { region: plan().household.region || 'scotland', people: [{ name: 'You', age: 35, retireAge: 65 }] }, accounts: [], income: [], expenses: [], events: [], goals: [] });
+    ws = E.normalizeWorkspace({ scenarios: [{ id, name: 'My plan', plan: blank }], activeId: id, checkins: [], settings: ws.settings, guides: { setup: ws.guides.setup || { date: today(), answers: {} } } });
+    afterImport();
+  }
+
+  function setupPanel() {
+    let el = $('#setupPanel');
+    if (!el) {
+      el = h('aside', { id: 'setupPanel', class: 'setup-panel', 'aria-label': 'Get started', hidden: true });
+      document.body.append(el);
+    }
+    return el;
+  }
+
+  function openSetup(step) {
+    const saved = ws.guides.setup && ws.guides.setup.answers ? Number(ws.guides.setup.answers.step) : 0;
+    setupStep = Math.max(0, Math.min(SETUP_STEPS.length - 1, step ?? (Number.isFinite(saved) ? saved : 0)));
+    document.body.classList.add('setup-open');
+    goSetupStep(setupStep);
+  }
+
+  function closeSetup() {
+    setupStep = null;
+    document.body.classList.remove('setup-open');
+    for (const el of $$('.setup-focus')) el.classList.remove('setup-focus');
+    setupPanel().hidden = true;
+    renderNotifications();
+  }
+
+  function goSetupStep(i) {
+    setupStep = i;
+    const st = SETUP_STEPS[i];
+    ws.guides.setup = { date: today(), answers: { step: String(i), ...(i === SETUP_STEPS.length - 1 ? { done: 'yes' } : (ws.guides.setup && ws.guides.setup.answers.done ? { done: 'yes' } : {})) } };
+    save();
+    if (st.route && route.tab + (route.sub && route.tab === 'finances' ? `/${route.sub}` : '') !== st.route) navigate(st.route);
+    renderSetup();
+    setTimeout(() => {
+      for (const el of $$('.setup-focus')) el.classList.remove('setup-focus');
+      const t = st.target && $(st.target);
+      if (t) { t.classList.add('setup-focus'); t.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+    }, 80);
+  }
+
+  function renderSetup() {
+    if (setupStep === null) return;
+    const el = setupPanel();
+    const st = SETUP_STEPS[setupStep];
+    const n = SETUP_STEPS.length;
+    el.hidden = false;
+    setKids(el,
+      h('div', { class: 'st-head' },
+        h('div', {}, h('span', { class: 'eyebrow' }, `Get started · step ${setupStep + 1} of ${n}`), h('h2', { id: 'setupTitle' }, st.title)),
+        h('button', { type: 'button', class: 'btn ghost icon-btn small', 'aria-label': 'Close the guide (carry on later)', title: 'Close (carry on later from Data → Set up my plan)', onclick: closeSetup }, '✕')),
+      h('div', { class: 'st-bar' }, h('i', { style: `width:${((setupStep + 1) / n) * 100}%` })),
+      h('div', { class: 'st-body', id: 'setupBody' }, st.render()),
+      h('div', { class: 'st-foot' },
+        h('button', { type: 'button', class: 'btn small', id: 'setupBack', disabled: setupStep === 0, onclick: () => goSetupStep(setupStep - 1) }, 'Back'),
+        h('select', { class: 'st-jump', 'aria-label': 'Go to a step', onchange: e => goSetupStep(Number(e.target.value)) },
+          SETUP_STEPS.map((s, k) => h('option', { value: String(k), selected: k === setupStep }, `${k + 1}. ${s.title}`))),
+        setupStep < n - 1
+          ? h('button', { type: 'button', class: 'btn small primary', id: 'setupNext', onclick: () => goSetupStep(setupStep + 1) }, 'Next')
+          : h('button', { type: 'button', class: 'btn small primary', id: 'setupNext', onclick: () => { closeSetup(); toast('Your plan is set up. Home shows where you are heading and what to do.'); } }, 'Finish')));
+  }
+
+  // Keep the panel's "so far" lists in step with edits on the page.
+  function refreshSetup() {
+    if (setupStep === null) return;
+    const body = $('#setupBody');
+    if (!body || body.contains(document.activeElement)) return;
+    const scroll = body.scrollTop;
+    renderSetup();
+    const nb = $('#setupBody');
+    if (nb) nb.scrollTop = scroll;
+  }
+
   // ------------------------------------------------------------------ wiring
 
   function wire() {
@@ -5931,6 +6392,7 @@
     $('#exportBtn').addEventListener('click', () => { $('#dataMenu').open = false; exportFile(); });
     $('#importBtn').addEventListener('click', () => { $('#dataMenu').open = false; $('#importFile').click(); });
     $('#importFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); });
+    $('#setupBtn').addEventListener('click', () => { $('#dataMenu').open = false; openSetup(); });
     $('#blankBtn').addEventListener('click', () => {
       $('#dataMenu').open = false;
       if (!confirm('Start a blank plan? This replaces everything in Horizon. Save to a file first if you want to keep your data.')) return;
@@ -5995,7 +6457,9 @@
   refresh();
   if (infoObserver) infoObserver.observe(document.body, { childList: true, subtree: true });
   decorate(document.body);
+  // The first time Horizon opens in this browser: offer the guide to set up your own plan.
+  if (firstVisit && !/[?&]nosetup\b/.test(location.search)) openSetup(0);
 
   // Exposed for automated tests only.
-  window.__horizon = { get ws() { return ws; }, get model() { return model; }, get route() { return route; }, refresh, showTab, navigate, openReview, openUpdate };
+  window.__horizon = { get ws() { return ws; }, get model() { return model; }, get route() { return route; }, refresh, showTab, navigate, openReview, openUpdate, openSetup };
 })();

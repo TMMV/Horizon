@@ -187,6 +187,7 @@
     const out = {};
     for (const k of TYPES) out[k] = r[k];
     out.netWorth = r.netWorth;
+    out.locked = r.locked || 0;
     return out;
   }
 
@@ -235,13 +236,19 @@
       last: { accounts: snap(original.accounts), income: snap(original.income), expenses: snap(original.expenses) },
       expected: { accounts: {}, income: snap(plan.income), expenses: snap(plan.expenses) },
       readings: {},
-      touched: { accounts: {}, income: {}, expenses: {} },
+      touched: { accounts: {}, income: {}, expenses: {}, reserves: {} },
+      // Money set aside as it went (see setReserve): what is typed in the review for each pot.
+      reserveInputs: {},
+      // Paid into ISAs and investments since the figures date (null = not asked); see explain().
+      paidIn: null,
       prev,
       predicted: predictedFor(prev, year),
       actualSpending: 0,
       market: Object.fromEntries(MARKET_FIELDS.map(f => [f, { current: original.assumptions[f], next: original.assumptions[f] }])),
     };
     applyEstimates(draft, est);
+    // Budgets of the year just ended: all spent unless the review says otherwise.
+    if (years > 0) for (const r of E.reservesAt(original, 0)) if (r.kind === 'budget') draft.reserveInputs[r.id] = { spent: Math.round(r.amount), keep: true };
     return draft;
   }
 
@@ -249,6 +256,18 @@
   // estimate; a balance read during the year (moved on to the review date) is used as the
   // starting value and counts as entered.
   function applyEstimates(draft, est) {
+    // Pots set aside, as the plan expects them on the date: the emergency fund and what has been
+    // put aside for each cost (the new figures date is the review date).
+    for (const r of E.reservesAt(draft.original, est.years)) {
+      if (r.kind === 'budget' || draft.touched.reserves[r.id]) continue;
+      if (r.kind === 'saving') {
+        for (const p of [draft.plan, draft.expectedPlan]) {
+          const m = (p.reserves || []).find(x => x.id === r.id);
+          if (m) m.saved = r.dueYear ? Math.round(r.held) : null;
+        }
+      }
+      draft.reserveInputs[r.id] = r.kind === 'saving' ? { saved: Math.round(r.held) } : { amount: Math.round(r.amount) };
+    }
     for (const a of draft.plan.accounts) {
       const added = !draft.original.accounts.some(x => x.id === a.id);
       const m = added ? est.missing.find(x => x.type === a.type) : null;
@@ -285,6 +304,76 @@
   function progress(draft, kind) {
     const list = kind === 'accounts' ? draft.plan.accounts : kind === 'income' ? draft.plan.income : draft.plan.expenses;
     return { done: list.filter(x => draft.touched[kind][x.id]).length, total: list.length };
+  }
+
+  // What the review says about a pot set aside: the emergency fund now ({amount}), what has been
+  // put aside for a cost ({saved}), or how much of last year's budget was spent and whether to keep
+  // the rest for this year ({spent, keep}). Applied to the reviewed plan straight away.
+  function setReserve(draft, id, values) {
+    const r = (draft.plan.reserves || []).find(x => x.id === id);
+    if (!r) return;
+    const st = draft.reserveInputs[id] = { ...(draft.reserveInputs[id] || {}), ...values };
+    draft.touched.reserves[id] = true;
+    if (r.kind === 'emergency') r.amount = Math.max(0, st.amount || 0);
+    else if (r.kind === 'saving') r.saved = Math.max(0, st.saved || 0);
+    else {
+      const last = draft.years > 0 ? E.reservesAt(draft.original, 0).find(x => x.id === id) : null;
+      r.left = st.keep && last ? Math.max(0, last.amount - (st.spent || 0)) : 0;
+    }
+  }
+
+  // What the plan expected to be paid into ISAs and other investments (net of anything taken
+  // out) from the figures date to `years` later.
+  function expectedPaidIn(plan, years, proj = E.project(plan)) {
+    const f = Math.min(Math.max(0, years), proj.pre.N);
+    let sum = 0;
+    for (let k = 0; k < Math.ceil(f); k++) {
+      const r = proj.rows[k];
+      const v = r.toIsa + r.toGia + (r.toLisa || 0) + r.sweepIsa + r.sweepGia - r.wIsa - r.wGia - (r.wLisa || 0);
+      sum += v * Math.min(1, f - k);
+    }
+    return sum;
+  }
+
+  // Why net worth differs from what the plan expected on the review date, in parts that add up
+  // to the difference: markets, money put in, home value, the mortgage, pensions, budgets not
+  // spent, money kept set aside, and cash with everything else (the rest). Amounts in pounds;
+  // `why` texts leave the pounds to `values` so the page can format them.
+  function explain(draft) {
+    const A = byType(draft.plan), X = byType(draft.expectedPlan);
+    const f = yearsBetween(E.asOfDate(draft.original), draft.date);
+    const parts = [];
+    const add = (key, label, diff, why, values) => parts.push({ key, label, diff, why, values: values || {} });
+    const d = t => A[t] - X[t];
+    const inv = d('isa') + d('gia') + d('bonds');
+    const expIn = expectedPaidIn(draft.original, f);
+    if (Number.isFinite(draft.paidIn)) {
+      const more = draft.paidIn - expIn;
+      add('paidIn', more >= 0 ? 'Put in more' : 'Put in less', more, 'You paid in {paid}; the plan expected about {expected}.', { paid: draft.paidIn, expected: expIn });
+      add('markets', 'Markets', inv - more, inv - more >= 0 ? 'ISAs and investments grew more than the plan assumes.' : 'ISAs and investments grew less than the plan assumes.');
+    } else {
+      add('investments', 'ISAs & investments', inv, 'Markets, and how much you put in: say what you paid in to split the two.');
+    }
+    add('pension', 'Pensions', d('pension'), 'Mostly markets: pension contributions come from pay.');
+    add('property', 'Home value', d('property'), d('property') >= 0 ? 'Worth more than the plan assumed.' : 'Worth less than the plan assumed.');
+    add('debt', d('debt') <= 0 ? 'Mortgage: owe less' : 'Mortgage: owe more', -d('debt'), 'Overpayments, a new rate or a different payment.');
+    // Budgets of the year just ended: what was not spent is still in the bank.
+    const last = draft.years > 0 ? E.reservesAt(draft.original, 0).filter(r => r.kind === 'budget') : [];
+    const notSpent = last.map(r => ({ name: r.name, v: r.amount - ((draft.reserveInputs[r.id] || {}).spent ?? r.amount) }))
+      .filter(x => Math.abs(x.v) >= 0.5);
+    const budgets = notSpent.reduce((s, x) => s + x.v, 0);
+    if (notSpent.length) add('budgets', budgets >= 0 ? 'Budgets not all spent' : 'Budgets overspent', budgets,
+      budgets >= 0 ? `${notSpent.map(x => x.name).join(' and ')}: still in the bank.` : `More than budgeted on ${notSpent.map(x => x.name).join(' and ')}.`);
+    const lockedMore = A.locked - X.locked;
+    add('setAside', lockedMore >= 0 ? 'Kept to spend' : 'Less set aside to spend', -lockedMore, lockedMore >= 0 ? 'Set aside for costs ahead, so not counted in net worth.' : 'Less set aside for costs ahead than the plan expected, so more of it counts.');
+    const total = A.netWorth - X.netWorth;
+    // Cash is what is left: pay and spending different from the plan, and money moved around.
+    const rest = total - parts.reduce((s, p) => s + p.diff, 0);
+    add('cash', 'Cash & everything else', rest, 'Pay and spending different from the plan, and money moved between accounts.');
+    const shown = parts.filter(p => Math.abs(p.diff) >= 50).sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+    const small = parts.filter(p => Math.abs(p.diff) < 50).reduce((s, p) => s + p.diff, 0);
+    if (Math.abs(small) >= 0.5) shown.push({ key: 'small', label: 'Small differences', diff: small, why: 'Each under £50.', values: {} });
+    return { expected: X.netWorth, actual: A.netWorth, total, parts: shown, expectedPaidIn: expIn };
   }
 
   // How this year compares with the prediction (or, without one by type, with last year).
@@ -395,7 +484,7 @@
     return out;
   }
 
-  const api = { TYPES, TYPE_LABELS, MARKET_FIELDS, suggestedYear, rollPlan, expectedBalances, estimateAt, yearsBetween, byType, previousCheckin, predictedFor, start, setDate, setValue, progress, variance, apply, recordReadings, due };
+  const api = { TYPES, TYPE_LABELS, MARKET_FIELDS, suggestedYear, rollPlan, expectedBalances, estimateAt, yearsBetween, byType, previousCheckin, predictedFor, start, setDate, setValue, setReserve, progress, variance, explain, expectedPaidIn, apply, recordReadings, due };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Review = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

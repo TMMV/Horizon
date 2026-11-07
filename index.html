@@ -29,6 +29,7 @@
           <button type="button" role="menuitem" id="exportBtn">Save to a file…</button>
           <button type="button" role="menuitem" id="importBtn">Open a saved file…</button>
           <p class="menu-note" id="savedNote"></p>
+          <button type="button" role="menuitem" id="setupBtn">Set up my plan (guide)</button>
           <button type="button" role="menuitem" id="blankBtn">Start a blank plan</button>
           <button type="button" role="menuitem" id="resetBtn">Reset to example</button>
         </div>
@@ -57,9 +58,17 @@
         </div>
         <div class="goal-strip" id="ovGoalStrip"></div>
       </section>
-      <section class="card" id="ovTodo"></section>
+      <!-- One place for everything to do: what needs you, the plan's steps, then suggestions -->
+      <section class="card do-card" id="ovDo" aria-labelledby="ovDoTitle">
+        <div class="card-head"><div>
+          <h2 id="ovDoTitle">What to do, and when</h2>
+          <p class="sub">Everything in one place: first anything that needs you, then what the plan says to do and when, then suggestions worth a look.</p>
+        </div></div>
+        <div class="do-needs" id="ovNeeds"></div>
+        <div class="do-block" id="ovTodo"></div>
+        <div class="do-block" id="ovInsights"></div>
+      </section>
       <section class="card" id="ovInOut"></section>
-      <section class="card" id="ovInsights"></section>
       <section class="card">
         <div class="card-head">
           <div>

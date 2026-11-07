@@ -688,6 +688,10 @@ test.describe('Horizon app', () => {
     await page.click('#rvNext'); // results
     await expect(page.locator('#rvBody .rv-delta')).toContainText('+£10,000');
     await expect(page.locator('#rvBody .divbar')).not.toHaveCount(0);
+    // Why: parts that add up, and saying what was paid in splits markets from saving.
+    await expect(page.locator('#rvExplain')).toContainText('Why you are where you are');
+    await page.fill('#rvPaidIn', '1000');
+    await expect(page.locator('#rvExplain')).toContainText('Markets');
     await expect(page.locator('#rvBody .impact table')).toBeVisible({ timeout: 30000 });
     await page.click('#rvNext'); // update scenarios
     await expect(page.locator('#rvBody .rv-scen')).toHaveCount(2);
@@ -1197,7 +1201,7 @@ test.describe('Horizon app', () => {
 
   test('home: what to do, and when', async ({ page }) => {
     const todo = page.locator('#ovTodo');
-    await expect(todo.locator('h2')).toContainText('What to do, and when');
+    await expect(page.locator('#ovDo h2')).toContainText('What to do, and when');
     // Now: this month's ISA amounts, split between the ISAs.
     const isa = todo.locator('.todo-item.now', { hasText: 'a month into ISAs' });
     await expect(isa).toContainText('into Alex stocks & shares ISA');
@@ -1500,6 +1504,67 @@ test.describe('Horizon app', () => {
     await page.locator('#sec-household select').first().selectOption('ruk');
     await expect(page.locator('#sec-tax')).not.toContainText('Intermediate');
     await expect(page.locator('#sec-tax')).toContainText('Additional');
+  });
+});
+
+test.describe('getting started', () => {
+  test('first visit: the guide sets up a plan from blank, one part at a time', async ({ page }) => {
+    const { problems } = await openApp(page, '', { setup: true });
+    const panel = page.locator('#setupPanel');
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('#setupTitle')).toHaveText('Set up your own plan');
+    // Every question has its "i".
+    await expect(panel.locator('.st-ask .info-btn')).toHaveCount(3);
+    await panel.locator('.st-ask .info-btn').first().click();
+    await expect(page.locator('#infoPop')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await panel.locator('.st-choice', { hasText: 'Yes, start my own plan' }).click();
+    await panel.locator('input[aria-label="Figures as at"]').fill('2026-03-01');
+    await panel.locator('.st-choice', { hasText: 'England' }).click();
+    const plan = () => page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    expect((await plan()).accounts).toHaveLength(0);
+    expect((await plan()).asOf).toBe('2026-03-01');
+    expect((await plan()).household.region).toBe('ruk');
+    // People: a couple, on the real page.
+    await page.click('#setupNext');
+    await expect(panel.locator('#setupTitle')).toHaveText('Who is the plan for?');
+    await expect(page.locator('#sec-household')).toHaveClass(/setup-focus/);
+    await panel.locator('.st-choice', { hasText: 'Me and a partner' }).click();
+    await page.locator('#sec-household .people .item').nth(0).locator('input.name').fill('Robin');
+    await page.locator('#sec-household .people .item').nth(1).locator('input.name').fill('Kim');
+    await expect(panel.locator('.st-field .info-btn')).not.toHaveCount(0);
+    // Pay: one click adds it and opens it to fill in.
+    await page.click('#setupNext');
+    await panel.locator('.st-adds button', { hasText: 'Robin’s pay' }).click();
+    await page.locator('[data-editing] input[aria-label="Amount"]').fill('3100');
+    await page.locator('[data-editing] .edit-done button').click();
+    await expect(panel.locator('.st-have')).toContainText('Robin: £3,100 a month');
+    // Accounts: a bank account and an ISA for Kim.
+    await panel.locator('.st-jump').selectOption({ label: '5. Bank and savings' });
+    await expect(page).toHaveURL(/finances\/portfolio/);
+    await panel.locator('.st-adds button', { hasText: 'Cash & savings' }).click();
+    await page.locator('[data-editing] label.field:has-text("Balance") input').fill('8000');
+    await page.locator('[data-editing] .edit-done button').click();
+    await page.click('#setupNext');
+    await panel.locator('.st-adds button', { hasText: /^\+ ISA$/ }).click();
+    await page.locator('[data-editing] select').first().selectOption('p2');
+    await page.locator('[data-editing] label.field:has-text("Balance") input').fill('12000');
+    await page.locator('[data-editing] .edit-done button').click();
+    const p = await plan();
+    expect(p.accounts.map(a => [a.type, a.owner, a.balance, a.basis])).toEqual([['cash', 'joint', 8000, 8000], ['isa', 'p2', 12000, 12000]]);
+    // Closing keeps the place; Home offers to carry on.
+    await page.locator('#setupPanel button[aria-label^="Close the guide"]').click();
+    await expect(panel).toBeHidden();
+    await go(page, 'home');
+    await expect(page.locator('#ovNeeds [data-notify="setup"]')).toContainText('step 6 of');
+    await page.locator('#ovNeeds [data-notify="setup"] button', { hasText: 'Carry on' }).click();
+    await expect(panel.locator('#setupTitle')).toHaveText('ISAs and investments');
+    // The last step: finish.
+    await panel.locator('.st-jump').selectOption({ label: '16. Save a copy' });
+    await page.click('#setupNext');
+    await expect(panel).toBeHidden();
+    await expect(page.locator('#ovNeeds [data-notify="setup"]')).toHaveCount(0);
+    expect(problems).toEqual([]);
   });
 });
 

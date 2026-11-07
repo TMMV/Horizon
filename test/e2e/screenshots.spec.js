@@ -123,6 +123,12 @@ for (const scheme of ['light', 'dark']) {
       await page.screenshot({ path: path.join(OUT, `${scheme}-wizard-compare.png`) });
       await page.click('#wizClose');
 
+      // The guide to setting up a plan, beside the page it fills in.
+      await page.evaluate(() => window.__horizon.openSetup(2));
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: path.join(OUT, `${scheme}-setup-guide.png`) });
+      await page.locator('#setupPanel button[aria-label^="Close the guide"]').click();
+
       // Notifications, then the yearly review.
       await page.click('#notifyBtn');
       await page.waitForTimeout(150);

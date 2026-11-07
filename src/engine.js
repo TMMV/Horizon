@@ -275,10 +275,11 @@
       color: colour >= 0 && colour < 8 ? colour : -1,     // palette slot, fixed once given (see normalizePlan)
       icon: oneOf(g.icon, GOAL_ICONS, g.measure === 'savings' && type === 'netWorth' ? 'piggy' : DEFAULT_GOAL_ICON[type]),
       type: oneOf(g.type, GOAL_TYPES, 'netWorth'),
-      amount: Math.max(0, num(g.amount, 1000000)),
+      // Only amount goals have an amount; a retirement goal's year follows its age (see evaluateGoals).
+      amount: type === 'netWorth' || type === 'passiveIncome' ? Math.max(0, num(g.amount, 1000000)) : 0,
       measure: oneOf(g.measure, Object.keys(GOAL_MEASURES), 'all'),
       basis: oneOf(g.basis, ['nominal', 'real'], 'nominal'),
-      year: Math.round(num(g.year, startYear + 10)),
+      year: type === 'retire' ? startYear + Math.round(num(g.age, who.retireAge)) - who.age : Math.round(num(g.year, startYear + 10)),
       age: Math.round(num(g.age, who.retireAge)),
       owner,
       confidence: Math.min(99, Math.max(50, num(g.confidence, 80))),
@@ -310,7 +311,8 @@
         type,
         owner: OWNED_TYPES.includes(type) && own === 'joint' ? 'p1' : own,
         balance: Math.max(0, num(a.balance)),
-        basis: Math.max(0, num(a.basis, num(a.balance))),
+        // What was paid in (for capital gains): only a general investment account needs it.
+        basis: type === 'gia' ? Math.max(0, num(a.basis, num(a.balance))) : Math.max(0, num(a.balance)),
         rate: num(a.rate),
         payment: Math.max(0, num(a.payment)),
         maturityYear: Math.round(num(a.maturityYear, 0)),
@@ -356,13 +358,14 @@
       dbSalary: Math.max(0, num(i.dbSalary)),
       amount: Math.max(0, num(i.amount)),
       freq: oneOf(i.freq, ['month', 'year'], 'year'),
-      growth: num(i.growth),
+      // A defined benefit pension rises with prices once paid (see dbPensionAt), whatever is stored.
+      growth: i.kind === 'dbpension' ? 0 : num(i.growth),
       // Pay progression: `growth` until this age (0 = all along), then `growthAfter`; promotions add a step.
       growthUntilAge: Math.max(0, Math.round(num(i.growthUntilAge, 0))),
-      growthAfter: num(i.growthAfter, num(i.growth)),
+      growthAfter: i.kind === 'dbpension' ? 0 : Math.round(num(i.growthUntilAge, 0)) > 0 ? num(i.growthAfter, num(i.growth)) : num(i.growth),
       raises: arr(i.raises).filter(r => r && Number.isFinite(+r.age) && Number.isFinite(+r.pct)).slice(0, 10)
         .map(r => ({ age: Math.round(+r.age), pct: Math.max(-90, Math.min(500, +r.pct)) })).sort((a, b) => a.age - b.age),
-      inflationLinked: !!i.inflationLinked,
+      inflationLinked: i.kind === 'dbpension' ? true : !!i.inflationLinked,
       ...normalizeTiming(i, 'now', 'retire'),
       pensionMode: oneOf(i.pensionMode, ['pct', 'fixed'], 'pct'),
       employeePension: Math.max(0, num(i.employeePension)),
