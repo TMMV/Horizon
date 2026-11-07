@@ -1260,6 +1260,47 @@ test.describe('Horizon app', () => {
     await expect(box.locator('.hero-value')).toHaveText(today);
   });
 
+  test('money set aside: shown on Home, checked in the yearly review', async ({ page }) => {
+    // A yearly cost to follow as a budget.
+    await page.evaluate(() => {
+      const w = window.__horizon;
+      const p = w.ws.scenarios[0].plan;
+      p.expenses.push({ id: 'e-trips', name: 'Trips', amount: 3000, freq: 'year', inflationLinked: true, startRef: 'now', endRef: 'end' });
+      w.refresh();
+    });
+    await go(page, 'finances/saving');
+    const ed = page.locator('#reservesEdit');
+    await ed.locator('button:has-text("+ Emergency fund")').click();
+    await ed.locator('button:has-text("+ Yearly budget")').click();
+    await expect(page.locator('#reservesEdit .reserve-item')).toHaveCount(2);
+    await page.locator('#reservesEdit .reserve-item').nth(1).locator('select[aria-label="For"]').selectOption('e-trips');
+    await tab(page, 'home');
+    const box = page.locator('#homePortfolio');
+    await expect(box.locator('#pfReserves .pf-res-row')).toHaveCount(2);
+    await expect(box.locator('#pfReserves')).toContainText('available until spent');
+    await expect(box.locator('#pfSum')).toContainText('free to use');
+    await box.locator('.pf-row.access.now .pf-class-btn').click();
+    await expect(box.locator('.pf-res-tag').first()).toContainText('Emergency fund');
+    await expect(box.locator('.pf-res-tag').first()).toContainText('free');
+    await expect(page.locator('#ovTodo')).toContainText('what is left of the trips budget');
+    // The review asks how it went, and keeps what is left of the budget.
+    await go(page, 'finances/history');
+    const year = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.startYear);
+    await page.click('#reviewBtn');
+    await page.click(`#rvBody .goal-option:has-text("Start ${year + 1}")`);
+    await page.click('#rvNext');
+    const rr = page.locator('#rvReserves');
+    await expect(rr.locator('.rv-reserve')).toHaveCount(2);
+    await expect(page.locator('#rvBody .rv-split').first()).toContainText('Expected: Emergency fund');
+    await rr.locator('input[aria-label="Trips spent"]').fill('2000');
+    await rr.locator('button:has-text("Keep it for next year")').click();
+    for (let i = 0; i < 5; i++) await page.click("#rvNext");
+    await page.click('#rvSave');
+    await expect(page.locator('#reviewWiz')).toBeHidden({ timeout: 30000 });
+    const left = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.reserves.find(r => r.kind === 'budget').left);
+    expect(left).toBe(1000);
+  });
+
   test('start a blank plan', async ({ page }) => {
     await page.click('#dataMenu summary');
     await page.click('#blankBtn');

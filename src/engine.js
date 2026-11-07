@@ -289,6 +289,9 @@
     };
   }
 
+  const RESERVE_KINDS = ['emergency', 'saving', 'budget'];
+  const RESERVE_ACCOUNTS = ['cash', 'isa', 'gia', 'bonds'];
+
   function normalizePlan(p) {
     p = p && typeof p === 'object' ? p : {};
     const startYear = Math.round(num(p.startYear, currentYear()));
@@ -388,6 +391,30 @@
       amount: Math.max(0, num(e.amount)),
     }));
 
+    // Money set aside inside an account: an emergency fund, savings building up for a known cost
+    // (e.g. home repairs every few years), or a yearly budget (e.g. holidays) that stays in the
+    // account until it is spent. The projection already counts what they pay for; these only mark
+    // which part of a balance is spoken for.
+    const reserves = arr(p.reserves).filter(r => r && typeof r === 'object').slice(0, 20).map(r => {
+      const kind = oneOf(r.kind, RESERVE_KINDS, 'emergency');
+      const acc = accounts.find(a => a.id === r.accountId && RESERVE_ACCOUNTS.includes(a.type));
+      return {
+        id: str(r.id, uid()),
+        name: str(r.name, kind === 'emergency' ? 'Emergency fund' : kind === 'budget' ? 'Yearly budget' : 'Saving up'),
+        kind,
+        accountId: acc ? acc.id : '',
+        // Emergency fund: today's money (null = the cash buffer setting).
+        amount: kind === 'emergency' && r.amount !== null && r.amount !== undefined && r.amount !== '' && Number.isFinite(+r.amount) ? Math.max(0, +r.amount) : null,
+        // Saving up: for the planned costs with this name. Budget: for this spending item.
+        eventName: kind === 'saving' ? str(r.eventName, '') : '',
+        expenseId: kind === 'budget' ? str(r.expenseId, '') : '',
+        // Budget: what was left of last year's, kept for it (pounds, as at the figures date).
+        left: kind === 'budget' ? Math.max(0, num(r.left)) : 0,
+        // Saving up: what was already put aside on the figures date (null = nothing yet).
+        saved: kind === 'saving' && r.saved !== null && r.saved !== undefined && r.saved !== '' && Number.isFinite(+r.saved) ? Math.max(0, +r.saved) : null,
+      };
+    }).filter(r => r.kind !== 'budget' || expenses.some(e => e.id === r.expenseId));
+
     let goals;
     if (Array.isArray(p.goals)) goals = arr(p.goals).map(g => normalizeGoal(g, startYear, people[0], people));
     else if (p.goal && typeof p.goal === 'object') goals = [normalizeGoal({ ...p.goal, type: 'netWorth', year: startYear + 10 }, startYear, people[0])];
@@ -398,7 +425,7 @@
       startYear,
       asOf: isDate(p.asOf) ? p.asOf : null,   // filled in by normalizeWorkspace when missing
       household: { region: oneOf(hh.region, ['scotland', 'ruk'], 'scotland'), ignoreTax: !!hh.ignoreTax, people },
-      accounts, income, expenses, events,
+      accounts, income, expenses, events, reserves,
       strategy: fill(p.strategy, defaultStrategy()),
       assumptions: fill(p.assumptions, defaultAssumptions()),
       goals,
@@ -590,6 +617,46 @@
   function expectedGrowth(item, plan, t) {
     if (item.inflationLinked) return Math.pow(1 + plan.assumptions.inflation / 100, t) * promotions(item, plan, t);
     return progression(item, plan, t);
+  }
+
+  // What each pot of money set aside holds `years` after the figures date (fractions allowed),
+  // in the pounds of then, on the plan's assumptions:
+  // - emergency: the amount (or the cash buffer), raised with prices each plan year;
+  // - saving: builds up evenly towards the next planned cost with its name (taken as due halfway
+  //   through that plan year), from the previous one or from what was put aside by the figures date;
+  // - budget: this plan year's amount of the spending item, available until spent (it comes in
+  //   from take-home pay during the year), plus what was left of last year's and kept for it.
+  // `held` is the part already in the account (all of it, except a budget's new year's money).
+  function reservesAt(plan, years = 0) {
+    const yrs = Math.max(0, years);
+    const price = t => Math.pow(1 + plan.assumptions.inflation / 100, Math.max(0, t));
+    const t = Math.floor(yrs);
+    return (plan.reserves || []).map(r => {
+      const base = { id: r.id, name: r.name, kind: r.kind, accountId: r.accountId };
+      if (r.kind === 'emergency') {
+        // Raised once a year, like the cash buffer the plan keeps.
+        const v = (r.amount ?? plan.strategy.cashReserve) * price(t);
+        return { ...base, amount: v, held: v };
+      }
+      if (r.kind === 'saving') {
+        const evs = plan.events.filter(e => e.kind === 'expense' && e.name === r.eventName)
+          .map(e => ({ at: e.year - plan.startYear + 0.5, year: e.year, amount: e.amount * price(e.year - plan.startYear) }))
+          .filter(e => e.at > 0).sort((a, b) => a.at - b.at);
+        const next = evs.find(e => e.at > yrs);
+        if (!next) return { ...base, amount: 0, held: 0, target: 0, dueYear: null, perYear: 0 };
+        const prev = evs.filter(e => e.at <= yrs).pop();
+        const from = prev ? prev.at : 0;
+        // Before the first cost: from what was already put aside on the figures date.
+        const start = prev ? 0 : Math.min(next.amount, r.saved || 0);
+        const share = Math.min(1, Math.max(0, (yrs - from) / (next.at - from)));
+        const v = start + (next.amount - start) * share;
+        return { ...base, amount: v, held: v, target: next.amount, dueYear: next.year, perYear: (next.amount - start) / (next.at - from) };
+      }
+      const e = plan.expenses.find(x => x.id === r.expenseId);
+      const yearly = e && isActive(e, plan, t) ? annual(e) * expectedGrowth(e, plan, t) : 0;
+      const left = t === 0 ? r.left : 0;
+      return { ...base, amount: yearly + left, held: left, yearly, left, year: plan.startYear + t, expenseName: e ? e.name : r.name };
+    });
   }
 
   // Rises at `growth` a year until `growthUntilAge`, then at `growthAfter`, plus any promotions.
@@ -792,6 +859,7 @@
       years: [], deflator: econ.price, g: zeros(), price: econ.price,
       ages: people.map(() => []),
       taxFree: zeros(), flatTax: zeros(), expenses: zeros(), eventsIn: zeros(), eventsOut: zeros(), eventsOverpay: zeros(),
+      keepCash: zeros(),   // money set aside in cash on top of the buffer (today's money), e.g. repairs building up
       people: people.map(() => ({
         gross: zeros(),        // gross salary paid in cash (before employee contributions)
         netPay: zeros(),       // take-home pay entered as net
@@ -923,12 +991,30 @@
         pre.expenses[t] = retired ? total : total * s.spendNowPct / 100;
       }
       if (s.slowDownAge > 0 && p1.age + t >= s.slowDownAge) pre.expenses[t] *= s.slowDownPct / 100;
+      // Savings building up for a cost in a cash account stay in cash (on top of the buffer) until paid.
+      {
+        const held = reservesAt(plan, t + 1).filter(r => r.kind === 'saving' && (plan.accounts.find(a => a.id === r.accountId) || {}).type === 'cash')
+          .reduce((acc, r) => acc + r.held, 0);
+        pre.keepCash[t] = held / Math.pow(1 + plan.assumptions.inflation / 100, t);
+      }
+      // Last year's budget money kept for this year (e.g. holidays not taken yet) is spent too.
+      if (t === 0) for (const r of plan.reserves || []) if (r.kind === 'budget') pre.eventsOut[0] += r.left;
       for (const e of plan.events) {
         if (e.year !== plan.startYear + t) continue;
         const v = e.amount * price;
         if (e.kind === 'income') pre.eventsIn[t] += v;
         else if (e.kind === 'overpay') pre.eventsOverpay[t] += v;
         else pre.eventsOut[t] += v;
+      }
+    }
+    // Money set aside to be spent (building up for a planned cost like repairs every few years, or
+    // what is left of a yearly budget like holidays) stays in its account but is not counted in net
+    // worth, as it is already spoken for. Only the emergency fund, not meant to be spent, still counts.
+    pre.locked = new Float64Array(N + 1);
+    if ((plan.reserves || []).some(r => r.kind !== 'emergency')) {
+      for (let t = 0; t <= N; t++) {
+        const held = reservesAt(plan, t).filter(r => r.kind !== 'emergency').reduce((acc, r) => acc + r.held, 0);
+        pre.locked[t] = held / Math.pow(1 + plan.assumptions.inflation / 100, t) * pre.price[t];
       }
     }
     return pre;
@@ -938,7 +1024,7 @@
 
   function newPath(N, detail, nPeople = 2) {
     const out = {};
-    for (const k of ['cash', 'isa', 'gia', 'pension', 'bonds', 'property', 'debt', 'short']) out[k] = new Float64Array(N + 1);
+    for (const k of ['cash', 'isa', 'gia', 'pension', 'bonds', 'property', 'debt', 'short', 'locked']) out[k] = new Float64Array(N + 1);
     if (detail) {
       for (const k of FLOW_KEYS) out[k] = new Float64Array(N + 1);
       out.persons = Array.from({ length: nPeople }, () => ({
@@ -1064,6 +1150,7 @@
       out.property[t] = props.reduce((acc, p) => acc + p.val, 0);
       out.debt[t] = debts.reduce((acc, d) => acc + d.bal, 0);
       out.short[t] = short;
+      out.locked[t] = pre.locked[t];
       if (detail) {
         for (let i = 0; i < n; i++) out.persons[i].pension[t] = pension[i];
         debts.forEach((d, k) => { out.debts[k].bal[t] = d.bal; });
@@ -1075,6 +1162,7 @@
       if (t === N) break;
 
       const g = pre.g[t], f = econ.price[t], r = econ.ret[t], dr = econ.rateShift[t];
+      const cashTarget = (s.cashReserve + pre.keepCash[t]) * f;
 
       // 1. Growth
       const cashRate = Math.max(0, cr + dr);
@@ -1176,7 +1264,7 @@
 
       if (net >= 0) {
         let left = net;
-        toCash = Math.max(0, Math.min(left, s.cashReserve * f - cash));
+        toCash = Math.max(0, Math.min(left, cashTarget - cash));
         cash += toCash;
         left -= toCash;
         let budget = left * s.overpayPct / 100;
@@ -1237,7 +1325,7 @@
         const rest = left - toIsa - toPension - toGia;   // left over by your own amounts: kept as cash
         if (rest > 0) { cash += rest; toCash += rest; }
         // Cash above the buffer (e.g. matured gilts) is invested too, within your own amounts.
-        const excess = cash - s.cashReserve * f;
+        const excess = cash - cashTarget;
         if (s.sweepCash && excess > 0.5) {
           sweepIsa = Math.min(excess, Math.max(0, s.isaAllowance * g * n - toLisa - toIsa), Math.max(0, capIsa - toIsa));
           sweepGia = Math.min(excess - sweepIsa, Math.max(0, capGia - toGia));
@@ -1250,7 +1338,7 @@
         let need = -net;
 
         // Cash above the buffer
-        const spare = Math.max(0, cash - s.cashReserve * f);
+        const spare = Math.max(0, cash - cashTarget);
         wCash = Math.min(spare, need);
         cash -= wCash;
         need -= wCash;
@@ -1414,7 +1502,7 @@
         stockWeight: pre.econ.stockW[t], expectedReturn: t < pre.N ? pre.econ.ret[t] : 0,
         cash: out.cash[t], isa: out.isa[t], gia: out.gia[t], pension: out.pension[t], bonds: out.bonds[t],
         property: out.property[t], debt: out.debt[t], shortfall: out.short[t],
-        liquid, netWorth: liquid + out.property[t] - out.debt[t],
+        liquid, netWorth: liquid + out.property[t] - out.debt[t] - out.locked[t], locked: out.locked[t],
         lisa: out.lisa ? out.lisa[t] : 0,
       };
       for (const k of FLOW_KEYS) row[k] = t < pre.N ? out[k][t] : 0;
@@ -1506,7 +1594,7 @@
     const out = newPath(N, false);
     const p1 = plan.household.people[0];
     const debtPayments = plan.accounts.filter(a => a.type === 'debt' && !a.excluded).reduce((acc, a) => acc + a.payment * 12, 0);
-    const snap = { cash: 0, isa: 0, gia: 0, pension: 0, bonds: 0, property: 0, debt: 0, short: 0 };
+    const snap = { cash: 0, isa: 0, gia: 0, pension: 0, bonds: 0, property: 0, debt: 0, short: 0, locked: 0 };
     const tOf = g => Math.max(0, Math.min(N, g.year - plan.startYear));
 
     // One pass over every start year for a plan; `check` records per-run goal results.
@@ -1609,10 +1697,11 @@
   // Value a balance snapshot under a goal measure.
   function goalValue(b, measure) {
     const short = b.short !== undefined ? b.short : b.shortfall || 0;
-    if (measure === 'savings') return b.cash + b.isa + b.gia + b.bonds - short;
+    const locked = b.locked || 0;   // set aside to be spent: not counted
+    if (measure === 'savings') return b.cash + b.isa + b.gia + b.bonds - short - locked;
     const liquid = b.cash + b.isa + b.gia + b.pension + b.bonds - short;
     if (measure === 'liquid') return liquid;
-    const nw = liquid + b.property - b.debt;
+    const nw = liquid + b.property - b.debt - locked;
     return measure === 'noPension' ? nw - b.pension : nw;
   }
 
@@ -1781,7 +1870,7 @@
     for (const g of nwGoals.concat(efGoals)) { hits[g.id] = new Float64Array(T); gvals[g.id] = new Float64Array(T * runs); }
     const debtPayments = plan.accounts.filter(a => a.type === 'debt' && !a.excluded).reduce((acc, a) => acc + a.payment * 12, 0);
     const failYears = [];
-    const snap = { cash: 0, isa: 0, gia: 0, pension: 0, bonds: 0, property: 0, debt: 0, short: 0 };
+    const snap = { cash: 0, isa: 0, gia: 0, pension: 0, bonds: 0, property: 0, debt: 0, short: 0, locked: 0 };
 
     for (let i = 0; i < runs; i++) {
       const econ = draw();
@@ -1794,7 +1883,7 @@
         for (const key in snap) snap[key] = out[key][t];
         const liquid = out.cash[t] + out.isa[t] + out.gia[t] + out.pension[t] + out.bonds[t] - out.short[t];
         data.liquid[k] = liquid;
-        data.netWorth[k] = liquid + out.property[t] - out.debt[t];
+        data.netWorth[k] = liquid + out.property[t] - out.debt[t] - out.locked[t];
         data.property[k] = out.property[t];
         data.debt[k] = out.debt[t];
         let e = 0;
@@ -2134,7 +2223,7 @@
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
     incomeAfterCosts, taxOf, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
-    uid, currentYear, todayISO, isDate, asOfDate, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
+    uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     streamAt, streamWindow, isActive, growthFactor, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,

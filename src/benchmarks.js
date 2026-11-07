@@ -345,6 +345,17 @@
       }
     }
 
+    // 10d. Money set aside: nothing marked yet, while there is a buffer, repeated costs or yearly budgets.
+    if (!(plan.reserves || []).length && plan.accounts.some(a => ['cash', 'isa', 'gia'].includes(a.type) && !a.excluded)) {
+      const yearly = plan.expenses.filter(e => e.freq === 'year' && e.amount >= 1000 && !(e.key || '').startsWith('life:'));
+      const names = plan.events.filter(e => e.kind === 'expense').map(e => e.name);
+      const repeated = [...new Set(names)].filter(n => names.filter(x => x === n).length >= 2);
+      if (plan.strategy.cashReserve > 0 || yearly.length || repeated.length) {
+        out.push({ id: 'reserves', tone: 'tip', action: 'guide:questions', title: 'Mark the money that is spoken for',
+          text: `Show which part of your accounts is ${[plan.strategy.cashReserve > 0 ? 'the emergency fund' : '', repeated.length ? `for ${repeated[0].toLowerCase()}` : '', yearly.length ? `for ${yearly.map(e => e.name.toLowerCase()).slice(0, 2).join(' and ')} (a yearly budget, available until spent)` : ''].filter(Boolean).join(', ')}, so Home shows what is free to use. Nothing changes in the plan; the yearly review then asks what was left of each budget.` });
+      }
+    }
+
     // 11. USS: an extra 1% of pay into the Investment Builder is matched by the employer.
     for (const i of plan.income.filter(x => x.kind === 'dbpension' && x.dbScheme === 'uss')) {
       const x = plan.household.people.find(y => y.id === i.owner);

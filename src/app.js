@@ -201,6 +201,7 @@
     gift: '<rect x="2.5" y="6" width="11" height="3" rx=".8"/><path d="M3.5 9v4.5h9V9M8 6v7.5M8 6C6.5 6 4.6 5.6 4.6 4.2 4.6 3 6.4 2.8 8 6zM8 6c1.5 0 3.4-.4 3.4-1.8C11.4 3 9.6 2.8 8 6z"/>',
     heart: '<path d="M8 13.5S2.4 10.2 2.4 6.2A2.9 2.9 0 0 1 8 4.8a2.9 2.9 0 0 1 5.6 1.4c0 4-5.6 7.3-5.6 7.3z"/>',
     clock: '<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/>',
+    lock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/>',
     pause: '<circle cx="8" cy="8" r="5.8"/><path d="M6.6 5.8v4.4M9.4 5.8v4.4"/>',
     edit: '<path d="M10.8 2.8l2.4 2.4-7.6 7.6-3.1.7.7-3.1z"/><path d="M9.4 4.2l2.4 2.4"/>',
     layers: '<path d="M8 2.2l5.8 3L8 8.2 2.2 5.2z"/><path d="M2.2 8.1L8 11.1l5.8-3M2.2 10.9L8 13.9l5.8-3"/>',
@@ -384,6 +385,30 @@
     return Number.isFinite(t) ? Math.max(0, Math.min(t, model.proj.pre.N)) : 0;
   }
 
+  // ---- Money set aside: which part of an account is spoken for (an emergency fund, savings
+  // building up for a known cost, a yearly budget that stays in the account until it is spent).
+  const accountName = id => (plan().accounts.find(a => a.id === id) || {}).name || '';
+  function reserveText(r) {
+    const where = accountName(r.accountId) ? `In ${accountName(r.accountId)}` : 'No account chosen';
+    if (r.kind === 'emergency') return `${where}; rises with prices. Only for the unexpected: not to spend or invest.`;
+    if (r.kind === 'saving') return r.dueYear
+      ? `${where}: ${money(r.amount)} of the ${money(r.target)} due in ${r.dueYear}, building up by about ${money(r.perYear)} a year. Already spoken for, so not counted in net worth.`
+      : `${where}. No planned cost with this name ahead.`;
+    return `${where}: ${money(r.yearly)} for ${r.year}${r.left ? ` plus ${money(r.left)} kept from last year` : ''}, counted as spent, so not in net worth. The review asks what is left.`;
+  }
+  function reservesPanel(list, when) {
+    const held = list.reduce((acc, r) => acc + r.held, 0);
+    const tag = r => (r.kind === 'budget' ? 'available until spent · not in net worth' : r.kind === 'saving' ? 'locked · not in net worth' : 'keep · counts in net worth');
+    return h('div', { class: 'pf-reserves', id: 'pfReserves' },
+      h('div', { class: 'pf-res-head' }, h('h3', {}, 'Set aside'), h('span', { class: 'muted' }, `${money(held)} held ${when}`)),
+      list.map(r => h('div', { class: `pf-res-row ${r.kind}`, 'data-reserve': r.id },
+        h('span', { class: 'pf-res-name' }, h('span', {}, h('strong', {}, r.name), h('span', { class: `pf-res-kind ${r.kind}` }, tag(r))), h('small', {}, reserveText(r))),
+        h('span', { class: 'pf-res-val' }, h('strong', {}, money(r.amount)),
+          r.kind === 'saving' && r.target ? h('span', { class: 'pf-res-bar', role: 'img', 'aria-label': `${Math.round((r.amount / r.target) * 100)}% of ${money(r.target)}` },
+            h('i', { style: `width:${Math.min(100, (r.amount / r.target) * 100).toFixed(1)}%` })) : null))),
+      h('button', { type: 'button', class: 'linkish', onclick: () => navigate('finances/saving') }, 'Change what is set aside'));
+  }
+
   function renderPortfolio() {
     const p = plan();
     const now = estimateToday();
@@ -391,6 +416,20 @@
     const futureDate = (() => { const d = new Date(`${today()}T00:00:00Z`); d.setUTCFullYear(d.getUTCFullYear() + ahead); return d.toISOString().slice(0, 10); })();
     const est = ahead ? RV.estimateAt(p, futureDate, model.proj) : now;
     const aheadYear = Number(futureDate.slice(0, 4));
+    // Money set aside on that date, and how much of each account it takes.
+    const res = E.reservesAt(p, est.years || 0);
+    const heldIn = {};
+    for (const r of res) if (r.accountId) heldIn[r.accountId] = (heldIn[r.accountId] || 0) + r.held;
+    const heldTotal = Object.values(heldIn).reduce((acc, v) => acc + v, 0);
+    const resTag = a => {
+      const v = heldIn[a.id] || 0;
+      if (v < 0.5) return null;
+      const parts = res.filter(r => r.accountId === a.id && r.held >= 0.5).map(r => `${r.name} ${money(r.held)}${r.kind === 'saving' ? ' (locked)' : r.kind === 'budget' ? ' (to spend)' : ''}`);
+      const free = est.byId[a.id] - v;
+      const over = free < -Math.max(50, v * 0.01);
+      return h('span', { class: `pf-res-tag${over ? ' over' : ''}`, title: over ? 'More is set aside than the account holds: move money in or set aside less.' : 'How this balance splits: money set aside, and what is free to use.' },
+        glyph(over ? 'warn' : 'lock'), [...parts, over ? `${money(-free)} short` : `free ${money(Math.max(0, free))}`].join(' · '));
+    };
     const deflate = ahead ? Math.pow(1 + p.assumptions.inflation / 100, ahead) : 1;
     // The left column: the figures you entered, or today when looking ahead.
     const baseOf = a => (ahead ? now.byId[a.id] : a.balance);
@@ -435,7 +474,7 @@
         return h('div', { class: `pf-row group single${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, 'data-type': g.key, style: `--item-color:${cssVar(g.color)}` },
           h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }),
             h('span', { class: 'pf-two' }, h('span', {}, h('strong', {}, g.label), updated(est.reading[a.id])),
-              h('small', {}, [a.name, owner(a), a.excluded ? 'not counted' : ''].filter(Boolean).join(' · ')))),
+              h('small', {}, [a.name, owner(a), a.excluded ? 'not counted' : ''].filter(Boolean).join(' · '), resTag(a)))),
           h('span', { class: 'pf-was', role: 'cell' }, signed(baseOf(a), debtish)),
           h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(est.byId[a.id], debtish)), changeTag(est.byId[a.id] - baseOf(a), debtish)));
       }
@@ -457,7 +496,7 @@
           const r = est.reading[a.id];
           return h('div', { class: `pf-row acct${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, hidden: !open },
             h('span', { class: 'pf-name', role: 'cell' }, h('span', {}, a.name, updated(r)),
-              h('small', {}, [owner(a), a.excluded ? 'not counted' : ''].filter(Boolean).join(' · '))),
+              h('small', {}, [owner(a), a.excluded ? 'not counted' : ''].filter(Boolean).join(' · '), resTag(a))),
             h('span', { class: 'pf-was', role: 'cell' }, signed(baseOf(a), debtish)),
             h('span', { class: 'pf-now', role: 'cell' }, signed(v, debtish), changeTag(v - baseOf(a), debtish)));
         }),
@@ -528,8 +567,14 @@
         h('div', { class: 'pf-visual' }, h('div', { class: 'pf-mix' }, ring), h('dl', { class: 'pf-sum', id: 'pfSum' },
           h('div', {}, h('dt', {}, 'What you own'), h('dd', {}, money(totalAssets))),
           avail ? h('div', { class: 'sub-line' }, h('dt', {}, 'of which available now'), h('dd', {}, money(classTotal(avail)))) : null,
+          avail && heldTotal >= 0.5 ? h('div', { class: 'sub-line deeper' }, h('dt', {}, 'set aside'), h('dd', {}, money(heldTotal))) : null,
+          avail && heldTotal >= 0.5 ? h('div', { class: 'sub-line deeper free' }, h('dt', {}, 'free to use'), h('dd', {}, money(Math.max(0, classTotal(avail) - heldTotal)))) : null,
           h('div', {}, h('dt', {}, 'What you owe'), h('dd', {}, `${totalOwed >= 0.5 ? '−' : ''}${money(totalOwed)}`)),
-          h('div', { class: 'total' }, h('dt', {}, 'Net worth'), h('dd', {}, money(totalAssets - totalOwed))))),
+          est.locked >= 0.5 ? h('div', { class: 'locked-line' }, h('dt', {}, 'Set aside to spend'), h('dd', {}, `−${money(est.locked)}`)) : null,
+          h('div', { class: 'total' }, h('dt', {}, 'Net worth'), h('dd', {}, money(totalAssets - totalOwed - (est.locked || 0)))))),
+        res.length ? reservesPanel(res, ahead ? `in ${aheadYear}` : 'today')
+          : ahead ? null : h('p', { class: 'hint pf-res-none' }, 'Keep an emergency fund, money for repairs or a holiday budget in these accounts? ',
+            h('button', { type: 'button', class: 'linkish', onclick: () => navigate('finances/saving') }, 'Mark it as set aside'), ' and Home shows what can be touched.'),
         readings ? h('p', { class: 'hint' }, `Your goals still use the figures from ${fmtDate(est.asOf)}; the balances you updated feed into your next yearly review.`) : null),
       list),
     ].filter(Boolean));
@@ -714,6 +759,10 @@
   // ---- "i" explanations and suggestion markers, added to labels as the page is drawn
   // Each term matches a label, a card or section heading, or a figure's caption by its text.
   const TERMS = [
+    { match: /^Set aside to spend$/, title: 'Set aside to spend',
+      text: () => 'Money you expect to spend: savings building up for a planned cost (like repairs every few years, kept invested until needed) and what is left of a yearly budget (like holidays, in the bank until spent). It is already spoken for, so it is left out of net worth, and of goals measured on net worth or savings. The emergency fund is not here: it is not meant to be spent, so it still counts.' },
+    { match: /^(Set aside|set aside|free to use|Money set aside)$/, title: 'Money set aside',
+      text: () => 'Part of an account that is spoken for: the emergency fund, money building up for a known cost (like repairs every few years) and yearly budgets (like holidays) that sit in the bank until spent. The plan already counts what they pay for, so nothing is taken twice; marking them shows what is free to use or invest. A budget is counted as spent each year; at the yearly review you say how much is left and whether to keep it or free it up.' },
     { match: /^(ISAs|ISA allowance per person|ISAs & general investment)$/, title: 'ISAs',
       text: () => `Tax-free savings and investments: no tax on interest, dividends or gains, and the money can be taken out at any time. Each person can pay in ${money(R.ISA_ALLOWANCE)} a year across all their ISAs (a Lifetime ISA counts towards it); allowance not used by 5 April is lost.` },
     { match: /Lifetime ISA/, title: 'Lifetime ISA',
@@ -857,7 +906,7 @@
     return b;
   }
 
-  const INFO_SPOTS = '.field > span:first-child, .card-head h2, .section-head h2, .io-fig > span:first-child, .pf-two > strong, .hero-label, .pf-sum dt, .sub-fields > h3, .io-split h3';
+  const INFO_SPOTS = '.pf-res-head > h3, .field > span:first-child, .card-head h2, .section-head h2, .io-fig > span:first-child, .pf-two > strong, .hero-label, .pf-sum dt, .sub-fields > h3, .io-split h3';
   function decorate(root) {
     if (!root || !root.querySelectorAll) return;
     const spots = [...(root.matches && root.matches(INFO_SPOTS) ? [root] : []), ...root.querySelectorAll(INFO_SPOTS)];
@@ -935,6 +984,7 @@
     const hg = model.goals.find(g => g.goal.type === 'netWorth' && g.goal.measure === 'all' && (g.goal.basis === 'real') === real());
     const refLines = hg ? [{ y: hg.goal.amount, label: `${fmtCompact(hg.goal.amount)} goal` }] : [];
     const ovCols = ['cash', 'isa', 'gia', 'pension', 'bonds', 'property'];
+    const anyLocked = rows.some(r => r.locked >= 0.5);
     chart('ovChart', 320, 'Net worth by account type over time').set({
       xs, areas: bars, markers, refLines,
       lines: [{ label: 'Net worth', color: '--text', values: nw }],
@@ -942,17 +992,18 @@
         title: titleAt(i),
         rows: [
           ...bars.slice().reverse().filter(b => Math.abs(b.values[i]) > 0.5).map(b => ({ label: b.label, color: b.color, text: money(b.values[i]) })),
+          ...(rows[i] && rows[i].locked >= 0.5 ? [{ label: 'Set aside to spend', color: '--muted', text: `−${money(D(rows[i].locked, i))}` }] : []),
           { label: 'Net worth', color: '--text', shape: 'line', text: money(nw[i]), strong: true },
         ],
       }),
       table: () => (homeBy === 'access' ? {
-        headers: ['Year', 'Ages', ...ACCESS_SERIES.map(a => a.label), 'Debt', 'Net worth'],
-        rows: rows.map((r, t) => [r.year, r.ages.join(' / '), ...ACCESS_SERIES.map(a => D(a.of(r), t)), -D(r.debt, t), D(r.netWorth, t)]),
-        formats: [String, String, money, money, money, money, money],
+        headers: ['Year', 'Ages', ...ACCESS_SERIES.map(a => a.label), 'Debt', ...(anyLocked ? ['Set aside to spend'] : []), 'Net worth'],
+        rows: rows.map((r, t) => [r.year, r.ages.join(' / '), ...ACCESS_SERIES.map(a => D(a.of(r), t)), -D(r.debt, t), ...(anyLocked ? [-D(r.locked, t)] : []), D(r.netWorth, t)]),
+        formats: [String, String, money, money, money, money, money, ...(anyLocked ? [money] : [])],
       } : {
-        headers: ['Year', 'Ages', 'Cash', 'ISAs', 'GIA', 'Pensions', 'Bonds', 'Property', 'Debt', 'Net worth'],
-        rows: rows.map((r, t) => [r.year, r.ages.join(' / '), ...ovCols.map(k => D(r[k], t)), -D(r.debt, t), D(r.netWorth, t)]),
-        formats: [String, String, money, money, money, money, money, money, money, money],
+        headers: ['Year', 'Ages', 'Cash', 'ISAs', 'GIA', 'Pensions', 'Bonds', 'Property', 'Debt', ...(anyLocked ? ['Set aside to spend'] : []), 'Net worth'],
+        rows: rows.map((r, t) => [r.year, r.ages.join(' / '), ...ovCols.map(k => D(r[k], t)), -D(r.debt, t), ...(anyLocked ? [-D(r.locked, t)] : []), D(r.netWorth, t)]),
+        formats: [String, String, money, money, money, money, money, money, money, money, ...(anyLocked ? [money] : [])],
       }),
     });
     $('#ovChartSub').textContent = `${homeBy === 'access' ? 'What you own by when it can be used' : 'What you own by account type'}, on average returns, from your figures as at ${fmtDate(asOf())}, in ${unitLabel()}. The areas add up to your net worth (the line); debt sits below zero. Hover a year, or switch to Table for every number.`;
@@ -1079,6 +1130,15 @@
     }
 
     // Every year.
+    const pots = E.reservesAt(p, model.est ? model.est.years || 0 : 0);
+    const budgets = pots.filter(r => r.kind === 'budget');
+    if (budgets.length) add('yearly', `At the review: what is left of the ${budgets.map(r => r.name.toLowerCase()).join(' and ')} budget${budgets.length > 1 ? 's' : ''}?`,
+      `${budgets.map(r => `${money(r.yearly)} for ${r.name.toLowerCase()}`).join(', ')} this year, in ${[...new Set(budgets.map(r => accountName(r.accountId) || 'an account'))].join(' and ')}. The plan counts it as spent; what is left can be kept for the year after or freed up to invest.`, ['Start review', () => openReview()]);
+    for (const r of pots) {
+      const where = accountName(r.accountId) || 'an account';
+      if (r.kind === 'emergency') add('now', `Keep ${money(r.amount)} in ${where} as the emergency fund`, 'Marked on Home as set aside: not for spending or investing. It rises with prices.', go('Set aside', 'finances/saving'));
+      else if (r.kind === 'saving' && r.dueYear) add('now', `Count about ${money(r.perYear / 12)} a month in ${where} as for ${r.name.toLowerCase()}`, `It is already part of what goes in each month. Home shows it building up to ${money(r.target)} for ${r.dueYear}, locked and left out of net worth; then it is taken out to pay.`, go('Set aside', 'finances/saving'));
+    }
     add('yearly', 'By 5 April: use the tax-year allowances', 'ISAs, pension top-ups and moving the general account into ISAs. Unused allowances are lost.', ['Tax year-end check', () => openGuide('tax')]);
     add('yearly', 'Each autumn: the yearly review', 'Swap the estimates for real balances so the plan tracks what actually happened.', ['Start review', () => openReview()]);
     return out;
@@ -2998,13 +3058,65 @@
     };
     return [dateRow, ...rvRows('accounts', d.plan.accounts, {
       expLabel: 'Estimate',
-      note: a => (d.readings && d.readings[a.id] ? h('small', { class: 'rv-note' }, `From your update on ${fmtDate(d.readings[a.id].date)}`) : null),
+      note: a => [d.readings && d.readings[a.id] ? h('small', { class: 'rv-note' }, `From your update on ${fmtDate(d.readings[a.id].date)}`) : null, rvSplit(a)],
       tag: a => (a.excluded ? 'Not counted' : ACCOUNT_LABELS[a.type]),
       color: a => TYPE_COLOR[a.type],
       lowerIsBetter: a => a.type === 'debt',
       nowLabel: a => (a.type === 'debt' ? 'Owed now' : a.type === 'property' ? 'Worth now' : 'Balance now'),
       extra: debtExtra,
-    })];
+    }), rvReserves()];
+  }
+
+  // How the plan expected an account to split on the review date: each pot set aside, and the rest.
+  function rvSplit(a) {
+    const d = rv.draft, o = d.original;
+    const pots = E.reservesAt(o, RV.yearsBetween(E.asOfDate(o), d.date)).filter(r => r.accountId === a.id && r.held >= 0.5);
+    if (!pots.length) return null;
+    const exp = d.expected.accounts[a.id] || 0;
+    const held = pots.reduce((acc, r) => acc + r.held, 0);
+    return h('small', { class: 'rv-note rv-split' }, glyph('lock'), `Expected: ${pots.map(r => `${r.name} ${money(r.held)}`).join(' + ')} + free ${money(Math.max(0, exp - held))}`);
+  }
+
+  // Money set aside, as it actually went: what is in the emergency fund, what has been put aside
+  // for each cost, and how much of each budget was spent (the rest kept for next year or freed up).
+  function rvReserves() {
+    const d = rv.draft, o = d.original;
+    if (!(o.reserves || []).length) return null;
+    const list = E.reservesAt(o, RV.yearsBetween(E.asOfDate(o), d.date));
+    const lastYear = d.years > 0 ? E.reservesAt(o, 0) : [];
+    rv.reserves = rv.reserves || {};
+    const seg = (st, key, opts, label) => h('div', { class: 'seg mini', role: 'group', 'aria-label': label }, opts.map(([v, l]) => h('button', {
+      type: 'button', 'aria-pressed': String(st[key] === v),
+      onclick: e => { st[key] = v; for (const x of e.currentTarget.parentElement.children) x.setAttribute('aria-pressed', String(x === e.currentTarget)); },
+    }, l)));
+    const rows = list.map(r => {
+      const where = accountName(r.accountId) ? ` in ${accountName(r.accountId)}` : '';
+      if (r.kind === 'emergency') {
+        const st = rv.reserves[r.id] || (rv.reserves[r.id] = { amount: Math.round(r.amount) });
+        return h('div', { class: 'rv-reserve', 'data-reserve': r.id },
+          h('div', { class: 'rv-name' }, h('strong', {}, r.name), h('span', { class: 'muted' }, `The plan kept ${money(r.amount)}${where}.`)),
+          field('In the emergency fund now', moneyInputPlain(() => st.amount, v => { st.amount = v; }, `${r.name} now`), 'Whatever you count as untouchable. From now on it rises with prices.'));
+      }
+      if (r.kind === 'saving') {
+        const st = rv.reserves[r.id] || (rv.reserves[r.id] = { saved: Math.round(r.amount) });
+        return h('div', { class: 'rv-reserve', 'data-reserve': r.id },
+          h('div', { class: 'rv-name' }, h('strong', {}, r.name), h('span', { class: 'muted' }, r.dueYear ? `The plan expected ${money(r.amount)} put aside${where}, towards ${money(r.target)} in ${r.dueYear}.` : 'No planned cost ahead.')),
+          r.dueYear ? field('Put aside so far', moneyInputPlain(() => st.saved, v => { st.saved = v; }, `${r.name} put aside so far`), 'It builds up from here to the full amount by when it is due.') : null);
+      }
+      const last = lastYear.find(x => x.id === r.id);
+      if (!last) return null;
+      const st = rv.reserves[r.id] || (rv.reserves[r.id] = { spent: Math.round(last.amount), keep: true });
+      return h('div', { class: 'rv-reserve', 'data-reserve': r.id },
+        h('div', { class: 'rv-name' }, h('strong', {}, `${r.name} ${o.startYear}`), h('span', { class: 'muted' }, `${money(last.amount)} budgeted${last.left ? `, with ${money(last.left)} kept from the year before` : ''}${where}. The plan counted it all as spent.`)),
+        field('How much did you spend?', moneyInputPlain(() => st.spent, v => { st.spent = v; }, `${r.name} spent`), 'What is left is still in the account, so it is part of the balance above.'),
+        h('div', { class: 'field' }, h('span', {}, 'What is left'),
+          seg(st, 'keep', [[true, 'Keep it for next year'], [false, 'Free it up to invest']], `What to do with what is left of ${r.name}`)));
+    }).filter(Boolean);
+    if (!rows.length) return null;
+    return h('div', { class: 'rv-reserves', id: 'rvReserves' },
+      h('h3', {}, 'Money set aside'),
+      h('p', { class: 'hint' }, 'How it actually went this year. This explains part of any difference in the balances above: money not spent stays in the account.'),
+      rows);
   }
 
   function rvIncome() {
@@ -3186,6 +3298,18 @@
     const d = rv.draft;
     const finish = () => {
       const goals = rv.evals.after.goals.map(g => ({ title: g.title, probability: g.probability, expectedYear: g.expectedYear }));
+      // Money set aside, as it went: the new figures date is the review date.
+      const lastYear = d.years > 0 ? E.reservesAt(d.original, 0) : [];
+      for (const [id, st] of Object.entries(rv.reserves || {})) {
+        const r = (d.plan.reserves || []).find(x => x.id === id);
+        if (!r) continue;
+        if (r.kind === 'emergency') r.amount = Math.max(0, st.amount || 0);
+        else if (r.kind === 'saving') r.saved = Math.max(0, st.saved || 0);
+        else {
+          const last = lastYear.find(x => x.id === id);
+          r.left = st.keep && last ? Math.max(0, last.amount - (st.spent || 0)) : 0;
+        }
+      }
       ws = RV.apply(ws, d, { scenarioIds: [...rv.scenarioIds], market: rv.market, date: d.date, goals, note: rv.note });
       $('#reviewWiz').close();
       rv = null;
@@ -4401,8 +4525,66 @@
         h('div', { class: 'fields' },
           field('Spend less from age', numInput(...bind(s, 'slowDownAge'), { min: 0, max: 110 }), '0 = never. Future costs (in Spending) can set this.'),
           field('Spending from then', numInput(...bind(s, 'slowDownPct'), { min: 0, max: 200, step: 5, suffix: '%' }), 'Of normal spending.'))),
+      reservesEditor(),
       h('p', { class: 'sub', style: 'margin-top:12px' }, 'In retirement, money comes from: cash above the buffer → pensions up to each person’s tax-free allowance → general investment account → ISAs → more pension (taxed) → the cash buffer.'),
     ];
+  }
+
+  // Money set aside: one row per pot, and buttons to add each kind.
+  function reservesEditor() {
+    const p = plan();
+    const accts = p.accounts.filter(a => E.RESERVE_ACCOUNTS.includes(a.type) && !a.excluded);
+    const evNames = [...new Set(p.events.filter(e => e.kind === 'expense').map(e => e.name))];
+    const items = p.expenses.filter(e => !(e.key || '').startsWith('life:'));
+    const now = E.reservesAt(p, model && model.est ? model.est.years || 0 : 0);
+    const rerender = () => { renderSection('strategy'); schedule(); };
+    const KIND = { emergency: 'Emergency fund', saving: 'Saving up for a cost', budget: 'Yearly budget' };
+    const rows = p.reserves.map((r, i) => {
+      const cur = now[i] || r;
+      const own = [
+        field('Name', h('input', { type: 'text', value: r.name, 'aria-label': 'Name', oninput: e => { r.name = e.target.value; schedule(); } })),
+        field('Held in', selectInput([['', 'Choose an account'], ...accts.map(a => [a.id, a.name])], ...bind(r, 'accountId'), { rerender: 'strategy', label: 'Held in' })),
+      ];
+      if (r.kind === 'emergency') {
+        own.push(field('Amount', moneyInput(() => (r.amount === null ? p.strategy.cashReserve : r.amount), v => { r.amount = v; }, { label: 'Emergency fund amount' }),
+          `Today’s money, rising with prices. The cash buffer is ${money(p.strategy.cashReserve)}.`));
+      } else if (r.kind === 'saving') {
+        own.push(field('For', evNames.length
+          ? selectInput(evNames.map(n => [n, n]), () => r.eventName, v => { if (!r.name || r.name === r.eventName) r.name = v; r.eventName = v; }, { rerender: 'strategy', label: 'For' })
+          : h('span', { class: 'hint' }, 'Add the cost under Spending → One-off events first.')));
+      } else {
+        own.push(field('For', selectInput(items.map(e => [e.id, `${e.name} (${money(e.amount * (e.freq === 'month' ? 12 : 1))} a year)`]), () => r.expenseId, v => {
+          const was = items.find(e => e.id === r.expenseId), now = items.find(e => e.id === v);
+          if (now && (!r.name || (was && r.name === was.name))) r.name = now.name;
+          r.expenseId = v;
+        }, { rerender: 'strategy', label: 'For' })),
+          field('Kept from last year', moneyInput(...bind(r, 'left'), { label: 'Kept from last year' }), 'Already in the account for it, e.g. not spent last year. Filled in by the yearly review; spent this year, so not counted in net worth.'));
+      }
+      return h('div', { class: 'reserve-item', 'data-reserve': r.id },
+        h('div', { class: 'reserve-head' }, h('strong', {}, KIND[r.kind]), h('span', { class: 'hint' }, reserveText(cur)),
+          h('button', { type: 'button', class: 'btn small ghost', 'aria-label': `Remove ${r.name}`, onclick: () => { p.reserves.splice(i, 1); rerender(); } }, 'Remove')),
+        h('div', { class: 'fields' }, own));
+    });
+    const add = kind => {
+      const pick = types => (accts.find(a => types.includes(a.type)) || accts[0] || {}).id || '';
+      const base = { kind, accountId: pick(kind === 'saving' ? ['isa', 'gia'] : ['cash']) };
+      if (kind === 'saving') Object.assign(base, { eventName: evNames[0] || '', name: evNames[0] || 'Saving up' });
+      if (kind === 'budget') {
+        const e = items.find(x => x.freq === 'year') || items[0];
+        if (!e) { toast('Add the spending item first (Finances → Spending).'); return; }
+        Object.assign(base, { expenseId: e.id, name: e.name });
+      }
+      p.reserves.push(E.normalizePlan({ ...p, reserves: [base] }).reserves[0]);
+      rerender();
+    };
+    return h('div', { class: 'reserves-edit', id: 'reservesEdit' },
+      h('div', { class: 'sub-fields' }, h('h3', {}, 'Money set aside')),
+      h('p', { class: 'hint' }, 'Mark the part of an account that is spoken for, so Home shows what is free to use. The plan already counts what each pot pays for (the cash buffer, one-off costs and the spending list), so nothing is taken twice.'),
+      rows,
+      h('div', { class: 'add-row' },
+        h('button', { type: 'button', class: 'btn small', onclick: () => add('emergency') }, '+ Emergency fund'),
+        h('button', { type: 'button', class: 'btn small', onclick: () => add('saving') }, '+ Saving up for a cost'),
+        h('button', { type: 'button', class: 'btn small', onclick: () => add('budget') }, '+ Yearly budget')));
   }
 
   // What "Use suggested values" would change; if nothing would, it says so instead.
@@ -5004,6 +5186,53 @@
         for (const x of canLisa) q.accounts.push({ id: E.uid(), name: `${x.name} Lifetime ISA`, type: 'lisa', owner: x.id, balance: 0, contribution: v === 'add' ? R.LISA.maxContribution : 0, purpose: 'retirement' });
       },
     });
+    // Money set aside: where the emergency fund is, where money for repeated costs builds up,
+    // and which yearly costs to follow as a budget.
+    const holders = p.accounts.filter(a => ['cash', 'isa', 'gia'].includes(a.type) && !a.excluded);
+    const setReserve = (q, match, v, r) => {
+      const old = (q.reserves || []).find(match);
+      q.reserves = (q.reserves || []).filter(x => !match(x));
+      if (v !== 'none') q.reserves.push({ ...(old || {}), ...r, accountId: v });
+    };
+    if (holders.length) {
+      const em = p.reserves.find(r => r.kind === 'emergency');
+      const firstCash = holders.find(a => a.type === 'cash');
+      out.push({
+        id: 'reserve-emergency', title: 'Where do you keep your emergency fund?',
+        why: `Money for the unexpected (losing a job, a boiler, the car): usually 3–6 months of spending, in easy-access cash. The plan keeps the cash buffer (${money(p.strategy.cashReserve)}) aside; Home then marks it as set aside in that account, so you know it is not for spending or investing.`,
+        current: em ? em.accountId || null : null,
+        options: holders.map(a => ({ value: a.id, label: a.name, text: a.type === 'cash' ? 'Reachable at once, and it doesn’t fall.' : 'Invested: it can fall just when it is needed, and takes a few days to sell.', recommended: a === firstCash }))
+          .concat([{ value: 'none', label: 'I don’t keep one', text: 'Worth building one before investing more.' }]),
+        apply: (q, v) => setReserve(q, r => r.kind === 'emergency', v, { kind: 'emergency', name: 'Emergency fund' }),
+      });
+      const costs = p.events.filter(e => e.kind === 'expense' && e.year > p.startYear);
+      for (const name of [...new Set(costs.map(e => e.name))].filter(n => costs.filter(e => e.name === n).length >= 2)) {
+        const evs = costs.filter(e => e.name === name).sort((a, b) => a.year - b.year);
+        const cur = p.reserves.find(r => r.kind === 'saving' && r.eventName === name);
+        const far = evs[0].year - p.startYear >= 3;
+        const rec = holders.find(a => (far ? ['isa', 'gia'] : ['cash']).includes(a.type)) || holders[0];
+        out.push({
+          id: `reserve-saving-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, title: `Where does the money for “${name}” build up?`,
+          why: `The plan has ${money(evs[0].amount)} for it in ${evs[0].year}, then again every ${evs[1].year - evs[0].year} years (today’s money). Putting a little aside each year means it is there when needed; Home shows how much of the account is for it, so it isn’t spent on something else.`,
+          current: cur ? cur.accountId || null : null,
+          options: holders.map(a => ({ value: a.id, label: a.name, text: a.type === 'cash' ? 'Safe; earns interest.' : 'Invested until needed: grows more, can dip.', recommended: a === rec }))
+            .concat([{ value: 'none', label: 'Not set aside', text: 'Paid from that year’s money when it comes.' }]),
+          apply: (q, v) => setReserve(q, r => r.kind === 'saving' && r.eventName === name, v, { kind: 'saving', name, eventName: name }),
+        });
+      }
+      const cashes = holders.filter(a => a.type === 'cash');
+      for (const e of p.expenses.filter(x => x.freq === 'year' && x.amount >= 1000 && !(x.key || '').startsWith('life:'))) {
+        const cur = p.reserves.find(r => r.kind === 'budget' && r.expenseId === e.id);
+        out.push({
+          id: `reserve-budget-${e.id}`, title: `Follow “${e.name}” as a yearly budget?`,
+          why: `The plan counts ${money(e.amount)} a year as spent. In practice it sits in the bank until it is, and some years not all of it goes, so balances differ from the plan. As a budget, Home shows it as available until spent, and each yearly review asks how much is left: kept for the year after, or freed up to invest.`,
+          current: cur ? cur.accountId || null : null,
+          options: (cashes.length ? cashes : holders).map((a, i) => ({ value: a.id, label: `Yes, in ${a.name}`, text: 'Shown there as set aside until spent.', recommended: i === 0 }))
+            .concat([{ value: 'none', label: 'No', text: 'It stays part of the spending list only.' }]),
+          apply: (q, v) => setReserve(q, r => r.kind === 'budget' && r.expenseId === e.id, v, { kind: 'budget', name: e.name, expenseId: e.id }),
+        });
+      }
+    }
     for (const db of p.income.filter(i => i.kind === 'dbpension' && i.dbScheme === 'uss')) {
       const x = ps.find(y => y.id === db.owner);
       if (!x || x.retireAge <= x.age) continue;

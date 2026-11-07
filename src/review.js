@@ -54,6 +54,11 @@
     }
     p.strategy.cashReserve *= infl;
     p.strategy.retireSpending *= infl;
+    // A new year: budgets start again (the review says what is kept); fixed emergency funds rise with prices.
+    for (const r of p.reserves || []) {
+      if (r.kind === 'budget') r.left = 0;
+      if (r.kind === 'emergency' && r.amount !== null) r.amount *= infl;
+    }
     for (const g of p.goals) if (g.basis === 'real' && g.type !== 'debtFree' && g.type !== 'retire') g.amount *= infl;
     return round(p);
   }
@@ -170,8 +175,10 @@
     const byType = Object.fromEntries(TYPES.map(t => [t, 0]));
     for (const a of plan.accounts) if (!a.excluded) byType[a.type === 'lisa' ? 'isa' : a.type] += byId[a.id];
     for (const m of exp.missing) byType[m.type] += m.value;
-    const netWorth = TYPES.reduce((s, t) => s + (t === 'debt' ? -byType[t] : byType[t]), 0);
-    return { date, asOf, years: f, byId, expected: exp.byId, source, reading, byType, netWorth, missing: exp.missing };
+    // Money set aside to be spent (savings for a cost, budgets): still in its account, not in net worth.
+    const locked = E.reservesAt(plan, f).filter(r => r.kind !== 'emergency').reduce((s, r) => s + r.held, 0);
+    const netWorth = TYPES.reduce((s, t) => s + (t === 'debt' ? -byType[t] : byType[t]), 0) - locked;
+    return { date, asOf, years: f, byId, expected: exp.byId, source, reading, byType, netWorth, locked, missing: exp.missing };
   }
 
   // Values by type, as a check-in records them.
@@ -331,6 +338,13 @@
         }
         for (const it of draft.plan.income) { const m = match(p.income, it); if (m) m.amount = it.amount; }
         for (const e of draft.plan.expenses) { const m = match(p.expenses, e); if (m) m.amount = e.amount; }
+        for (const r of draft.plan.reserves || []) {
+          const m = (p.reserves || []).find(x => x.id === r.id) || (p.reserves || []).find(x => x.kind === r.kind && x.name === r.name);
+          if (!m) continue;
+          if (r.kind === 'budget') m.left = r.left;
+          else if (r.kind === 'saving') m.saved = r.saved;
+          else if (r.kind === 'emergency') m.amount = r.amount;
+        }
         p.asOf = draft.date || p.asOf;
         for (const a of p.accounts) a.latest = null;   // the review's figures replace any readings
       }
