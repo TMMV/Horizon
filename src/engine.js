@@ -21,10 +21,10 @@
 
   // ---------------------------------------------------------------- constants
 
-  const ACCOUNT_TYPES = ['cash', 'isa', 'lisa', 'gia', 'pension', 'bonds', 'property', 'debt'];
+  const ACCOUNT_TYPES = ['cash', 'isa', 'lisa', 'gia', 'pension', 'bonds', 'property', 'asset', 'debt'];
   const OWNED_TYPES = ['isa', 'lisa', 'pension'];
   const GOAL_TYPES = ['netWorth', 'debtFree', 'retire', 'passiveIncome', 'emergency'];
-  const INCOME_KINDS = ['salary', 'rental', 'other', 'dbpension'];
+  const INCOME_KINDS = ['salary', 'self', 'rental', 'other', 'dbpension'];
   const TAX_TREATMENTS = ['uk', 'none', 'flat'];
   const BASIC_RELIEF = 0.2; // relief at source added to personal pension contributions
 
@@ -34,7 +34,7 @@
     'wCash', 'wGia', 'wIsa', 'wPension', 'toIsa', 'toGia', 'toCash', 'overpay', 'pensionIn',
     'cgt', 'gCash', 'gIsa', 'gGia', 'gPension', 'gBonds', 'gProperty',
     'debtInterest', 'debtRegular', 'lumpOverpay', 'bondsMatured', 'bondsToIsa', 'propSold', 'extraPension', 'flatTax',
-    'sweepIsa', 'sweepGia', 'nonWork',
+    'sweepIsa', 'sweepGia', 'nonWork', 'homeBuy', 'studentLoan',
     'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension', 'sacrificed',
   ];
 
@@ -210,6 +210,9 @@
   const oneOf = (v, list, d) => (list.includes(v) ? v : d);
   const str = (v, d) => (typeof v === 'string' ? v : d);
   const arr = v => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : []);
+  const optNum = v => (v === null || v === undefined || v === '' || !Number.isFinite(+v) ? null : +v);
+  // A note anyone can add to an item: what it is, how it is arranged, who it is with.
+  const note = v => (typeof v === 'string' ? v.slice(0, 500) : '');
 
   // Copies known keys from src, coercing to the type of each default.
   function fill(src, defs) {
@@ -235,15 +238,25 @@
       statePensionAge: Math.round(num(p.statePensionAge, R.statePensionAge(startYear - age))),
       pensionAccessAge: Math.round(num(p.pensionAccessAge, R.MIN_PENSION_AGE)),
       extraPension: Math.max(0, num(p.extraPension)),
+      // Student loan: which plan ('' = none), what is owed on the figures date, the year anything
+      // left is written off, and optional own threshold and interest (null = the plan's).
+      loanPlan: oneOf(p.loanPlan, Object.keys(R.STUDENT_LOANS), ''),
+      loanBalance: Math.max(0, num(p.loanBalance)),
+      loanEndYear: Math.round(num(p.loanEndYear, 0)),
+      loanThreshold: optNum(p.loanThreshold),
+      loanRate: optNum(p.loanRate),
     };
   }
 
   function normalizeTiming(item, defStart, defEnd) {
     return {
-      startRef: oneOf(item.startRef, ['now', 'retire', 'age'], defStart),
+      startRef: oneOf(item.startRef, ['now', 'retire', 'age', 'year'], defStart),
       startAge: Math.round(num(item.startAge, 0)),
-      endRef: oneOf(item.endRef, ['retire', 'end', 'age'], defEnd),
+      endRef: oneOf(item.endRef, ['retire', 'end', 'age', 'year'], defEnd),
       endAge: Math.round(num(item.endAge, 0)),
+      // In a calendar year instead of at an age: from `fromYear`, until (not including) `toYear`.
+      fromYear: Math.round(num(item.fromYear, 0)),
+      toYear: Math.round(num(item.toYear, 0)),
     };
   }
 
@@ -333,6 +346,15 @@
         // An ISA's own amount a month (today's money); null = automatic.
         monthly: type === 'isa' && a.monthly !== null && a.monthly !== undefined && a.monthly !== '' && Number.isFinite(+a.monthly) ? Math.max(0, +a.monthly) : null,
         homeYear: Math.round(num(a.homeYear, 0)),
+        // A home bought later: the year, the deposit (% of the price), and the mortgage taken out
+        // then (rate and years). Until then `balance` is today's price, rising with house prices.
+        ...(type === 'property' ? {
+          buyYear: Math.round(num(a.buyYear, 0)),
+          deposit: Math.min(100, Math.max(0, num(a.deposit, 10))),
+          mortRate: Math.max(0, num(a.mortRate, 4.5)),
+          mortYears: Math.min(40, Math.max(1, Math.round(num(a.mortYears, 30)))),
+        } : {}),
+        note: note(a.note),
         // A balance read since the plan's figures date (e.g. from a banking app). It shows on
         // the home page and feeds the next yearly review; the projection keeps the figures.
         latest: a.latest && typeof a.latest === 'object' && isDate(a.latest.date) && Number.isFinite(+a.latest.value)
@@ -371,6 +393,7 @@
       employeePension: Math.max(0, num(i.employeePension)),
       employerPension: Math.max(0, num(i.employerPension)),
       sacrifice: !!i.sacrifice,
+      note: note(i.note),
     }));
 
     const expenses = arr(p.expenses).map(e => ({
@@ -384,6 +407,7 @@
       inflationLinked: e.inflationLinked !== undefined ? !!e.inflationLinked : true,
       growth: num(e.growth),
       ...normalizeTiming(e, 'now', 'end'),
+      note: note(e.note),
     }));
 
     const events = arr(p.events).map(e => ({
@@ -392,6 +416,7 @@
       kind: oneOf(e.kind, ['expense', 'income', 'overpay'], 'expense'),
       year: Math.round(num(e.year, startYear + 1)),
       amount: Math.max(0, num(e.amount)),
+      note: note(e.note),
     }));
 
     // Money set aside inside an account: an emergency fund, savings building up for a known cost
@@ -562,6 +587,12 @@
       if (a.balance <= 0 && owner.age >= R.LISA.openBefore) out.push(`“${a.name}”: a Lifetime ISA has to be opened before 40, so ${owner.name} cannot start paying in now.`);
       if (a.purpose === 'home' && a.homeYear && a.homeYear < p.startYear) out.push(`“${a.name}”: the first-home year has passed.`);
     }
+    for (const a of p.accounts.filter(x => x.type === 'property' && x.buyYear && x.buyYear < p.startYear)) {
+      out.push(`“${a.name}”: the year it is bought has passed, so it is counted as owned now. Set the year to 0 and add its mortgage as a loan.`);
+    }
+    for (const person of p.household.people.filter(x => x.loanPlan && x.loanBalance > 0 && !x.loanEndYear)) {
+      out.push(`${person.name}: add the year the student loan is written off (in the Student Loans Company account), or it never ends.`);
+    }
     for (const person of p.household.people) {
       if (person.endAge <= person.age) out.push(`${person.name}: “plan until age” must be after current age.`);
       if (person.retireAge < person.age) out.push(`${person.name} is treated as already retired (retirement age is before current age).`);
@@ -588,9 +619,11 @@
   }
 
   // [start, end) ages of the owner during which a stream is active.
-  function streamWindow(item, person) {
-    const start = item.startRef === 'now' ? -Infinity : item.startRef === 'retire' ? person.retireAge : item.startAge;
-    const end = item.endRef === 'retire' ? person.retireAge : item.endRef === 'end' ? Infinity : item.endAge;
+  // Years are turned into the owner's age with the plan's first year (`startYear`).
+  function streamWindow(item, person, startYear) {
+    const yearAge = y => person.age + y - (startYear || 0);
+    const start = item.startRef === 'now' ? -Infinity : item.startRef === 'retire' ? person.retireAge : item.startRef === 'year' ? yearAge(item.fromYear) : item.startAge;
+    const end = item.endRef === 'retire' ? person.retireAge : item.endRef === 'end' ? Infinity : item.endRef === 'year' ? (item.toYear ? yearAge(item.toYear) : Infinity) : item.endAge;
     return [start, end];
   }
 
@@ -603,7 +636,7 @@
   function isActive(item, plan, t) {
     const person = ownerOf(plan, item);
     const age = person.age + t;
-    const [start, end] = streamWindow(item, person);
+    const [start, end] = streamWindow(item, person, plan.startYear);
     return age >= start && age < end;
   }
 
@@ -694,7 +727,7 @@
 
   // Tax functions for a plan: UK rules, or all zero when the household switches tax off.
   const NO_TAX = {
-    incomeTax: () => 0, nationalInsurance: () => 0, capitalGainsTax: () => 0,
+    incomeTax: () => 0, nationalInsurance: () => 0, capitalGainsTax: () => 0, selfEmployedNI: () => 0,
     personalAllowance: (inc, g) => R.personalAllowance(inc, g),
   };
   const taxRules = plan => (plan.household.ignoreTax ? NO_TAX : R);
@@ -881,6 +914,9 @@
         sacrificed: zeros(),   // pay sacrificed into the pension to stay under £100,000
         payInc: zeros(),       // income tax is measured on (take-home pay grossed up), for "pensions first"
         earned: zeros(),       // pay before tax: the most that can get relief in a year
+        selfProfit: zeros(),   // self-employed profit (income tax + Class 4 NI)
+        loanPaid: zeros(),     // student loan repaid
+        loanBal: zeros(),      // student loan owed at the start of each year
       })),
     };
 
@@ -888,6 +924,33 @@
       pre.years.push(plan.startYear + t);
       pre.g[t] = thresholdFactorFrom(plan, t, econ.price);
       people.forEach((p, i) => pre.ages[i].push(p.age + t));
+    }
+
+    // Student loans: a share of pay above the threshold, until repaid or written off. Take-home pay
+    // already has it taken off, so it rises when the loan ends; pay before tax pays it from here.
+    const loanLeft = people.map(p => (p.loanPlan ? p.loanBalance : 0));
+    const grossOf = (P, t, g) => P.gross[t] + P.selfProfit[t] + (P.netPay[t] > 0 ? R.grossFromTakeHome(P.netPay[t] / g, household.region) * g : 0);
+    function studentLoan(p, P, t) {
+      const i = people.indexOf(p);
+      P.loanBal[t] = loanLeft[i];
+      if (!p.loanPlan) return;
+      const L = R.STUDENT_LOANS[p.loanPlan];
+      const year = plan.startYear + t;
+      const fz = L.frozenUntil ? Math.max(0, Math.min(N, L.frozenUntil - plan.startYear)) : 0;
+      const thr = (p.loanThreshold === null ? L.threshold : p.loanThreshold) * (t <= fz ? 1 : econ.price[t] / econ.price[fz]);
+      const G = grossOf(P, t, pre.g[t]);
+      const due = L.pct / 100 * Math.max(0, G - thr);
+      if (loanLeft[i] <= 0 || (p.loanEndYear && year >= p.loanEndYear)) loanLeft[i] = 0;
+      const rate = (p.loanRate === null ? a.inflation + L.extra : p.loanRate) / 100;
+      const owed = loanLeft[i] * (1 + rate);
+      const paid = Math.min(due, owed);
+      loanLeft[i] = Math.max(0, owed - paid);
+      P.loanPaid[t] = paid;
+      // The share of pay entered as take-home already has the loan taken off.
+      const net = G > 0 ? (G - P.gross[t] - P.selfProfit[t]) / G : 0;
+      P.netPay[t] += net * (due - paid);
+      P.baseTax[t] += (1 - net) * paid;
+      if (t === N - 1) P.loanBal[N] = loanLeft[i];
     }
 
     for (let t = 0; t < N; t++) {
@@ -920,9 +983,13 @@
           continue;
         }
         if (tax === 'uk') {
-          // Taxable non-salary income; joint income is split equally.
-          if (P) P.other[t] += v;
-          else for (const Q of pre.people) Q.other[t] += v / people.length;
+          // Taxable non-salary income; joint income is split equally. Self-employed profit also
+          // pays Class 4 National Insurance.
+          const to = P ? [P] : pre.people;
+          for (const Q of to) {
+            Q.other[t] += v / to.length;
+            if (item.kind === 'self') Q.selfProfit[t] += v / to.length;
+          }
           continue;
         }
         pre.taxFree[t] += v;
@@ -963,7 +1030,7 @@
           }
         }
         P.taxable[t] = P.gross[t] - P.employee[t] + P.other[t] + P.statePension[t];
-        P.ni[t] = age < p.statePensionAge ? T.nationalInsurance(niable[i], g) : 0;
+        P.ni[t] = age < p.statePensionAge ? T.nationalInsurance(niable[i], g) + T.selfEmployedNI(P.selfProfit[t], g) : 0;
         P.baseIT[t] = T.incomeTax(P.taxable[t], household.region, g);
         // Relief above the basic 20% on personal contributions, claimed through self-assessment:
         // the tax saved by taking the gross contribution off taxable income, less the 20% already
@@ -975,6 +1042,7 @@
           P.baseIT[t] -= P.relief[t];
         }
         P.baseTax[t] = P.baseIT[t] + P.ni[t];
+        studentLoan(p, P, t);
         if (s.pensionFirst && !household.ignoreTax && age < p.retireAge && p.retireAge >= p.pensionAccessAge && (P.gross[t] > 0 || P.netPay[t] > 0)) {
           const grossed = grossUp(P.netPay[t]);
           P.payInc[t] = P.taxable[t] + grossed - P.extraPot[t];
@@ -1130,7 +1198,14 @@
         });
       }
       else if (x.type === 'bonds') bonds.push({ bal: x.balance, rate: x.rate / 100, t: x.maturityYear ? x.maturityYear - plan.startYear : Infinity, inIsa: x.inIsa, payout: x.coupons === 'payout' });
-      else if (x.type === 'property') props.push({ val: x.balance, rate: x.rate / 100, t: x.sellYear ? x.sellYear - plan.startYear : Infinity });
+      else if (x.type === 'property' || x.type === 'asset') {
+        // A home bought later is not owned yet: its price rises with house prices until the year
+        // it is bought, when the deposit is paid and its mortgage starts.
+        const buy = x.type === 'property' && x.buyYear >= plan.startYear ? x.buyYear - plan.startYear : -1;
+        const mort = buy >= 0 && x.deposit < 100 ? { id: `${x.id}:mortgage`, bal: 0, rate: x.mortRate / 100, pay: 0, varFrom: Infinity, after: x.mortRate / 100, keepTerm: false } : null;
+        if (mort) debts.push(mort);
+        props.push({ val: x.balance, rate: x.rate / 100, t: x.sellYear ? x.sellYear - plan.startYear : Infinity, buy, owned: buy < 0, deposit: x.deposit / 100, years: x.mortYears, mort });
+      }
       else if (x.type === 'debt') {
         debts.push({
           id: x.id, bal: x.balance, rate: x.rate / 100, pay: x.payment * 12,
@@ -1150,7 +1225,7 @@
       if (out.lisa) out.lisa[t] = lisaBal;
       out.cash[t] = cash; out.isa[t] = isa + lisaBal; out.gia[t] = gia; out.pension[t] = sum(pension);
       out.bonds[t] = bonds.reduce((acc, b) => acc + b.bal, 0);
-      out.property[t] = props.reduce((acc, p) => acc + p.val, 0);
+      out.property[t] = props.reduce((acc, p) => acc + (p.owned ? p.val : 0), 0);
       out.debt[t] = debts.reduce((acc, d) => acc + d.bal, 0);
       out.short[t] = short;
       out.locked[t] = pre.locked[t];
@@ -1198,12 +1273,24 @@
           b.bal = 0;
         }
       }
-      let gProperty = 0, propSold = 0;
+      let gProperty = 0, propSold = 0, homeBuy = 0;
       for (const p of props) {
+        if (!p.owned && t === p.buy) {
+          // Bought at the start of the year, at that year's price.
+          p.owned = true;
+          const loan = p.mort ? p.val * (1 - p.deposit) : 0;
+          homeBuy += p.val - loan;
+          if (p.mort) {
+            // Yearly payments that clear it over its term (the plan adds interest once a year).
+            const i = p.mort.rate, m = p.years;
+            p.mort.bal = loan;
+            p.mort.pay = i > 0 ? loan * i / (1 - Math.pow(1 + i, -m)) : loan / m;
+          }
+        }
         const x = p.val * Math.max(-0.5, p.rate + econ.house[t]);
         p.val += x;
-        gProperty += x;
-        if (t === p.t && p.val > 0) { propSold += p.val; p.val = 0; }
+        if (p.owned) gProperty += x;
+        if (t === p.t && p.val > 0 && p.owned) { propSold += p.val; p.val = 0; }
       }
 
       // 2. Pension contributions
@@ -1257,7 +1344,7 @@
       }
       other += pre.taxFree[t] + pre.eventsIn[t] + propSold;
       const net = earnings - employee - extraOut + other + statePension - baseTax
-        - pre.expenses[t] - pre.eventsOut[t] - debtRegular - lumpOverpay;
+        - pre.expenses[t] - pre.eventsOut[t] - debtRegular - lumpOverpay - homeBuy;
 
       let extraTax = 0, cgt = 0, unfunded = 0, sweepIsa = 0, sweepGia = 0;
       let toCash = 0, overpay = 0, toIsa = 0, toGia = 0, toLisa = 0, lisaBonus = 0, wLisa = 0, lisaCharge = 0, toPension = 0;
@@ -1455,7 +1542,9 @@
         out.statePension[t] = statePension;
         out.withdrawals[t] = wCash + wGia + wIsa + wPension + wLisa - lisaCharge;
         out.wCash[t] = wCash; out.wGia[t] = wGia; out.wIsa[t] = wIsa; out.wPension[t] = wPension;
-        out.spending[t] = pre.expenses[t] + pre.eventsOut[t];
+        out.spending[t] = pre.expenses[t] + pre.eventsOut[t] + homeBuy;
+        out.homeBuy[t] = homeBuy;
+        out.studentLoan[t] = pre.people.reduce((acc, P) => acc + P.loanPaid[t], 0);
         out.taxes[t] = baseTax + extraTax + lisaCharge;
         out.flatTax[t] = pre.flatTax[t];
         out.cgt[t] = cgt;
@@ -1546,9 +1635,14 @@
       add(p.pensionAccessAge, people.length > 1 ? 'can access pension' : 'Pension access', 'pension');
       add(p.statePensionAge, people.length > 1 ? 'starts State Pension' : 'State Pension starts', 'sp');
     });
-    if (rows[0].debt > 0) {
-      const r = rows.find(x => x.debt <= 0.5);
+    // Mortgage-free: the first year with nothing owed after borrowing (now, or for a home bought later).
+    const owing = rows.findIndex(x => x.debt > 0.5);
+    if (owing >= 0) {
+      const r = rows.slice(owing).find(x => x.debt <= 0.5);
       if (r) list.push({ year: r.year, label: 'Mortgage-free', kind: 'debt' });
+    }
+    for (const a of plan.accounts) {
+      if (a.type === 'property' && !a.excluded && a.buyYear >= plan.startYear && inRange(a.buyYear)) list.push({ year: a.buyYear, label: `Buy ${a.name}`, kind: 'home' });
     }
     const fi = rows.find(r => r.t < pre.N && r.spending > 0 && r.liquid >= 25 * r.spending);
     if (fi) list.push({ year: fi.year, label: 'Financially independent (25× spending)', kind: 'fi' });
@@ -1631,9 +1725,8 @@
           }
           r[g.id] = hit;
         } else if (g.type === 'debtFree') {
-          let hit = false;
-          for (let t = 0; t <= tg && !hit; t++) hit = out.debt[t] <= 0.5;
-          r[g.id] = hit;
+          // Nothing owed in the target year (a mortgage taken out later counts too).
+          r[g.id] = out.debt[tg] <= 0.5;
         } else if (g.type === 'emergency') {
           for (const k in snap) snap[k] = out[k][Math.min(tg, N - 1)];
           r[g.id] = emergencyHave(g, snap) >= emergencyNeed(g, pre, out.debt[tg] > 0.5 ? debtPayments : 0, tg) - 0.5;
@@ -1743,8 +1836,10 @@
   }
 
   function debtFreeYear(proj) {
-    if (proj.rows[0].debt <= 0.5) return proj.rows[0].year;
-    const r = proj.rows.find(x => x.debt <= 0.5);
+    // The year after the last one with anything owed.
+    let last = -1;
+    proj.rows.forEach((x, t) => { if (x.debt > 0.5) last = t; });
+    const r = proj.rows[last + 1];
     return r ? r.year : null;
   }
 
@@ -1880,7 +1975,6 @@
       const pre = precompute(plan, econ);
       runPath(plan, pre, out);
       const reached = nwGoals.map(() => false);
-      let paid = false;
       for (let t = 0; t < T; t++) {
         const k = t * runs + i;
         for (const key in snap) snap[key] = out[key][t];
@@ -1895,8 +1989,8 @@
         price[k] = econ.price[t];
         infl[k] = t < N ? econ.infl[t] : econ.infl[N - 1];
         if (out.short[t] <= 0) funded[t] += 1;
-        if (!paid && out.debt[t] <= 0.5) paid = true;
-        if (paid) debtFree[t] += 1;
+        // Owing nothing in year t (a mortgage for a home bought later starts owing again).
+        if (out.debt[t] <= 0.5) debtFree[t] += 1;
         nwGoals.forEach((g, j) => {
           const v = g.type === 'passiveIncome' ? passiveIncome(snap, nonWorkIncome(pre, t), g) : goalValue(snap, g.measure);
           gvals[g.id][k] = v;
@@ -2216,7 +2310,9 @@
     p.events = p.events.filter(e => e.year >= p.startYear);
     for (const a of p.accounts) {
       if (a.type === 'bonds' && a.maturityYear && a.maturityYear < p.startYear) a.balance = 0;
-      if (a.type === 'property' && a.sellYear && a.sellYear < p.startYear) a.balance = 0;
+      if ((a.type === 'property' || a.type === 'asset') && a.sellYear && a.sellYear < p.startYear) a.balance = 0;
+      // A home bought in the meantime is owned now (the review adds its mortgage).
+      if (a.type === 'property' && a.buyYear && a.buyYear < p.startYear) a.buyYear = 0;
     }
     return p;
   }

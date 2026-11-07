@@ -1514,7 +1514,7 @@ test.describe('getting started', () => {
     await expect(panel).toBeVisible();
     await expect(panel.locator('#setupTitle')).toHaveText('Set up your own plan');
     // Every question has its "i".
-    await expect(panel.locator('.st-ask .info-btn')).toHaveCount(3);
+    await expect(panel.locator('.st-ask .info-btn')).toHaveCount(4);
     await panel.locator('.st-ask .info-btn').first().click();
     await expect(page.locator('#infoPop')).toBeVisible();
     await page.keyboard.press('Escape');
@@ -1560,10 +1560,87 @@ test.describe('getting started', () => {
     await page.locator('#ovNeeds [data-notify="setup"] button', { hasText: 'Carry on' }).click();
     await expect(panel.locator('#setupTitle')).toHaveText('ISAs and investments');
     // The last step: finish.
-    await panel.locator('.st-jump').selectOption({ label: '16. Save a copy' });
+    await panel.locator('.st-jump').selectOption({ label: '17. Save a copy' });
     await page.click('#setupNext');
     await expect(panel).toBeHidden();
     await expect(page.locator('#ovNeeds [data-notify="setup"]')).toHaveCount(0);
+    expect(problems).toEqual([]);
+  });
+
+  test('starting out: a student loan, renting, a home bought later and help from family', async ({ page }) => {
+    const { problems } = await openApp(page, '', { setup: true });
+    const panel = page.locator('#setupPanel');
+    const plan = () => page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    const ed = () => page.locator('[data-editing]').last();
+    await panel.locator('.st-choice', { hasText: 'Yes, start my own plan' }).click();
+    await panel.locator('.st-choice', { hasText: 'Just starting out' }).click();
+    await expect(panel.locator('.st-choice', { hasText: 'Just starting out' })).toHaveAttribute('aria-pressed', 'true');
+    await panel.locator('.st-choice', { hasText: 'England' }).click();
+    // People: typing the age moves the State Pension age with it; a student loan under More options.
+    await page.click('#setupNext');
+    await expect(panel.locator('.st-tip')).toContainText('Starting out');
+    const card = page.locator('#sec-household .people .item').first();
+    const age = card.locator('label.field:has-text("Age now") input');
+    await age.fill('62');
+    await age.blur();
+    await expect.poll(async () => (await plan()).household.people[0].statePensionAge).toBe(67);
+    await age.fill('24');
+    await age.blur();
+    await expect.poll(async () => (await plan()).household.people[0].statePensionAge).toBe(68);
+    await panel.locator('button', { hasText: 'Open “More options”' }).click();
+    await card.locator('select[aria-label="Student loan plan"]').selectOption('plan2');
+    await card.locator('label.field:has-text("Student loan owed") input').fill('40000');
+    await expect(card.locator('[data-loan]')).toContainText('add your pay');
+    // Pay before tax: the loan's repayments show on the person.
+    await page.click('#setupNext');
+    await panel.locator('.st-adds button', { hasText: 'Your pay' }).click();
+    await ed().locator('input[aria-label="Amount"]').fill('35000');
+    await ed().locator('select[aria-label="Frequency"]').selectOption('year');
+    await ed().locator('label.field:has-text("Tax") select').first().selectOption('uk');
+    await ed().locator('.edit-done button').click();
+    const p1 = await plan();
+    expect(p1.household.people[0]).toMatchObject({ loanPlan: 'plan2', loanBalance: 40000 });
+    expect(p1.household.people[0].loanEndYear).toBeGreaterThan(2040);
+    // Home: renting, with a flat to buy later; it is listed but not counted yet.
+    await panel.locator('.st-jump').selectOption({ label: '8. Your home and mortgage' });
+    await panel.locator('.st-choice', { hasText: 'Renting' }).click();
+    await expect(panel.locator('.st-field', { hasText: 'Amount owed' })).toHaveCount(0);
+    await panel.locator('.st-adds button', { hasText: 'A home I’ll buy later' }).click();
+    await ed().locator('label.field:has-text("Price today") input').fill('200000');
+    await ed().locator('input[aria-label="Year you buy it"]').fill('2030');
+    await expect(ed().locator('[data-buy]')).toContainText('In 2030 it costs about');
+    await expect(ed().locator('[data-buy]')).toContainText('lenders usually stop at about 4.5 times');
+    await expect(ed().locator('.tag.est')).toHaveText('buying in 2030');
+    await ed().locator('.edit-done button').click();
+    await expect(panel.locator('.st-have')).toContainText('buying in 2030');
+    // Rent, until the year of the purchase.
+    await panel.locator('.st-adds button', { hasText: 'Rent (in spending)' }).click();
+    await expect(page).toHaveURL(/finances\/spending/);
+    await ed().locator('input[aria-label="Rent amount"]').fill('850');
+    await ed().locator('select[aria-label="Ends"]').selectOption('year');
+    await ed().locator('input[aria-label="Year it stops"]').fill('2030');
+    await ed().locator('.edit-done button').click();
+    await expect(page.locator('#sec-expenses .sum-row', { hasText: 'Rent' })).toContainText('until 2030');
+    // Your own situation: a gift from family for the deposit, with a note, in the year of the purchase.
+    await panel.locator('.st-jump').selectOption({ label: '11. Your own situation' });
+    await expect(panel.locator('.st-group[open]')).not.toHaveCount(0);
+    await expect(panel.locator('.st-recipe .info-btn')).not.toHaveCount(0);
+    await panel.locator('.st-recipe', { hasText: 'Help from family towards a deposit' }).locator('.st-adds button').click();
+    const gift = (await plan()).events[0];
+    expect(gift).toMatchObject({ kind: 'income', year: 2030, note: 'From family; a gift, not a loan' });
+    await expect(page.locator('#sec-events [data-editing] textarea[aria-label="Note"]')).toHaveValue('From family; a gift, not a loan');
+    await page.locator('#sec-events [data-editing] .edit-done button').click();
+    await expect(page.locator('#sec-events .sum-row')).toContainText('“From family; a gift, not a loan”');
+    // The plan: the flat is bought in 2030 with a mortgage, rent stops and the loan is repaid from pay.
+    const rows = await page.evaluate(() => window.__horizon.model.proj.rows.map(r => ({ year: r.year, property: r.property, debt: r.debt, homeBuy: r.homeBuy, loan: r.studentLoan })));
+    const at = y => rows.find(r => r.year === y);
+    expect(at(2030).homeBuy).toBeGreaterThan(15000);
+    expect(at(2031).property).toBeGreaterThan(200000);
+    expect(at(2031).debt).toBeGreaterThan(150000);
+    expect(at(2027).loan).toBeGreaterThan(300);
+    await go(page, 'home');
+    await openGroups(page);
+    await expect(page.locator('#homePortfolio [data-account]')).toContainText('buying in 2030: not counted yet');
     expect(problems).toEqual([]);
   });
 });

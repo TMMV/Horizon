@@ -127,6 +127,10 @@ for (const scheme of ['light', 'dark']) {
       await page.evaluate(() => window.__horizon.openSetup(2));
       await page.waitForTimeout(400);
       await page.screenshot({ path: path.join(OUT, `${scheme}-setup-guide.png`) });
+      // Ideas for situations that do not follow the usual rules (family arrangements, other taxes…).
+      await page.evaluate(() => window.__horizon.openSetup(10));
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: path.join(OUT, `${scheme}-setup-own.png`) });
       await page.locator('#setupPanel button[aria-label^="Close the guide"]').click();
 
       // Notifications, then the yearly review.

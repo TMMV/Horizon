@@ -68,6 +68,19 @@
   // Lifetime ISA: open from 18 to 39, pay in until 50, 25% government bonus, inside the ISA
   // allowance. Withdrawals are free from 60 or for a first home up to £450,000; otherwise
   // a 25% charge applies (losing the bonus and a bit more).
+  // Self-employed profits: Class 4 National Insurance (Class 2 is no longer compulsory).
+  const CLASS4 = { lower: 12570, upper: 50270, mainRate: 0.06, upperRate: 0.02 };
+  // Student loans in England, Wales, Scotland and NI, 2026/27: repaid as a share of pay above a
+  // yearly threshold, through the payslip; whatever is left is written off. `extra` is interest
+  // above the plan's inflation, roughly (it is set from RPI). Plan 2's threshold is frozen to April
+  // 2030, Plan 5's to April 2027; the others rise with prices.
+  const STUDENT_LOANS = {
+    plan1: { label: 'Plan 1 (started before Sept 2012, or in NI)', threshold: 26900, pct: 9, extra: 0.5, frozenUntil: 0, writeOff: 25 },
+    plan2: { label: 'Plan 2 (England & Wales, started Sept 2012 to July 2023)', threshold: 29385, pct: 9, extra: 2, frozenUntil: 2030, writeOff: 30 },
+    plan4: { label: 'Plan 4 (Scotland)', threshold: 33795, pct: 9, extra: 0.5, frozenUntil: 0, writeOff: 30 },
+    plan5: { label: 'Plan 5 (England, started from Aug 2023)', threshold: 25000, pct: 9, extra: 0.5, frozenUntil: 2027, writeOff: 40 },
+    pg: { label: 'Postgraduate loan', threshold: 21000, pct: 6, extra: 3.5, frozenUntil: 0, writeOff: 30 },
+  };
   const LISA = { maxContribution: 4000, bonus: 0.25, openBefore: 40, payUntil: 50, accessAge: 60, charge: 0.25, homePriceCap: 450000 };
 
   // Defined benefit (career average) schemes: pension added per year = salary / accrual,
@@ -121,6 +134,12 @@
     return (incomeTax(income + step, region, g) - incomeTax(income, region, g)) / step;
   }
 
+  function selfEmployedNI(profit, g = 1) {
+    const lo = CLASS4.lower * g, hi = CLASS4.upper * g;
+    if (profit <= lo) return 0;
+    return CLASS4.mainRate * (Math.min(profit, hi) - lo) + CLASS4.upperRate * Math.max(0, profit - hi);
+  }
+
   function nationalInsurance(earnings, g = 1) {
     const pt = NI.primaryThreshold * g, uel = NI.upperEarningsLimit * g;
     if (earnings <= pt) return 0;
@@ -168,7 +187,7 @@
     TAX_YEAR, PERSONAL_ALLOWANCE, PA_TAPER_START, INCOME_TAX, NI, CGT, IHT,
     ISA_ALLOWANCE, STATE_PENSION_FULL, LUMP_SUM_ALLOWANCE, PENSION_TAX_FREE_SHARE,
     MIN_PENSION_AGE, PENSION_ANNUAL_ALLOWANCE, FREEZE_UNTIL, SACRIFICE_NI_CAP, SACRIFICE_NI_CAP_FROM,
-    CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, DB_SCHEMES, USS_EARLY, LISA,
+    CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, DB_SCHEMES, USS_EARLY, LISA, CLASS4, STUDENT_LOANS, selfEmployedNI,
     statePensionAge, grossFromTakeHome, personalAllowance, incomeTax, marginalRate, nationalInsurance,
     capitalGainsTax, bandTable,
   };

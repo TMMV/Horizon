@@ -48,10 +48,16 @@
     }
     for (const e of p.expenses) e.amount *= itemGrowth(e);
     for (const ev of p.events) ev.amount *= infl;
-    for (const person of p.household.people) {
+    // Student loans: what the plan expects to be left after the repayments and interest.
+    const loans = plan.household.people.some(x => x.loanPlan) ? E.precompute(plan).people : null;
+    p.household.people.forEach((person, i) => {
       person.statePension *= infl * grow(a.statePensionRealGrowth, years);
       person.extraPension *= infl;
-    }
+      if (loans && person.loanPlan) {
+        const bal = loans[i].loanBal, k = Math.min(bal.length - 2, Math.floor(years)), x = years - k;
+        person.loanBalance = Math.max(0, bal[k] + (bal[k + 1] - bal[k]) * x);
+      }
+    });
     p.strategy.cashReserve *= infl;
     p.strategy.retireSpending *= infl;
     // A new year: budgets start again (the review says what is kept); fixed emergency funds rise with prices.
@@ -108,6 +114,11 @@
     isas.forEach((a, i) => { out[a.id] = mixSum > 0 ? isaTotal * (mix[i] / mixSum) : isaTotal / isas.length; });
   }
 
+  // Lifetime ISAs are part of the ISA total in a projection; other assets are with property.
+  const typeOf = a => (a.type === 'lisa' ? 'isa' : a.type === 'asset' ? 'property' : a.type);
+  // A home to be bought later is not owned `f` years after the figures date.
+  const notYet = (plan, a, f) => a.type === 'property' && a.buyYear >= plan.startYear && f < a.buyYear - plan.startYear;
+
   // What the plan expects each account to hold `years` (may be a fraction) after its figures
   // date, on average returns. Each account takes its share of its type's projected total;
   // between two years the values are interpolated.
@@ -118,23 +129,22 @@
     const row = {};
     for (const type of TYPES) row[type] = proj.rows[k][type] + (proj.rows[k + 1][type] - proj.rows[k][type]) * x;
     const out = {};
-    // Lifetime ISAs are part of the ISA total in a projection.
-    const typeOf = a => (a.type === 'lisa' ? 'isa' : a.type);
     isaShares(plan, proj, f, row, out);
     for (const type of TYPES) {
       if (type === 'isa') continue;
-      const counted = plan.accounts.filter(a => typeOf(a) === type && !a.excluded);
+      const counted = plan.accounts.filter(a => typeOf(a) === type && !a.excluded && !notYet(plan, a, f));
       const total = counted.reduce((s, a) => s + a.balance, 0);
       for (const a of counted) {
         const share = total > 0 ? a.balance / total : 1 / counted.length;
         out[a.id] = Math.max(0, row[type] * share);
       }
     }
-    for (const a of plan.accounts.filter(x => x.excluded)) {
-      out[a.id] = a.type === 'property' ? a.balance * grow(a.rate, f) : a.balance;
+    // Not counted, or a home not bought yet: its own value, moved on at its growth rate.
+    for (const a of plan.accounts.filter(x => x.excluded || notYet(plan, x, f))) {
+      out[a.id] = a.type === 'property' || a.type === 'asset' ? a.balance * grow(a.rate, f) : a.balance;
     }
     // Money the plan expects in a type with no account yet (e.g. a first general investment account).
-    const missing = TYPES.filter(type => row[type] > 0.5 && !plan.accounts.some(a => typeOf(a) === type && !a.excluded));
+    const missing = TYPES.filter(type => row[type] > 0.5 && !plan.accounts.some(a => typeOf(a) === type && !a.excluded && !notYet(plan, a, f)));
     return { byId: out, missing: missing.map(type => ({ type, value: row[type] })), row };
   }
 
@@ -173,7 +183,7 @@
       source[a.id] = src;
     }
     const byType = Object.fromEntries(TYPES.map(t => [t, 0]));
-    for (const a of plan.accounts) if (!a.excluded) byType[a.type === 'lisa' ? 'isa' : a.type] += byId[a.id];
+    for (const a of plan.accounts) if (!a.excluded && !notYet(plan, a, f)) byType[typeOf(a)] += byId[a.id];
     for (const m of exp.missing) byType[m.type] += m.value;
     // Money set aside to be spent (savings for a cost, budgets): still in its account, not in net worth.
     const locked = E.reservesAt(plan, f).filter(r => r.kind !== 'emergency').reduce((s, r) => s + r.held, 0);
@@ -484,7 +494,7 @@
     return out;
   }
 
-  const api = { TYPES, TYPE_LABELS, MARKET_FIELDS, suggestedYear, rollPlan, expectedBalances, estimateAt, yearsBetween, byType, previousCheckin, predictedFor, start, setDate, setValue, setReserve, progress, variance, explain, expectedPaidIn, apply, recordReadings, due };
+  const api = { TYPES, TYPE_LABELS, MARKET_FIELDS, notYet, typeOf, suggestedYear, rollPlan, expectedBalances, estimateAt, yearsBetween, byType, previousCheckin, predictedFor, start, setDate, setValue, setReserve, progress, variance, explain, expectedPaidIn, apply, recordReadings, due };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Review = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

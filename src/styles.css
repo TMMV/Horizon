@@ -1581,3 +1581,20 @@ body.setup-open main, body.setup-open .tabs { margin-right: 404px; }
   .row-item > .row-main > :nth-child(4) { grid-column: 1 / 3; }
 }
 .setup-panel[hidden] { display: none; }
+
+/* ---- Get started: tips for where you are in life, and ideas for your own situation */
+.st-tip { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 0.86rem; line-height: 1.45; }
+.st-tip .glyph { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--accent); }
+.st-tip p { margin: 0; color: var(--text-2); }
+.st-choices:has(> :nth-child(3):last-child) { grid-template-columns: 1fr 1fr 1fr; }
+.st-group { border: 1px solid var(--border); border-radius: 10px; }
+.st-group > summary { cursor: pointer; padding: 8px 10px; list-style: none; display: flex; align-items: baseline; gap: 4px; }
+.st-group > summary::before { content: '▸'; color: var(--muted); margin-right: 4px; transition: transform 0.15s; }
+.st-group[open] > summary::before { transform: rotate(90deg); }
+.st-group > summary small { color: var(--muted); }
+.st-recipes { display: grid; gap: 8px; padding: 0 10px 10px; }
+.st-recipe { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+.st-recipe .st-q { font-size: 0.88rem; }
+.note-field { grid-column: 1 / -1; }
+.note-field textarea { width: 100%; font: inherit; font-size: 0.88rem; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); resize: vertical; box-sizing: border-box; }
+.row-note { padding: 0 8px 8px; }
