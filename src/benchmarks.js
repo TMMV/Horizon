@@ -274,6 +274,19 @@
     const firstGia = proj.rows.findIndex((r, t) => t < proj.pre.N && r.toGia > 100);
     const topRate = Math.max(0, ...m.people.map(x => (x.ani > 0 ? R.incomeTax(x.ani + 100, plan.household.region) - R.incomeTax(x.ani, plan.household.region) : 0)));
     const toPensions = taxOn && topRate >= 40 && !s.pensionFirst && m.working;
+    // One company's shares (an account marked so, or awards kept from work): a big share of
+    // investments rides on one firm, often the same one that pays the salary.
+    {
+      const one = plan.accounts.filter(a => a.type === 'gia' && !a.excluded && (a.oneCompany || plan.income.some(i => i.kind === 'salary' && i.shares > 0 && i.sharesTo === a.id)));
+      const held = one.reduce((acc, a) => acc + a.balance, 0);
+      const invested = plan.accounts.filter(a => ['isa', 'lisa', 'gia', 'pension', 'bonds'].includes(a.type) && !a.excluded).reduce((acc, a) => acc + a.balance, 0);
+      const yearly = plan.income.filter(i => i.kind === 'salary' && i.shares > 0 && i.sharesTo !== 'sell').reduce((acc, i) => acc + i.shares, 0);
+      if (invested > 0 && (held / invested > 0.1 || yearly > 0)) {
+        out.push({ id: 'one-company', tone: held / invested > 0.2 ? 'warn' : 'tip', action: 'accounts',
+          title: `${Math.round(held / invested * 100)}% of your investments is one company`,
+          text: `${money(held)} in ${one.map(a => a.name).join(' and ') || 'one company'}${yearly > 0 ? `, and ${money(yearly)} a year more kept from share awards` : ''}. If that company has a bad year, your shares and your job can suffer together. A common rule is no more than 5–10% in any one company: selling some each year (within the ${money(R.CGT.annualExempt)} capital gains allowance each) and moving it into ISAs spreads the risk. The plan grows all investments alike, so it doesn’t show this risk.` });
+      }
+    }
     const over = m.people.filter(x => x.ani > R.PA_TAPER_START);
     if (taxOn && m.working && over.length && !s.stayUnder100k) {
       out.push({ id: 'over100k', tone: 'warn', action: 'strategy', title: `${over.map(x => x.name).join(' and ')}: income over £100,000`,

@@ -1972,6 +1972,49 @@ test.describe('round 2 fixes', () => {
     expect(problems).toEqual([]);
   });
 
+  test('a bonus and share awards on pay, a month for a cost, a move to a smaller home and equity release', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/income');
+    const plan = () => page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    await page.locator('#sec-income .sum-row', { hasText: 'Alex salary' }).click();
+    const pay = page.locator('#sec-income [data-editing]');
+    await pay.locator('summary', { hasText: 'More options' }).click();
+    await pay.locator('input[aria-label="Bonus a year"]').fill('8000');
+    await pay.locator('input[aria-label="Share awards a year"]').fill('5000');
+    await pay.locator('input[aria-label="Share awards a year"]').blur();
+    await page.locator('#sec-income [data-editing] .edit-done button.primary').click();
+    await page.locator('#sec-income .sum-row', { hasText: 'Alex salary' }).click();
+    // More options remembers it was open.
+    const gia = (await plan()).accounts.find(a => a.type === 'gia');
+    await page.locator('#sec-income [data-editing] select[aria-label="Shares kept or sold"]').selectOption(gia.id);
+    let q = await plan();
+    const it = q.income.find(i => i.name === 'Alex salary');
+    expect(it.bonus).toBe(8000);
+    expect(it.sharesTo).toBe(gia.id);
+    await expect(page.locator('#sec-income .sum-row', { hasText: 'Alex salary' })).toHaveCount(0);   // still open
+    await page.locator('#sec-income [data-editing] .edit-done button.primary').click();
+    await expect(page.locator('#sec-income .sum-row', { hasText: 'Alex salary' })).toContainText('+ £8,000 bonus a year');
+    // A cost to the end of August.
+    await go(page, 'finances/spending');
+    await page.locator('#sec-expenses .sum-row').first().click();
+    const ex = page.locator('#sec-expenses [data-editing]');
+    await ex.locator('select[aria-label="Ends"]').selectOption('year');
+    await page.locator('#sec-expenses [data-editing] select[aria-label="Last month paid"]').selectOption('8');
+    await expect(page.locator('#sec-expenses [data-editing] .timing-year small')).toContainText(/Paid to the end of August \d{4}: 8 months that year/);
+    await page.locator('#sec-expenses [data-editing] .edit-done button.primary').click();
+    // The home: equity release and a move.
+    await go(page, 'finances/portfolio');
+    await page.locator('#sec-accounts .sum-row', { hasText: 'Property' }).first().click();
+    const home = page.locator('#sec-accounts [data-editing]');
+    await home.locator('summary', { hasText: 'More options' }).click().catch(() => {});
+    await expect(home.locator('.equity-release')).toContainText('Equity release (a lifetime mortgage)');
+    await home.locator('.move-home input[aria-label="Year to move"]').fill('2040');
+    await home.locator('.move-home button', { hasText: 'Set up the move' }).click();
+    q = await plan();
+    expect(q.accounts.some(a => a.type === 'property' && a.buyYear === 2040 && a.deposit === 100)).toBe(true);
+    expect(q.events.some(e => /Moving/.test(e.name) && e.year === 2040)).toBe(true);
+    expect(problems).toEqual([]);
+  });
+
   test('a goal that leaves out pensions says what it counts, next to what Home shows', async ({ page }) => {
     const { problems } = await openApp(page);
     await page.evaluate(() => {

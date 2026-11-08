@@ -35,7 +35,7 @@
     'cgt', 'gCash', 'gIsa', 'gGia', 'gPension', 'gBonds', 'gProperty',
     'debtInterest', 'debtRegular', 'lumpOverpay', 'bondsMatured', 'bondsToIsa', 'propSold', 'extraPension', 'flatTax',
     'sweepIsa', 'sweepGia', 'nonWork', 'homeBuy', 'studentLoan', 'annuityBought', 'propBought', 'debtNew', 'debtForgiven', 'withdrawTax', 'hiDebtPay',
-    'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension', 'sacrificed',
+    'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension', 'sacrificed', 'sharesKept',
   ];
 
   const GOAL_MEASURES = {
@@ -283,6 +283,10 @@
       // In a calendar year instead of at an age: from `fromYear`, until (not including) `toYear`.
       fromYear: Math.round(num(item.fromYear, 0)),
       toYear: Math.round(num(item.toYear, 0)),
+      // Months, for a part year: first paid in `fromMonth` of `fromYear` (1 = January); paid to
+      // the end of `toMonth` of `toYear` (0 = not paid in `toYear` at all).
+      fromMonth: Math.min(12, Math.max(1, Math.round(num(item.fromMonth, 1)))),
+      toMonth: Math.min(12, Math.max(0, Math.round(num(item.toMonth, 0)))),
     };
   }
 
@@ -367,6 +371,16 @@
         rateAfterFix: a.rateAfterFix === null || a.rateAfterFix === undefined || a.rateAfterFix === '' || !Number.isFinite(+a.rateAfterFix) ? null : +a.rateAfterFix,
         afterFix: oneOf(a.afterFix, ['payment', 'term'], 'payment'),
         excluded: !!a.excluded,
+        // Equity release (a lifetime mortgage) on a home: a lump sum in `releaseYear` (today's
+        // money), nothing to pay back while living there, interest rolling up at `releaseRate`%;
+        // repaid from the sale if the home is sold, else it comes off what is left.
+        ...(type === 'property' ? {
+          releaseYear: Math.round(num(a.releaseYear, 0)),
+          releaseAmount: Math.max(0, num(a.releaseAmount)),
+          releaseRate: Math.max(0, Math.min(15, num(a.releaseRate, 6.5))),
+        } : {}),
+        // A general account holding one company's shares (e.g. from work): warned about when large.
+        ...(type === 'gia' ? { oneCompany: !!a.oneCompany } : {}),
         // A pension inherited from someone who died before 75: drawn tax-free, at any age.
         ...(type === 'pension' ? { inherited: !!a.inherited } : {}),
         inIsa: type === 'bonds' && !!a.inIsa,   // gilts held inside an ISA: maturing money stays in the ISA
@@ -441,6 +455,15 @@
       potEmployer: Math.max(0, num(i.potEmployer)),
       // How much it can swing from year to year (± %, typical), e.g. self-employed profit.
       vary: Math.min(60, Math.max(0, num(i.vary))),
+      // A yearly bonus on pay (today's money, rising with the pay): taxed like pay, with no
+      // pension contributions on it, and ± `bonusVary`% in a typical good or bad year.
+      bonus: i.kind === 'salary' ? Math.max(0, num(i.bonus)) : 0,
+      bonusVary: Math.min(100, Math.max(0, num(i.bonusVary, 40))),
+      // Share awards (RSUs) vesting each year (today's money, rising with the pay): taxed like pay
+      // when they vest; what is kept after tax goes into `sharesTo` (a general account's id), or
+      // is sold for cash ('sell').
+      shares: i.kind === 'salary' ? Math.max(0, num(i.shares)) : 0,
+      sharesTo: typeof i.sharesTo === 'string' && i.sharesTo ? i.sharesTo.slice(0, 40) : 'sell',
       note: note(i.note),
     }));
 
@@ -697,7 +720,7 @@
   function streamWindow(item, person, startYear) {
     const yearAge = y => person.age + y - (startYear || 0);
     const start = item.startRef === 'now' ? -Infinity : item.startRef === 'retire' ? person.retireAge : item.startRef === 'year' ? yearAge(item.fromYear) : item.startAge;
-    const end = item.endRef === 'retire' ? person.retireAge : item.endRef === 'end' ? Infinity : item.endRef === 'year' ? (item.toYear ? yearAge(item.toYear) : Infinity) : item.endAge;
+    const end = item.endRef === 'retire' ? person.retireAge : item.endRef === 'end' ? Infinity : item.endRef === 'year' ? (item.toYear ? yearAge(item.toYear) + (item.toMonth > 0 ? 1 : 0) : Infinity) : item.endAge;
     return [start, end];
   }
 
@@ -786,9 +809,17 @@
   }
 
   // Nominal amount of an income or expense stream in year t (expected economy by default).
+  // The share of year t a stream is paid for, when it starts or stops part-way through a year.
+  function partYear(item, plan, t) {
+    const y = plan.startYear + t;
+    const first = item.startRef === 'year' && y === item.fromYear && item.fromMonth > 1 ? item.fromMonth : 1;
+    const last = item.endRef === 'year' && item.toMonth > 0 && y === item.toYear ? item.toMonth : 12;
+    return first === 1 && last === 12 ? 1 : Math.max(0, last - first + 1) / 12;
+  }
+
   function streamAt(item, plan, t, econ) {
     if (!isActive(item, plan, t)) return 0;
-    return annual(item) * (econ ? growthFactor(item, plan, t, econ) : expectedGrowth(item, plan, t));
+    return annual(item) * partYear(item, plan, t) * (econ ? growthFactor(item, plan, t, econ) : expectedGrowth(item, plan, t));
   }
 
   // Pension contributions for a salary in year t, nominal: what the employee and the employer pay,
@@ -866,8 +897,16 @@
     const price = econ ? econ.price[t] : Math.pow(1 + plan.assumptions.inflation / 100, t);
     // An income that varies: a good or bad year in a simulation (the expected path uses the average).
     const swing = econ && econ.noise && item.vary > 0 ? Math.max(0, 1 + item.vary / 100 * econ.noise[t * NOISE_SLOTS + noiseSlot(item.id)]) : 1;
-    const gross = annual(item) * g * item.fx * swing;
+    const gross = annual(item) * partYear(item, plan, t) * g * item.fx * swing;
     return Math.max(0, gross * (1 - item.costPct / 100) - item.fixedCosts * price);
+  }
+
+  // The bonus on a salary in year t (nominal): 0 when there is none or the pay has stopped.
+  function bonusAt(item, plan, t, econ) {
+    if (item.kind !== 'salary' || !(item.bonus > 0) || !isActive(item, plan, t)) return 0;
+    const g = econ ? growthFactor(item, plan, t, econ) : expectedGrowth(item, plan, t);
+    const swing = econ && econ.noise && item.bonusVary > 0 ? Math.max(0, 1 + item.bonusVary / 100 * econ.noise[t * NOISE_SLOTS + noiseSlot(`${item.id}:bonus`)]) : 1;
+    return item.bonus * g * (item.fx || 1) * swing;
   }
 
   // How an income stream is taxed, after the household-wide switch.
@@ -964,7 +1003,7 @@
     for (let t = 0; t < N; t++) e.mean[t] = (e.stockW[t] * a.stockReturn + (1 - e.stockW[t]) * a.bondReturn) / 100;
     // Incomes that swing from year to year (e.g. self-employed profit) get their own draws, only when
     // there are any, so other plans keep the same simulated futures.
-    const varies = plan.income.some(i => i.vary > 0);
+    const varies = plan.income.some(i => i.vary > 0 || (i.bonus > 0 && i.bonusVary > 0));
     if (varies) e.noise = new Float64Array(N * NOISE_SLOTS);
     return function draw() {
       let pi = mu;
@@ -1006,11 +1045,13 @@
       taxFree: zeros(), flatTax: zeros(), expenses: zeros(), eventsIn: zeros(), eventsOut: zeros(), eventsOverpay: zeros(),
       annuityBuy: people.map(() => zeros()),   // pension pot spent on annuities in year t, per person
       overpayTo: [],                            // lump sums off a particular loan: [t] = { debtId: amount }
+      vests: [],                                // share awards kept: { to: account id, owner, gross[t], keep[t] after tax }
       keepCash: zeros(),   // money set aside in cash on top of the buffer (today's money), e.g. repairs building up
       people: people.map(() => ({
         gross: zeros(),        // gross salary paid in cash (before employee contributions)
         netPay: zeros(),       // take-home pay entered as net
         employee: zeros(),     // employee contributions deducted from gross pay
+        vest: zeros(),         // share awards vesting (taxed like pay)
         ee: zeros(),           // the person's own workplace contributions (any kind of pay)
         contrib: zeros(),      // workplace contributions into the pot (employee + employer)
         extraOut: zeros(),     // extra personal contributions paid from take-home pay
@@ -1083,22 +1124,34 @@
         }
         if (item.kind === 'salary' && P) {
           const c = pensionSplit(item, v, plan, t, econ), ee = c.ee;
+          const bonus = bonusAt(item, plan, t, econ);
+          // Share awards vest at the year's value: like a bonus, plus their own swings with the share price.
+          const vest = item.shares > 0 && isActive(item, plan, t) ? item.shares * (econ ? growthFactor(item, plan, t, econ) : expectedGrowth(item, plan, t)) * (item.fx || 1)
+            * (econ && econ.noise ? Math.max(0, 1 + 0.3 * econ.noise[t * NOISE_SLOTS + noiseSlot(`${item.id}:shares`)]) : 1) : 0;
+          if (vest > 0) {
+            P.vest[t] += vest;
+            if (item.sharesTo !== 'sell') {
+              let k = pre.vests.find(x => x.to === item.sharesTo && x.owner === personIndex(plan, item.owner));
+              if (!k) { k = { to: item.sharesTo, owner: personIndex(plan, item.owner), gross: zeros(), keep: zeros() }; pre.vests.push(k); }
+              k.gross[t] += vest;
+            }
+          }
           // Paid into a defined benefit scheme: it comes off pay but builds that pension, not a pot
           // (except any extra contributions into a pot alongside it).
           P.contrib[t] += c.potEe + c.potEr;
           P.ee[t] += ee;
           if (tax === 'uk') {
-            P.gross[t] += v;
+            P.gross[t] += v + bonus + vest;
             P.employee[t] += ee;
             // Salary sacrifice avoids NI on the sacrificed amount (capped at £2,000 a person from April 2029).
             const i = personIndex(plan, item.owner);
             let niFree = 0;
             if (item.sacrifice && plan.startYear + t >= R.SACRIFICE_NI_CAP_FROM) { niFree = Math.min(ee, niCapLeft[i]); niCapLeft[i] -= niFree; }
             else if (item.sacrifice) niFree = ee;
-            niable[i] += v - niFree;
+            niable[i] += v + bonus + vest - niFree;
           } else {
             // Take-home pay: contributions are assumed to come out before it is paid.
-            P.netPay[t] += v;
+            P.netPay[t] += v + bonus + vest;
             if (tax === 'flat') pre.flatTax[t] += v * item.taxRate / 100;
           }
           continue;
@@ -1157,6 +1210,13 @@
         P.taxable[t] = P.gross[t] - P.employee[t] + P.other[t] + P.statePension[t];
         P.ni[t] = age < p.statePensionAge ? T.nationalInsurance(niable[i], g) + T.selfEmployedNI(P.selfProfit[t], g) : 0;
         P.baseIT[t] = T.incomeTax(P.taxable[t], household.region, g);
+        for (const k of pre.vests) {
+          if (k.owner !== i || !(k.gross[t] > 0)) continue;
+          const x = k.gross[t];
+          const itCut = T.incomeTax(P.taxable[t], household.region, g) - T.incomeTax(Math.max(0, P.taxable[t] - x), household.region, g);
+          const niCut = age < p.statePensionAge ? T.nationalInsurance(niable[i], g) - T.nationalInsurance(Math.max(0, niable[i] - x), g) : 0;
+          k.keep[t] = Math.max(0, x - itCut - niCut);
+        }
         // Relief above the basic 20% on personal contributions, claimed through self-assessment:
         // the tax saved by taking the gross contribution off taxable income, less the 20% already
         // added to the pot. Take-home pay is grossed up to estimate the tax paid on it.
@@ -1337,7 +1397,11 @@
         const buy = x.type === 'property' && x.buyYear >= plan.startYear ? x.buyYear - plan.startYear : -1;
         const mort = buy >= 0 && x.deposit < 100 ? { id: `${x.id}:mortgage`, bal: 0, rate: x.mortRate / 100, pay: 0, varFrom: Infinity, after: x.mortRate / 100, keepTerm: false } : null;
         if (mort) debts.push(mort);
-        props.push({ id: x.id, val: x.balance, rate: x.rate / 100, t: x.sellYear ? x.sellYear - plan.startYear : Infinity, buy, owned: buy < 0, deposit: x.deposit / 100, years: x.mortYears, mort });
+        const rel = x.type === 'property' && x.releaseYear >= plan.startYear && x.releaseAmount > 0
+          ? { id: `${x.id}:release`, bal: 0, rate: x.releaseRate / 100, pay: 0, varFrom: Infinity, after: x.releaseRate / 100, keepTerm: false, rollUp: true, at: x.releaseYear - plan.startYear, amount: x.releaseAmount }
+          : null;
+        if (rel) debts.push(rel);
+        props.push({ id: x.id, val: x.balance, rate: x.rate / 100, t: x.sellYear ? x.sellYear - plan.startYear : Infinity, buy, owned: buy < 0, deposit: x.deposit / 100, years: x.mortYears, mort, rel });
       }
       else if (x.type === 'debt') {
         debts.push({
@@ -1446,7 +1510,7 @@
           b.bal = 0;
         }
       }
-      let gProperty = 0, propSold = 0, homeBuy = 0, propBought = 0, debtNew = 0;
+      let gProperty = 0, propSold = 0, homeBuy = 0, propBought = 0, debtNew = 0, releaseIn = 0, releaseRepaid = 0;
       for (const p of props) {
         if (!p.owned && t === p.buy) {
           // Bought at the start of the year, at that year's price.
@@ -1462,10 +1526,23 @@
             p.mort.pay = i > 0 ? loan * i / (1 - Math.pow(1 + i, -m)) : loan / m;
           }
         }
+        if (p.rel && t === p.rel.at && p.owned) {
+          const lump = p.rel.amount * econ.price[t];
+          p.rel.bal += lump;
+          cash += lump;
+          debtNew += lump;
+          releaseIn += lump;
+        }
         const x = p.val * Math.max(-0.5, p.rate + econ.house[t]);
         p.val += x;
         if (p.owned) gProperty += x;
-        if (t === p.t && p.val > 0 && p.owned) { propSold += p.val; p.val = 0; }
+        if (t === p.t && p.val > 0 && p.owned) {
+          // Equity release is paid off from the sale first (never more than the home fetches).
+          const owe = p.rel ? Math.min(p.rel.bal, p.val) : 0;
+          if (owe > 0) { p.rel.bal -= owe; releaseRepaid += owe; }
+          propSold += p.val - owe;
+          p.val = 0;
+        }
       }
 
       // An annuity is bought with the pension pot; if the pot is short, the rest comes from savings.
@@ -1503,7 +1580,9 @@
         }
         d.last = rate;
         if (detail) out.debts[k].rate[t] = rate;
-        const interest = d.bal * rate;
+        let interest = d.bal * rate;
+        // Equity release: the no-negative-equity guarantee keeps it within the home's value.
+        if (d.rollUp) { const home = props.find(z => z.rel === d); if (home) interest = Math.max(0, Math.min(interest, home.val - d.bal)); }
         const p = Math.min(d.pay, d.bal + interest);
         d.bal = d.bal + interest - p;
         debtRegular += p;
@@ -1520,6 +1599,7 @@
       }
       for (const d of debts) {
         if (lump <= 0) break;
+        if (d.rollUp) continue;
         const x = Math.min(lump, d.bal);
         d.bal -= x;
         lump -= x;
@@ -1538,8 +1618,16 @@
         statePension += P.statePension[t];
       }
       other += pre.taxFree[t] + pre.eventsIn[t] + propSold;
+      let vestKept = 0;
+      for (const k of pre.vests) {
+        const x = k.keep[t];
+        if (!(x > 0)) continue;
+        const acc = gias.find(a => a.id === k.to) || null;
+        if (acc) { acc.bal += x; acc.basis += x; } else share(ownedBy(gias, k.owner), x, a => a.bal);
+        vestKept += x;
+      }
       const net = earnings - employee - extraOut + other + statePension - baseTax
-        - pre.expenses[t] - pre.eventsOut[t] - debtRegular - lumpOverpay - homeBuy - annuityShort;
+        - pre.expenses[t] - pre.eventsOut[t] - debtRegular - lumpOverpay - homeBuy - annuityShort - vestKept;
 
       let extraTax = 0, cgt = 0, unfunded = 0, sweepIsa = 0, sweepGia = 0;
       let toCash = 0, overpay = 0, toIsa = 0, toGia = 0, toLisa = 0, lisaBonus = 0, wLisa = 0, lisaCharge = 0, toPension = 0;
@@ -1553,7 +1641,7 @@
         // Expensive debt (credit cards, loans at 8% or more) is cleared first: nothing saved or
         // invested earns that much for sure.
         for (const d of debts) {
-          if (left <= 0 || d.bal <= 0 || d.rate < HIGH_RATE) continue;
+          if (left <= 0 || d.bal <= 0 || d.rate < HIGH_RATE || d.rollUp) continue;
           const x = Math.min(left, d.bal);
           d.bal -= x;
           left -= x;
@@ -1564,7 +1652,7 @@
         left -= toCash;
         let budget = left * s.overpayPct / 100;
         debts.forEach((d, k) => {
-          if (budget <= 0 || d.bal <= 0) return;
+          if (budget <= 0 || d.bal <= 0 || d.rollUp) return;   // equity release is repaid from the home
           const cap = s.overpayCapPct > 0 ? debtStart[k] * s.overpayCapPct / 100 : Infinity;
           const x = Math.min(budget, d.bal, cap);
           d.bal -= x;
@@ -1806,7 +1894,8 @@
         out.debtInterest[t] = debtInterest;
         out.lumpOverpay[t] = lumpOverpay;
         out.overpay[t] = overpay;
-        out.saved[t] = employee + extraOut + toCash + toIsa + toGia + toLisa + toPension;
+        out.saved[t] = employee + extraOut + toCash + toIsa + toGia + toLisa + toPension + vestKept;
+        out.sharesKept[t] = vestKept;
         out.toPension[t] = toPension;
         out.sacrificed[t] = pre.people.reduce((acc, P) => acc + P.sacrificed[t], 0);
         out.toLisa[t] = toLisa; out.lisaBonus[t] = lisaBonus; out.wLisa[t] = wLisa; out.lisaHome[t] = lisaHome; out.lisaCharge[t] = lisaCharge;
@@ -2597,7 +2686,7 @@
 
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
-    incomeAfterCosts, taxOf, pensionSplit, spYears, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
+    incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     streamAt, streamWindow, isActive, growthFactor, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,

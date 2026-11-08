@@ -411,3 +411,82 @@ test('stopping work before State Pension age leaves NI years out, unless volunta
   // Fewer than 10 years: none at all.
   assert.equal(E.spYears(plan({ niYears: 0, retireAge: 45 }).household.people[0]).share, 0);
 });
+
+test('a bonus is taxed like pay with no pension on it; share awards kept go into their account', () => {
+  const B = require('../../src/benchmarks');
+  const plan = pay => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ name: 'Ravi', age: 44, retireAge: 60 }] },
+    accounts: [{ id: 'gia', type: 'gia', owner: 'p1', balance: 60000, basis: 40000 }, { id: 'isa', type: 'isa', owner: 'p1', balance: 95000 }],
+    income: [{ id: 'pay', name: 'Pay', kind: 'salary', owner: 'p1', tax: 'uk', amount: 135000, freq: 'year', growth: 0, pensionMode: 'pct', employeePension: 5, employerPension: 8, ...pay }],
+    expenses: [{ name: 'Living', amount: 5500, freq: 'month' }], events: [], goals: [],
+  });
+  const base = E.precompute(plan({})).people[0];
+  const bonus = E.precompute(plan({ bonus: 20000 })).people[0];
+  near(bonus.gross[0] - base.gross[0], 20000, 0.01);
+  near(bonus.contrib[0], base.contrib[0], 0.01);     // no pension on the bonus
+  // Share awards kept: taxed like pay, what is left goes into the general account.
+  const kept = E.project(plan({ shares: 25000, sharesTo: 'gia' }));
+  const sold = E.project(plan({ shares: 25000, sharesTo: 'sell' }));
+  const k = kept.rows[0].sharesKept;
+  assert.ok(k > 25000 * 0.45 && k < 25000 * 0.6, `kept ${k}`);   // 45% tax + 2% NI over £125k... about half
+  assert.ok(kept.out.byAccount.gia[1] > sold.out.byAccount.gia[1] + k * 0.9);
+  // And the warning about one company.
+  const ids = B.insights(plan({ shares: 25000, sharesTo: 'gia' }), kept).map(i => i.id);
+  assert.ok(ids.includes('one-company'));
+});
+
+test('private school from a child’s age, shown in the child’s ages', () => {
+  const LWm = require('../../src/life-wizard');
+  const p = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ name: 'Ravi', age: 44, retireAge: 60 }] },
+    accounts: [], income: [], expenses: [], events: [], goals: [],
+  });
+  const a = { ...LWm.defaults(p), children: [{ name: 'Maya', age: 6 }, { name: 'Leo', age: 3 }], privateFee: 22000, privateFrom: 11 };
+  const q = LWm.apply(p, a);
+  const maya = q.expenses.find(e => e.key === 'life:private-0'), leo = q.expenses.find(e => e.key === 'life:private-1');
+  assert.equal(maya.startAge, 44 + 5); assert.equal(maya.endAge, 44 + 12);
+  assert.equal(leo.startAge, 44 + 8); assert.equal(leo.endAge, 44 + 15);
+  assert.equal(maya.amount, 22000);
+});
+
+test('a cost can start and stop part-way through a year', () => {
+  const plan = e => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ name: 'Ravi', age: 44, retireAge: 60 }] },
+    accounts: [], income: [], events: [], goals: [],
+    expenses: [{ name: 'Nursery', amount: 1500, freq: 'month', inflationLinked: false, growth: 0, startRef: 'now', endRef: 'year', toYear: 2027, ...e }],
+  });
+  const at = (p, t) => E.streamAt(p.expenses[0], p, t);
+  // To the end of August 2027: 8 months that year.
+  let p = plan({ toMonth: 8 });
+  near(at(p, 0), 18000, 0.01); near(at(p, 1), 12000, 0.01); near(at(p, 2), 0, 0.01);
+  // Without a month, 2027 isn't paid at all (as before).
+  p = plan({});
+  near(at(p, 1), 0, 0.01);
+  // After-school club from September 2027: 4 months that year.
+  p = plan({ startRef: 'year', fromYear: 2027, fromMonth: 9, endRef: 'end', amount: 400 });
+  near(at(p, 0), 0, 0.01); near(at(p, 1), 1600, 0.01); near(at(p, 2), 4800, 0.01);
+});
+
+test('equity release: a lump sum from the home, rolled-up interest repaid from the sale, never more than the home', () => {
+  const plan = extra => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Eileen', age: 72, retireAge: 72, endAge: 95 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 4000 }, { id: 'home', type: 'property', balance: 240000, rate: 3, releaseYear: 2028, releaseAmount: 60000, releaseRate: 6.5, ...extra }],
+    income: [], expenses: [{ name: 'Living', amount: 1000, freq: 'month' }], events: [], goals: [],
+  });
+  const pr = E.project(plan({}));
+  const owed = id => pr.out.debts.find(d => d.id === id).bal;
+  const price2028 = Math.pow(1 + plan({}).assumptions.inflation / 100, 2);
+  near(owed('home:release')[3], 60000 * price2028 * 1.065, 1);   // rolled up a year
+  assert.ok(pr.rows[2].debtNew > 60000);                        // taken out in 2028
+  // Sold in 2040: repaid from the sale first.
+  const sold = E.project(plan({ sellYear: 2040 }));
+  assert.equal(sold.out.debts.find(d => d.id === 'home:release').bal[15], 0);
+  // A big release at a high rate stops at the home's value.
+  const big = E.project(plan({ releaseAmount: 200000, releaseRate: 12 }));
+  const end = big.rows.length - 1;
+  assert.ok(big.out.debts.find(d => d.id === 'home:release').bal[end] <= big.rows[end].property + 1);
+});

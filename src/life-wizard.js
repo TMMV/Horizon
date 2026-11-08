@@ -19,6 +19,8 @@
     return {
       children: [],                 // [{ name, age }]
       schoolCost: r(1500, 100),     // per child per year until 18: uniforms, trips, clubs
+      privateFee: 0,                // private school fees per child per year (0 = state school)
+      privateFrom: 11,              // the child's age when private school starts (to 18)
       uniPerYear: r(6000, 500),     // help with living costs at university (tuition: free in Scotland, a loan elsewhere)
       uniYears: scot ? 4 : 3,
       carAt17: 3000,                // driving lessons and a first car
@@ -73,6 +75,7 @@
       const ageNow = Math.max(0, Math.round(c.age || 0));
       const p1At = childAge => p1.age + (childAge - ageNow);
       exp(`school-${i}`, `${label}: school costs`, a.schoolCost, Math.max(p1.age, p1At(Math.max(ageNow, 4))), p1At(18));
+      exp(`private-${i}`, `${label}: private school`, a.privateFee, Math.max(p1.age, p1At(Math.max(ageNow, a.privateFrom || 11))), p1At(18));
       exp(`uni-${i}`, `${label}: university support`, a.uniPerYear, Math.max(p1.age, p1At(18)), p1At(18 + a.uniYears));
       ev(`car-${i}`, `${label}: driving lessons & first car`, yearAtAge(p1At(17)), a.carAt17);
       ev(`wedding-${i}`, `${label}: wedding`, yearAtAge(p1At(a.helpAge)), a.weddingHelp);

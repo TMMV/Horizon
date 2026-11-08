@@ -10,6 +10,8 @@
 
   const people = p => p.household.people;
   const hasDebt = p => p.accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
+  // The home lived in now: owned, not being sold, the most valuable.
+  const ownHome = p => p.accounts.filter(a => a.type === 'property' && !a.excluded && !(a.buyYear >= p.startYear) && !a.sellYear).sort((a, b) => b.balance - a.balance)[0] || null;
   const fixedDebt = p => p.accounts.find(a => a.type === 'debt' && a.balance > 0 && a.fixedUntil >= p.startYear);
   const salaries = (p, owner) => p.income.filter(i => i.kind === 'salary' && i.owner === owner);
   // The person a "work" idea is about: the partner if there is one, else the only person.
@@ -47,6 +49,20 @@
   }
 
   const childName = p => { const c = ((p.life && p.life.children) || []).filter(x => x.age < 30).sort((a, b) => b.age - a.age)[0]; return c && c.name ? c.name : 'your eldest'; };
+
+  // Move to a smaller home in `year`: the home is sold then, the next one (`price` in today's
+  // money, rising like this one) bought outright from the sale, and moving costs and stamp duty
+  // (`costPct` of the new price) paid that year.
+  function downsize(p, homeId, year, price, costPct = 5) {
+    const home = p.accounts.find(a => a.id === homeId);
+    if (!home) return null;
+    home.sellYear = year;
+    const next = E.normalizePlan({ ...p, accounts: [{ name: 'Smaller home', type: 'property', owner: home.owner, balance: Math.round(price), rate: home.rate, buyYear: year, deposit: 100, mortRate: 4.5, mortYears: 10 }] }).accounts[0];
+    p.accounts.push(next);
+    const grow = Math.pow(1 + home.rate / 100, Math.max(0, year - p.startYear));
+    p.events.push(E.normalizePlan({ ...p, events: [{ name: 'Moving: stamp duty and costs', kind: 'expense', year, amount: Math.round(price * grow * costPct / 100) }] }).events[0]);
+    return next;
+  }
 
   function addExpense(p, e) {
     p.expenses.push(E.normalizePlan({ ...p, expenses: [{ owner: 'p1', inflationLinked: true, freq: 'month', ...e }] }).expenses[0]);
@@ -129,6 +145,19 @@
     { id: 'spend-more', icon: 'piggy', title: 'Spend 20% more in retirement', text: 'More holidays, help for family, a better car: what if you enjoy more of it?',
       applies: p => p.strategy.retireSpending > 0 || retirementSpending(p) > 0,
       apply: p => { p.strategy.retireSpending = Math.round((p.strategy.retireSpending > 0 ? p.strategy.retireSpending : retirementSpending(p)) * 1.2 / 100) * 100; } },
+    { id: 'downsize', icon: 'home', title: 'Move to a smaller home at 75', text: p => `Sell ${ownHome(p).name} the year ${people(p)[0].name} turns 75 and buy a home costing 60% as much, outright.`,
+      applies: p => !!ownHome(p) && people(p)[0].age >= 50 && people(p)[0].age < 75 && people(p)[0].endAge > 76,
+      apply: p => { const h = ownHome(p); downsize(p, h.id, p.startYear + 75 - people(p)[0].age, h.balance * 0.6); } },
+    { id: 'private-school', icon: 'heart', title: 'Private school from 11', text: p => `£18,000 a year each for ${(p.life.children || []).filter(c => c.age < 18).map(c => c.name || 'a child').join(' and ')}, from 11 to 18, in today’s money.`,
+      applies: p => !!(p.life && (p.life.children || []).some(c => c.age < 18)),
+      apply: p => {
+        const p1 = people(p)[0];
+        (p.life.children || []).forEach((c, i) => {
+          if (!(c.age < 18)) return;
+          const at = age => p1.age + (age - c.age);
+          addExpense(p, { key: `idea:private-${i}`, name: `${c.name || `Child ${i + 1}`}: private school`, amount: 18000, freq: 'year', category: 'Children', startRef: c.age >= 11 ? 'now' : 'age', startAge: Math.max(p1.age, at(11)), endRef: 'age', endAge: at(18) });
+        });
+      } },
     { id: 'care', icon: 'heart', title: 'Care costs later in life', text: p => `£60,000 a year of care for three years from ${people(p)[0].name}'s 85th birthday.`,
       applies: p => people(p)[0].endAge > 86,
       apply: p => addExpense(p, { key: 'idea:care', name: 'Care in later life', amount: 60000, freq: 'year', startRef: 'age', startAge: 85, endRef: 'age', endAge: 88 }) },
@@ -328,7 +357,7 @@
     };
   }
 
-  const api = { DRIVERS, IDEAS, COMPARISONS, driversFor, ideasFor, comparisonsFor, optionsOf, variantOf, textOf, driverImpacts, changeSalary, sacrificeMore, retirementSpending, grossForTakeHome, takeHome };
+  const api = { DRIVERS, IDEAS, COMPARISONS, driversFor, ideasFor, comparisonsFor, optionsOf, variantOf, textOf, driverImpacts, changeSalary, sacrificeMore, downsize, retirementSpending, grossForTakeHome, takeHome };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ScenarioIdeas = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -3690,11 +3690,18 @@
       if (v === 'year' && !item[yearKey]) item[yearKey] = plan().startYear + (which === 'start' ? 1 : 5);
     }, { rerender: sectionId, label: which === 'start' ? 'Starts' : 'Ends' });
     if (item[refKey] === 'year') {
-      const say = () => (which === 'start' ? `First paid in ${item.fromYear}.` : `Not paid in ${item.toYear}: ${item.toYear - 1} is the last year.`);
+      const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const say = () => (which === 'start'
+        ? (item.fromMonth > 1 ? `First paid in ${MONTHS[item.fromMonth - 1]} ${item.fromYear}: ${13 - item.fromMonth} months that year.` : `First paid in ${item.fromYear}.`)
+        : (item.toMonth > 0 ? `Paid to the end of ${MONTHS[item.toMonth - 1]} ${item.toYear}: ${item.toMonth} month${item.toMonth === 1 ? '' : 's'} that year.` : `Not paid in ${item.toYear}: ${item.toYear - 1} is the last year.`));
       const note = h('small', { class: 'hint' }, say());
       const num = numInput(...bind(item, yearKey), { label: which === 'start' ? 'First year' : 'Year it stops', min: 1950, max: 2150, step: 1 });
       (num.tagName === 'INPUT' ? num : num.querySelector('input')).addEventListener('input', () => { note.textContent = say(); });
-      return h('div', { class: 'timing-year' }, h('div', { class: 'pair' }, sel, num), note);
+      const month = which === 'start'
+        ? h('select', { 'aria-label': 'First month', onchange: e => { item.fromMonth = +e.target.value; note.textContent = say(); schedule(); } }, MONTHS.map((m, k) => h('option', { value: String(k + 1), selected: item.fromMonth === k + 1 }, m)))
+        : h('select', { 'aria-label': 'Last month paid', onchange: e => { item.toMonth = +e.target.value; note.textContent = say(); schedule(); } },
+          [h('option', { value: '0', selected: !(item.toMonth > 0) }, 'Not at all that year'), ...MONTHS.map((m, k) => h('option', { value: String(k + 1), selected: item.toMonth === k + 1 }, `To the end of ${m}`))]);
+      return h('div', { class: 'timing-year' }, h('div', { class: 'pair' }, sel, num), month, note);
     }
     if (item[refKey] !== 'age') return sel;
     return h('div', { class: 'pair' }, sel, numInput(...bind(item, ageKey), { label: 'Age', min: 0, max: 120 }));
@@ -4047,10 +4054,22 @@
   }
 
   const ownerName = (p, owner) => (owner === 'joint' ? (p.household.people.length > 1 ? 'Joint' : p.household.people[0].name) : (p.household.people.find(x => x.id === owner) || {}).name || '');
+  // For a check-up item about a child (key "life:school-0"): "Maya, 11–18".
+  function childAges(item, p) {
+    const m = /^life:(school|private|uni)-(\d+)$/.exec(item.key || '');
+    const c = m && p.life && (p.life.children || [])[+m[2]];
+    if (!c) return null;
+    const p1 = p.household.people[0], at = age => (c.age || 0) + (age - p1.age);
+    const from = item.startRef === 'now' ? c.age : at(item.startAge);
+    return `${c.name || `Child ${+m[2] + 1}`}, age ${Math.max(c.age || 0, from)}–${at(item.endAge)}`;
+  }
+
   const untilText = (item, p) => {
+    const kid = childAges(item, p);
+    if (kid) return kid;
     const person = p.household.people[E.personIndex(p, item.owner === 'joint' ? 'p1' : item.owner)];
-    const end = item.endRef === 'retire' ? 'until retirement' : item.endRef === 'end' ? 'for good' : item.endRef === 'year' ? `last paid in ${item.toYear - 1}` : `until ${person ? `${person.name.split(' ')[0]} is ` : 'age '}${item.endAge}`;
-    const start = item.startRef === 'age' ? `from ${person ? `${person.name.split(' ')[0]} at ` : 'age '}${item.startAge}, ` : item.startRef === 'retire' ? 'from retirement, ' : item.startRef === 'year' ? `from ${item.fromYear}, ` : '';
+    const end = item.endRef === 'retire' ? 'until retirement' : item.endRef === 'end' ? 'for good' : item.endRef === 'year' ? (item.toMonth > 0 ? `to the end of ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][item.toMonth - 1]} ${item.toYear}` : `last paid in ${item.toYear - 1}`) : `until ${person ? `${person.name.split(' ')[0]} is ` : 'age '}${item.endAge}`;
+    const start = item.startRef === 'age' ? `from ${person ? `${person.name.split(' ')[0]} at ` : 'age '}${item.startAge}, ` : item.startRef === 'retire' ? 'from retirement, ' : item.startRef === 'year' ? `from ${item.fromMonth > 1 ? `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][item.fromMonth - 1]} ` : ''}${item.fromYear}, ` : '';
     return start + end;
   };
 
@@ -4705,6 +4724,14 @@
             field(`Starts (${owner.name}'s age, or a year)`, timingControl(item, 'start', 'income')),
             field('Ends', timingControl(item, 'end', 'income')),
             item.kind !== 'rental' ? costFields : null,
+            item.kind === 'salary' ? field('Bonus (a year, typical)', moneyInput(...bind(item, 'bonus'), { label: 'Bonus a year' }),
+              'Before tax, in today’s money; it rises with the pay. Taxed like pay, with no pension contributions on it (unless you sacrifice it: add that to the pension instead).') : null,
+            item.kind === 'salary' ? field('Share awards vesting (a year)', moneyInput(...bind(item, 'shares'), { label: 'Share awards a year' }),
+              'RSUs or other shares from work, at their value when they vest, in today’s money. Taxed like pay (income tax and NI) when they vest.') : null,
+            item.kind === 'salary' && item.shares > 0 ? field('The shares', selectInput([['sell', 'Sold when they vest: cash'], ...p.accounts.filter(a => a.type === 'gia').map(a => [a.id, `Kept in ${a.name}`])], ...bind(item, 'sharesTo'), { label: 'Shares kept or sold', rerender: 'income' }),
+              item.sharesTo === 'sell' ? 'The money after tax joins the rest of your income.' : 'What is left after tax stays as shares in that account (add a general investment account under Accounts to keep them).') : null,
+            item.kind === 'salary' && item.bonus > 0 ? field('Bonus varies by', numInput(...bind(item, 'bonusVary'), { min: 0, max: 100, step: 10, suffix: '± %', label: 'Bonus varies by' }),
+              `A typical good or bad year: ±${item.bonusVary}% is about ${money(item.bonus * (1 - item.bonusVary / 100))}–${money(item.bonus * (1 + item.bonusVary / 100))}. The plan uses ${money(item.bonus)}; simulations try good and bad years.`) : null,
             item.kind === 'salary' || item.kind === 'self' || item.kind === 'other' || item.kind === 'rental'
               ? field('Varies from year to year', numInput(...bind(item, 'vary'), { min: 0, max: 60, step: 5, suffix: '± %', label: 'Varies by' }), 'For income that is up and down, like self-employed profit: a typical good or bad year, e.g. ±15% for £38,000–£52,000 around £45,000. The plan uses the average; the simulations try good and bad years.') : null,
             noteField(item)),
@@ -4732,7 +4759,7 @@
       const db = item.kind === 'dbpension' ? (() => { const x = people()[E.personIndex(p, item.owner)]; const t = Math.max(0, item.startAge - x.age); return E.incomeAfterCosts(item, p, t) / Math.pow(1 + p.assumptions.inflation / 100, t); })() : 0;
       return {
         name: item.name,
-        sub: [kindLabel(item.kind), ownerName(p, item.owner), item.kind === 'dbpension' || item.kind === 'annuity' ? null : untilText(item, p), grow, noteText(item)].filter(Boolean).join(' · '),
+        sub: [kindLabel(item.kind), ownerName(p, item.owner), item.bonus > 0 ? `+ ${money(item.bonus)} bonus a year` : null, item.kind === 'dbpension' || item.kind === 'annuity' ? null : untilText(item, p), grow, noteText(item)].filter(Boolean).join(' · '),
         value: item.kind === 'dbpension' ? `${money(db)} a year` : item.kind === 'annuity' ? `${money(item.amount)} a year` : incomeValue(item, p).main,
         valueSub: item.kind === 'dbpension' || item.kind === 'annuity' ? `from ${item.startAge}, today’s money` : [item.tax === 'none' ? (item.kind === 'salary' ? 'take-home' : 'no tax') : item.tax === 'uk' ? 'before tax' : `after ${item.taxRate}% tax`, incomeValue(item, p).other].filter(Boolean).join(' · '),
       };
@@ -4956,6 +4983,8 @@
     return out;
   }
 
+  const moveDraft = {};   // "Move to a smaller home": the year and price being typed, by home id
+
   function renderAccounts() {
     const p = plan();
     const items = p.accounts.map(a => {
@@ -4963,7 +4992,7 @@
       const extra = [];
       const buying = a.type === 'property' && a.buyYear > 0;
       if (a.type === 'property') main.push(field('Do you own it?', selectInput([['now', 'I own it now'], ['later', 'Buying it later']], () => (a.buyYear > 0 ? 'later' : 'now'),
-        v => { a.buyYear = v === 'later' ? plan().startYear + 3 : 0; }, { rerender: 'accounts', label: 'Own it now or buying later' })));
+        v => { a.buyYear = v === 'later' ? plan().startYear + 3 : 0; if (v === 'later' && people().every(x => x.retireAge <= x.age)) { a.deposit = 100; a.mortYears = 10; } }, { rerender: 'accounts', label: 'Own it now or buying later' })));   // retired: bought outright, as a rule
       main.push(field(buying ? 'Price today' : a.type === 'property' || a.type === 'asset' ? 'Value' : a.type === 'debt' ? 'Amount owed' : 'Balance', moneyInput(() => a.balance, v => { a.balance = v; if (a.type !== 'gia') a.basis = v; }),
         buying ? 'What a home like it costs now; it rises with house prices until you buy.' : null));
       if (E.OWNED_TYPES.includes(a.type)) main.push(field('Whose', selectInput(ownerOptions(false), ...ownerBind(a), { rerender: 'accounts' })));
@@ -4987,6 +5016,9 @@
         a.holding === 'cash' ? 'Earns the cash rate, doesn’t fall, and counts as cash for an emergency fund.' : 'Grows with your investment mix; it can fall in a bad year.'));
       if (a.type === 'cash') extra.push(h('p', { class: 'hint' }, 'Premium Bonds go here too: no interest, but prizes average about the cash rate, tax-free, and you can take the money out within days.'));
       if (a.type === 'gia') extra.push(field('Amount you paid in', moneyInput(...bind(a, 'basis')), 'Used to work out capital gains.'));
+      if (a.type === 'gia') extra.push(h('div', { class: 'field' }, h('span', {}, 'Holds'),
+        switchInput('One company’s shares (e.g. from work)', ...bind(a, 'oneCompany'), { rerender: 'accounts' }),
+        h('span', { class: 'hint' }, 'So Horizon can warn when too much rides on one company. The plan still grows it like your other investments.')));
       if (a.type === 'bonds') {
         main.push(field('Interest', numInput(...bind(a, 'rate'), { step: 0.05, suffix: '%' })));
         extra.push(field('Matures in', numInput(...bind(a, 'maturityYear'), { min: 0, max: 2100 }), a.inIsa ? '0 = never. Pays out into the ISA.' : '0 = never. Pays out into cash.'));
@@ -5019,6 +5051,30 @@
           } }, `+ Goal: the deposit by ${a.buyYear}`)));
         }
         extra.push(field('Sell in year', numInput(...bind(a, 'sellYear'), { min: 0, max: 2100 }), '0 = keep. Sale money is saved or invested; to move, add the next home as “Buying it later” in the same year.'));
+        if (!buying) {
+          extra.push(h('div', { class: 'field-group pot-alongside equity-release' },
+            h('h4', {}, 'Equity release (a lifetime mortgage)'),
+            h('p', { class: 'hint' }, 'Money from the home while you live in it: nothing to pay back each month, but interest rolls up and is repaid when the home is sold (or from the estate). It can never be more than the home is worth. Otherwise the plan never sells the home to pay for spending: it is part of what you leave.'),
+            h('div', { class: 'fields' },
+              field('In year', numInput(...bind(a, 'releaseYear'), { min: 0, max: 2100, label: 'Equity release year', rerender: 'accounts' }), '0 = none.'),
+              a.releaseYear ? field('Amount (today’s money)', moneyInput(...bind(a, 'releaseAmount'), { label: 'Equity release amount' }), 'Usually 20–50% of the home’s value, more the older you are.') : null,
+              a.releaseYear ? field('Interest', numInput(...bind(a, 'releaseRate'), { step: 0.1, suffix: '%', label: 'Equity release interest' }), 'Fixed for life; 6–7% is typical. At 6.5% what is owed doubles in about 11 years.') : null)));
+        }
+        if (!buying && !a.sellYear) {
+          const mv = moveDraft[a.id] || (moveDraft[a.id] = { year: plan().startYear + 10, price: Math.round(a.balance * 0.6 / 1000) * 1000 });
+          extra.push(h('div', { class: 'field-group pot-alongside move-home' },
+            h('h4', {}, 'Move to a smaller home'),
+            h('p', { class: 'hint' }, 'Sells this home in that year and buys the next one outright from the sale, with about 5% for stamp duty and moving. The rest of the sale is saved or invested.'),
+            h('div', { class: 'fields' },
+              field('Move in', numInput(() => mv.year, v => { mv.year = Math.round(v); }, { min: plan().startYear + 1, max: plan().startYear + 50, label: 'Year to move' })),
+              field('The smaller home costs (today)', moneyInput(() => mv.price, v => { mv.price = v; }, { label: 'Price of the smaller home' })),
+              h('div', { class: 'field' }, h('span', {}, ' '), h('button', { type: 'button', class: 'btn small', onclick: () => {
+                SI.downsize(plan(), a.id, mv.year, mv.price);
+                delete moveDraft[a.id];
+                renderSection('accounts'); refresh();
+                toast(`Set up: ${a.name} is sold in ${mv.year} and a ${money(mv.price)} home (today’s price) bought outright. Change either under Accounts.`);
+              } }, 'Set up the move')))));
+        }
       }
       if (a.type === 'asset') {
         main.push(field('Growth', numInput(...bind(a, 'rate'), { step: 0.1, min: -50, suffix: '%/yr' }), 'Average a year; negative if it loses value (e.g. a car).'));
@@ -5465,6 +5521,8 @@
             h('input', { type: 'number', value: c.age, min: 0, max: 30, 'aria-label': `Child ${i + 1} age`, style: 'width:80px', oninput: e => { c.age = parseInt(e.target.value, 10) || 0; updateLifeTotal(); } }))))) : null,
         kids.length ? h('div', { class: 'fields' },
           lwNum('schoolCost', 'School costs (a year, each, to 18)', { money: true, hint: 'Uniforms, trips, clubs. Childcare stays in your spending list.' }),
+          lwNum('privateFee', 'Private school fees (a year, each)', { money: true, hint: '0 = state school. Fees rise with prices in the plan; they often rise faster.' }),
+          lwNum('privateFrom', 'Private school from the child’s age', { min: 3, max: 17, hint: 'Until 18. E.g. 11 for secondary school only.' }),
           lwNum('uniPerYear', 'University support (a year)', { money: true, hint: plan().household.region === 'scotland' ? 'Scottish students pay no tuition at Scottish universities; this is help with living costs.' : 'Tuition is paid by a student loan; this is your help with living costs (their maintenance loan is smaller when parents earn more).' }),
           lwNum('uniYears', 'Years at university', { min: 0, max: 7 }),
           lwNum('carAt17', 'Driving lessons & first car', { money: true }),
