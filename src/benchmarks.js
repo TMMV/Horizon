@@ -394,6 +394,8 @@
     for (const i of plan.income.filter(x => x.kind === 'dbpension' && x.dbScheme === 'uss')) {
       const x = plan.household.people.find(y => y.id === i.owner);
       if (!x || x.retireAge <= x.age) continue;
+      // Already paying into the Investment Builder with the employer's match.
+      if (plan.income.some(s => s.kind === 'salary' && s.owner === x.id && s.pensionTo === 'db' && s.potEmployer > 0)) continue;
       const sal = i.dbSalary > 0 ? i.dbSalary : 0;
       out.push({ id: `uss-match-${x.id}`, tone: 'tip', title: `${x.name}: the USS match is free money`,
         text: `In USS, paying an extra 1% of salary into the Investment Builder makes the employer add 1% too${sal ? ` (about ${money(sal / 100)} a year each on ${money(sal)})` : ''}, with tax relief on ${x.name}’s part. Choose it in My USS; it can be changed at any time.` });

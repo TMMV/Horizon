@@ -1057,7 +1057,7 @@
     const ps = people();
     const N = pre.N;
     const out = [];
-    const add = (when, title, text, action) => out.push({ when, title, text, action });
+    const add = (when, title, text, action, date) => out.push({ when, title, text, action, date });
     const m = v => money(v / 12);
     const go = (label, where) => [label, () => navigate(where)];
     const year0 = p.startYear;
@@ -1096,6 +1096,14 @@
       const pay = p.income.filter(it => it.kind === 'salary' && it.owner === x.id);
       const sac = pay.some(it => it.sacrifice);
       const er = P.contrib[0] - P.ee[0] - P.sacrificed[0];
+      const both = pay.find(it => it.pensionTo === 'db' && (it.potEmployee > 0 || it.potEmployer > 0));
+      if (both) {
+        const c = E.pensionSplit(both, E.incomeAfterCosts(both, p, 0), p, 0);
+        add('now', `${x.name}: ${money(c.ee / 12)} a month into pensions${sac ? ' by salary sacrifice' : ''}`,
+          `${money((c.ee - c.potEe) / 12)} into the defined benefit scheme (it builds the pension paid from ${(p.income.find(it => it.kind === 'dbpension' && it.owner === x.id) || {}).startAge || 'pension age'}) and ${money(c.potEe / 12)} into the pension pot${c.potEr > 0.5 ? `, where the employer adds ${money(c.potEr / 12)}` : ''}. Both rise with pay.`,
+          go('Income', 'finances/income'));
+        return;
+      }
       add('now', `${x.name}: ${money(P.ee[0] / 12)} a month into the pension${sac ? ' by salary sacrifice' : ''}`,
         `${er > 0.5 ? `The employer adds ${m(er)}. ` : ''}${pay.some(it => it.pensionMode === 'fixed') ? `The plan raises it with pay each year: about ${m(P.ee[1] || 0)} a month next year.` : 'A share of pay, so it rises with pay.'}`,
         go('Income', 'finances/income'));
@@ -1110,7 +1118,7 @@
       add(E.ownsHome(p) ? by : 'now', `Open Lifetime ISAs before turning 40: ${who.map(x => x.name).join(' and ')}`, `Even with £1, so the option stays open: up to £4,000 a year each then gets a 25% bonus until 50${E.ownsHome(p) ? ', usable from 60' : ', usable for a first home (up to £450,000) or from 60'}.`, ['Compare the options', () => openComparison('sacrifice-lisa')]);
     }
     for (const d of p.accounts.filter(a => a.type === 'debt' && !a.excluded && a.balance > 0 && a.fixedUntil >= year0)) {
-      add(d.fixedUntil, `${d.name}: the fixed rate ends`, `Compare deals about six months before, to avoid the lender’s standard variable rate. The plan assumes ${d.rateAfterFix === null ? `${d.rate}%` : `${d.rateAfterFix}%`} afterwards.`, ['Compare rates', () => openComparison('mortgage-rate')]);
+      add(d.fixedUntil, `${d.name}: the fixed rate ends`, `Compare deals about six months before, to avoid the lender’s standard variable rate. The plan assumes ${d.rateAfterFix === null ? `${d.rate}%` : `${d.rateAfterFix}%`} afterwards.`, ['Compare rates', () => openComparison('mortgage-rate')], `${d.fixedUntil}-06-01`);   // about six months before it ends
     }
     const saveOf = r => ({ isa: r.toIsa + (r.toLisa || 0), gia: r.toGia, pen: r.toPension || 0, over: r.overpay, cash: r.toCash });
     const where = r => { const s = saveOf(r); return [[s.isa, 'into ISAs'], [s.pen, 'into pensions (with relief)'], [s.gia, 'into the general account'], [s.over, 'off the mortgage'], [s.cash, 'into cash']].filter(x => x[0] > 0.5 * 12).map(([v, l]) => `${m(v)} a month ${l}`).join(', '); };
@@ -1153,6 +1161,14 @@
       const t = x.retireAge - x.age;
       if (t <= 0 || t >= N) return;
       add(rows[t].year, `${x.name} retires at ${x.retireAge}`, `Pay and pension contributions stop.${x.retireAge < x.pensionAccessAge ? ` Pensions can be drawn from ${x.pensionAccessAge}; until then savings and ISAs pay the way.` : ''}`, ['Can I retire then?', () => openGuide('retire', { who: x.id })]);
+      const ny = E.spYears(x);
+      if (ny.voluntary > 0) {
+        add(rows[t].year, `${x.name}: pay voluntary NI for ${ny.voluntary} year${ny.voluntary === 1 ? '' : 's'}`,
+          `With no pay from ${x.retireAge}, those years don’t count towards the State Pension unless paid for. Class 3 costs about ${money(R.NI_YEARS.class3Week * 52)} a year (£${R.NI_YEARS.class3Week.toFixed(2)} a week at 2025/26 rates); each year adds about ${money(R.STATE_PENSION_FULL / R.NI_YEARS.full)} a year of State Pension, for life. How: check the NI record at gov.uk/check-national-insurance-record, then pay HMRC each year (gov.uk “Pay voluntary Class 3 National Insurance”, by Direct Debit or bank transfer). Gaps can also be paid up to 6 years later. Until ${rows[t].year + ny.voluntary - 1}.`,
+          go('Your State Pension', 'finances/assumptions'), `${rows[t].year}-05-01`);
+      } else if (!ny.known && t > 0 && x.retireAge < x.statePensionAge) {
+        add('now', `${x.name}: check the National Insurance record`, `The State Pension forecast assumes NI is paid until ${x.statePensionAge}; stopping at ${x.retireAge} can cost part of it. How: gov.uk/check-national-insurance-record shows the full years so far; type them under More options for ${x.name} and Horizon works out the rest.`, go('Your details', 'finances/assumptions'));
+      }
       const sp = pre.people[i].statePension.findIndex((v, k) => k < N && v > 0);
       if (sp > 0) add(rows[sp].year, `${x.name}: claim the State Pension`, `From ${E.spStart(x)}${x.spDefer ? ` (put off ${x.spDefer} year${x.spDefer === 1 ? '' : 's'}, so about ${Math.round((E.spDeferUplift(x) - 1) * 100)}% more for life)` : ''}: about ${m(pre.people[i].statePension[sp])} a month. It is not paid automatically: claim it at gov.uk about 4 months before.`, null);
       for (const db of p.income.filter(it => it.kind === 'dbpension' && it.owner === x.id)) {
@@ -1181,7 +1197,7 @@
     const pots = E.reservesAt(p, model.est ? model.est.years || 0 : 0);
     const budgets = pots.filter(r => r.kind === 'budget');
     if (budgets.length) add('yearly', `At the review: what is left of the ${budgets.map(r => r.name.toLowerCase()).join(' and ')} budget${budgets.length > 1 ? 's' : ''}?`,
-      `${budgets.map(r => `${money(r.yearly)} for ${r.name.toLowerCase()}`).join(', ')} this year, in ${[...new Set(budgets.map(r => accountName(r.accountId) || 'an account'))].join(' and ')}. The plan counts it as spent; what is left can be kept for the year after or freed up to invest.`, ['Start review', () => openReview()]);
+      `${budgets.map(r => `${money(r.yearly)} for ${r.name.toLowerCase()}`).join(', ')} this year, in ${[...new Set(budgets.map(r => accountName(r.accountId) || 'an account'))].join(' and ')}. The plan counts it as spent; what is left can be kept for the year after or freed up to invest.`, ['Start review', () => openReview()], '10-01');
     for (const r of pots) {
       const where = accountName(r.accountId) || 'an account';
       if (r.kind === 'emergency') {
@@ -1196,9 +1212,43 @@
         add('now', `Count about ${money(r.perYear / 12)} a month in ${where} as for ${r.name.toLowerCase()}`, `It is already part of what goes in each month. Home shows it building up to ${money(r.target)} for ${r.dueYear}, spoken for and left out of net worth; then it is taken out to pay.${needs > spare + 1 ? ` All the pots together need about ${money(needs)} a month, more than the ${money(spare)} left over now: the plan pays the difference from savings when each cost comes, so a smaller cost, a later date or more put aside already would help.` : ''}`, go('Set aside', 'finances/saving'));
       }
     }
-    add('yearly', 'By 5 April: use the tax-year allowances', 'ISAs, pension top-ups and moving the general account into ISAs. Unused allowances are lost.', ['Tax year-end check', () => openGuide('tax')]);
-    add('yearly', 'Each autumn: the yearly review', 'Swap the estimates for real balances so the plan tracks what actually happened.', ['Start review', () => openReview()]);
+    add('yearly', 'By 5 April: use the tax-year allowances', 'ISAs, pension top-ups and moving the general account into ISAs. Unused allowances are lost.', ['Tax year-end check', () => openGuide('tax')], '03-01');
+    add('yearly', 'Each autumn: the yearly review', 'Swap the estimates for real balances so the plan tracks what actually happened.', ['Start review', () => openReview()], '10-01');
     return out;
+  }
+
+  // The steps as a calendar file (.ics), made here and saved to this computer: each one on its
+  // date (or 15 January of its year), the yearly ones repeating, with a reminder that morning.
+  function todoCalendar(items) {
+    const y0 = new Date().getFullYear();
+    const esc = s => String(s).replace(/\\/g, '\\\\').replace(/[,;]/g, m => `\\${m}`).replace(/\n/g, '\\n');
+    const fold = line => { const out = []; let s = line; while (s.length > 60) { out.push(s.slice(0, 60)); s = ` ${s.slice(60)}`; } out.push(s); return out.join('\r\n'); };
+    const day = iso => iso.replace(/-/g, '');
+    const next = d => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
+    const hash = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(36); };
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Horizon//Plan steps//EN', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Horizon: plan steps'];
+    for (const i of items) {
+      const date = i.when === 'now' ? today()
+        : i.when === 'yearly' ? `${y0}-${i.date || '01-15'}`
+        : /^\d{4}-\d{2}-\d{2}$/.test(i.date || '') ? i.date : `${i.when}-01-15`;
+      lines.push('BEGIN:VEVENT', `UID:${hash(`${i.title}|${i.when}`)}@horizon-plan`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`,
+        `DTSTART;VALUE=DATE:${day(date)}`, `DTEND;VALUE=DATE:${day(next(date))}`,
+        ...(i.when === 'yearly' ? ['RRULE:FREQ=YEARLY'] : []),
+        fold(`SUMMARY:${esc(i.title)}`),
+        fold(`DESCRIPTION:${esc(`${i.text}${i.action ? `\n\nIn Horizon: ${i.action[0]}.` : ''}`)}`),
+        'BEGIN:VALARM', 'ACTION:DISPLAY', fold(`DESCRIPTION:${esc(i.title)}`), 'TRIGGER;RELATED=START:PT9H', 'END:VALARM',
+        'END:VEVENT');
+    }
+    lines.push('END:VCALENDAR');
+    return lines.join('\r\n');
+  }
+
+  function downloadCalendar() {
+    // What changes over the years and what comes round each year; “now” is on Home already.
+    const blob = new Blob([todoCalendar(todoItems().filter(i => i.when !== 'now'))], { type: 'text/calendar' });
+    const a = h('a', { href: URL.createObjectURL(blob), download: 'horizon-plan-steps.ics' });
+    document.body.append(a); a.click(); a.remove();
+    toast('Saved “horizon-plan-steps.ics”: open it to add the steps to your calendar. After big changes to the plan, save it again (the same steps are updated, not doubled, in most calendars).');
   }
 
   function renderTodo() {
@@ -1217,7 +1267,8 @@
         i.action ? h('button', { type: 'button', class: 'linkish', onclick: i.action[1] }, i.action[0]) : null));
     setKids(box,
       h('div', { class: 'do-head' }, h('h3', {}, 'Your plan, step by step'),
-        h('p', { class: 'sub' }, 'What to pay where now, what changes along the way, and how much to take in retirement. Amounts a month, in the pounds of that year; change the plan and the list follows.')),
+        h('p', { class: 'sub' }, 'What to pay where now, what changes along the way, and how much to take in retirement. Amounts a month, in the pounds of that year; change the plan and the list follows.'),
+        h('button', { type: 'button', class: 'btn small', id: 'todoCalendar', title: 'A calendar file with each step on its date and a reminder that morning, made on this computer.', onclick: downloadCalendar }, glyph('review'), 'Add the steps to my calendar')),
       h('ol', { class: 'todo' }, soon.map(row)),
       later.length ? more('home-todo-later', `Later on (${later.length})`, h('ol', { class: 'todo' }, later.map(row))) : null);
   }
@@ -3626,7 +3677,7 @@
     });
     // Redraw the section once the number is finished (leaving the field or Enter), not on every
     // key: redrawing while typing would take the cursor away after the first digit.
-    if (opts.rerender) input.addEventListener('change', () => { redrawKeepFocus(opts.rerender); schedule(); });
+    if (opts.rerender) input.addEventListener('change', () => { redrawWhenLeft(input, opts.rerender); schedule(); });
     if (!opts.suffix) return input;
     return h('div', { class: 'adorn has-suf' }, input, h('span', { class: 'suf' }, opts.suffix));
   }
@@ -4298,6 +4349,20 @@
     }, 0);
   }
 
+  // After a typed number is finished: redraw once the person has left the card it is in, never
+  // while they are typing in it or in the next field of the same card (a redraw would replace
+  // the field under their cursor). Dropdowns and switches redraw at once (redrawKeepFocus).
+  function redrawWhenLeft(input, id) {
+    const card = input.closest('[data-editing], .item, .row-item') || document.getElementById(`sec-${id}`);
+    if (!card) { renderSection(id); return; }
+    let done = false;
+    const go = () => { if (done) return; done = true; card.removeEventListener('focusout', out); redrawKeepFocus(id); };
+    const out = e => { if (!e.relatedTarget || !card.contains(e.relatedTarget)) setTimeout(go, 0); };
+    card.addEventListener('focusout', out);
+    // Focus already gone elsewhere (e.g. Enter pressed, then a click outside): redraw now.
+    setTimeout(() => { if (!card.contains(document.activeElement)) go(); }, 0);
+  }
+
   function renderSection(id) {
     const s = SECTIONS.find(x => x.id === id);
     const el = $(`#sec-${id}`);
@@ -4347,7 +4412,7 @@
       set(input.value.trim() === '' || !Number.isFinite(v) ? null : v);
       schedule();
     });
-    if (opts.rerender) input.addEventListener('change', () => { redrawKeepFocus(opts.rerender); schedule(); });
+    if (opts.rerender) input.addEventListener('change', () => { redrawWhenLeft(input, opts.rerender); schedule(); });
     return h('div', { class: 'adorn has-suf' }, input, h('span', { class: 'suf' }, opts.suffix || '%'));
   }
 
@@ -4368,7 +4433,7 @@
             // Retired (retirement age = age): stays retired as the age is corrected.
             if (p.retireAge === was) p.retireAge = p.age;
             was = p.age;
-            redrawKeepFocus('household');
+            redrawWhenLeft(input, 'household');
             schedule();
           });
           return input;

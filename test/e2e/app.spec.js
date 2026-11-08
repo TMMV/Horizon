@@ -2015,6 +2015,24 @@ test.describe('round 2 fixes', () => {
     expect(problems).toEqual([]);
   });
 
+  test('the steps can be added to a calendar, each on its date with a reminder', async ({ page }) => {
+    const { problems } = await openApp(page);
+    // Voluntary NI after stopping work is a step, with how to pay it.
+    await page.evaluate(() => { const H = window.__horizon, x = H.ws.scenarios[0].plan.household.people[0]; x.niYears = 9; x.niVoluntary = true; H.refresh(); });
+    await page.locator('#ovTodo summary', { hasText: 'Later on' }).click();
+    await expect(page.locator('#ovTodo')).toContainText(/Alex: pay voluntary NI for \d+ years/);
+    await expect(page.locator('#ovTodo')).toContainText('Pay voluntary Class 3 National Insurance');
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#todoCalendar')]);
+    expect(dl.suggestedFilename()).toBe('horizon-plan-steps.ics');
+    const text = require('fs').readFileSync(await dl.path(), 'utf8');
+    expect(text.startsWith('BEGIN:VCALENDAR')).toBe(true);
+    expect(text).toContain('RRULE:FREQ=YEARLY');
+    expect(text).toContain('BEGIN:VALARM');
+    expect(text.match(/BEGIN:VEVENT/g).length).toBeGreaterThan(5);
+    expect(text.split('\r\n').every(l => l.length <= 75)).toBe(true);
+    expect(problems).toEqual([]);
+  });
+
   test('a goal that leaves out pensions says what it counts, next to what Home shows', async ({ page }) => {
     const { problems } = await openApp(page);
     await page.evaluate(() => {
