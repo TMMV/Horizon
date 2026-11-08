@@ -289,24 +289,24 @@
       xs,
       yDomain: opts.yDomain, yFormat: opts.yFormat,
       bands: [
-        { label: '10th–90th percentile', lower: bands.p10, upper: bands.p90, color: opts.band || '--band', alpha: 0.14 },
+        { label: '8 in 10 outcomes', lower: bands.p10, upper: bands.p90, color: opts.band || '--band', alpha: 0.14 },
         { label: 'Middle half of outcomes', lower: bands.p25, upper: bands.p75, color: opts.band || '--band', alpha: 0.26 },
       ],
       lines,
       markers: opts.markers,
       table: () => ({
-        headers: ['Year', '10th', '25th', 'Median', '75th', '90th', ...(opts.expected ? ['Average returns'] : [])],
+        headers: ['Year', 'Bad case (1 in 10)', 'Worse half', 'Middle', 'Better half', 'Good case (1 in 10)', ...(opts.expected ? ['Average returns'] : [])],
         rows: xs.map((x, i) => [x, bands.p10[i], bands.p25[i], bands.p50[i], bands.p75[i], bands.p90[i], ...(opts.expected ? [opts.expected[i]] : [])]),
         formats: [String, fmt, fmt, fmt, fmt, fmt, fmt],
       }),
       tooltip: i => ({
         title: opts.title ? opts.title(i) : String(xs[i]),
         rows: [
-          { label: '90th percentile', series: '10th–90th percentile', color: opts.band || '--band', shape: 'band', text: fmt(bands.p90[i]) },
-          { label: '75th percentile', series: 'Middle half of outcomes', color: opts.band || '--band', shape: 'band', text: fmt(bands.p75[i]) },
+          { label: 'Good case (1 in 10 do better)', series: '8 in 10 outcomes', color: opts.band || '--band', shape: 'band', text: fmt(bands.p90[i]) },
+          { label: 'Better half', series: 'Middle half of outcomes', color: opts.band || '--band', shape: 'band', text: fmt(bands.p75[i]) },
           { label: 'Median', color: opts.color || '--s1', shape: 'line', text: fmt(bands.p50[i]), strong: true },
-          { label: '25th percentile', series: 'Middle half of outcomes', color: opts.band || '--band', shape: 'band', text: fmt(bands.p25[i]) },
-          { label: '10th percentile', series: '10th–90th percentile', color: opts.band || '--band', shape: 'band', text: fmt(bands.p10[i]) },
+          { label: 'Worse half', series: 'Middle half of outcomes', color: opts.band || '--band', shape: 'band', text: fmt(bands.p25[i]) },
+          { label: 'Bad case (1 in 10 do worse)', series: '8 in 10 outcomes', color: opts.band || '--band', shape: 'band', text: fmt(bands.p10[i]) },
           ...(opts.expected ? [{ label: 'Average returns', series: 'Expected', color: '--muted', shape: 'dash', text: fmt(opts.expected[i]) }] : []),
         ],
       }),
@@ -1004,7 +1004,7 @@
       ? ACCESS_SERIES.map(s => ({ ...s, values: rows.map((r, t) => D(s.of(r), t)) })).filter(s => s.values.some(v => v > 0.5))
       : ACCOUNT_SERIES.map(s => ({ ...s, values: col(s.key) })).filter(s => s.values.some(v => v > 0.5));
     if (rows.some(r => r.debt > 0.5)) bars.push({ key: 'debt', label: 'Mortgage & loans', color: '--s8', values: rows.map((r, t) => -D(r.debt, t)) });
-    if (rows.some(r => r.shortfall > 0.5)) bars.push({ key: 'short', label: 'Unfunded spending', color: '--muted', values: rows.map((r, t) => -D(r.shortfall, t)) });
+    if (rows.some(r => r.shortfall > 0.5)) bars.push({ key: 'short', label: 'Spending not covered', color: '--muted', values: rows.map((r, t) => -D(r.shortfall, t)) });
     const nw = col('netWorth');
     const markers = [];
     const seen = new Set();
@@ -1131,7 +1131,9 @@
     const dEnd = rows.findIndex((r, t) => t > 0 && t < N && rows[0].debt > 0.5 && r.debt <= 0.5);
     if (dEnd > 0) add(rows[dEnd].year, 'Mortgage paid off', `The payments become savings. The plan then puts ${where(rows[dEnd])} (in ${rows[dEnd].year} pounds).`, go('Set amounts', 'finances/saving'));
     const giaStart = rows.findIndex((r, t) => t > 0 && t < N && r.toGia > 100);
-    if (giaStart > 0 && !(dEnd > 0 && giaStart === dEnd)) add(rows[giaStart].year, 'ISAs full: the rest goes into the general account', `About ${m(rows[giaStart].toGia)} a month at first, where gains and dividends are taxed.${p.strategy.pensionFirst ? '' : ' “Pensions first” would put it into pensions with tax relief instead.'}`, ['Compare the options', () => openComparison('after-isa')]);
+    const fromSale = giaStart > 0 && (rows[giaStart].propSold || 0) > 0.5;
+    if (fromSale) add(rows[giaStart].year, `The sale puts ${money(rows[giaStart].propSold)} into savings`, `Up to ${money(p.strategy.isaAllowance * ps.length)} of it can go into ISAs that year; the rest goes into a general investment account, where gains are taxed. Each April after, move ${money(p.strategy.isaAllowance * ps.length)} of it into ISAs (“Bed and ISA”).`, go('Saving & investing', 'finances/saving'));
+    else if (giaStart > 0 && !(dEnd > 0 && giaStart === dEnd)) add(rows[giaStart].year, 'ISAs full: the rest goes into the general account', `About ${m(rows[giaStart].toGia)} a month at first, where gains and dividends are taxed.${p.strategy.pensionFirst ? '' : ' “Pensions first” would put it into pensions with tax relief instead.'}`, ['Compare the options', () => openComparison('after-isa')]);
     const penStart = rows.findIndex((r, t) => t < N && (r.toPension || 0) > 0.5);
     if (penStart >= 0) add(penStart === 0 ? 'now' : rows[penStart].year, `Pay ${m(rows[penStart].toPension)} a month more into pensions`, 'Pensions first: once the ISAs are full, into the pension of whoever pays the most tax (with tax relief on top), by salary sacrifice or a personal contribution.', go('Saving & investing', 'finances/saving'));
     ps.forEach((x, i) => {
@@ -1242,7 +1244,7 @@
   function driverLine(goalId) {
     const d = driverSummary(goalId);
     if (!d) return h('p', { class: 'gt-driver muted' }, 'Working out what moves it…');
-    const fmt = x => `${x.d > 0 ? '+' : '−'}${Math.abs(Math.round(x.d * 100))} pts`;
+    const fmt = x => `${x.d > 0 ? '+' : '−'}${Math.abs(Math.round(x.d * 100))} points`;
     return h('p', { class: 'gt-driver' },
       d.help ? [h('span', { class: 'drv-k up' }, '▲'), `${d.help.label} `, h('strong', {}, fmt(d.help))] : h('span', { class: 'muted' }, 'Already as likely as it gets.'),
       d.risk ? [h('br'), h('span', { class: 'drv-k down' }, '▼'), `${d.risk.label} `, h('strong', {}, fmt(d.risk))] : null);
@@ -1489,7 +1491,7 @@
       { label: 'Average returns', series: 'Expected', color: '--muted', shape: 'dash' },
       ...(target ? [{ label: g.type === 'emergency' ? 'Needed' : 'Target', color: '--text', shape: 'dash' }] : []),
       { label: 'Middle half of outcomes', color: col, shape: 'band' },
-      { label: '10th–90th percentile', color: col, shape: 'band' },
+      { label: '8 in 10 outcomes', color: col, shape: 'band' },
     ], c);
   }
 
@@ -1548,7 +1550,7 @@
       return h('div', { class: 'divbar', role: 'listitem', tabindex: '0', title: `${r.label}: ${pct(r.before)} → ${pct(r.after)}` },
         h('span', { class: 'db-label' }, h('span', { class: `kind ${r.kind}` }, r.kind === 'risk' ? 'Risk' : 'Choice'), r.label, r.why ? h('small', { class: 'db-why' }, r.why) : null),
         h('span', { class: 'db-track' }, h('span', { class: 'db-mid' }), h('span', { class: `db-bar ${r.pts >= 0 ? 'pos' : 'neg'}`, style: `${r.pts >= 0 ? 'left' : 'right'}:50%;width:${w}%` })),
-        h('span', { class: `db-val${r.pts === 0 ? ' flat' : ''}` }, r.pts === 0 ? 'No change' : `${r.pts > 0 ? '+' : '−'}${Math.abs(r.pts)} pts`));
+        h('span', { class: `db-val${r.pts === 0 ? ' flat' : ''}` }, r.pts === 0 ? 'No change' : `${r.pts > 0 ? '+' : '−'}${Math.abs(r.pts)} points`));
     }));
     const tbl = h('div', { class: 'table-wrap' }, table(['Change', 'Chance now', 'With the change', 'Points'], rows.map(r => ({ cells: [r.label, pct(r.before), pct(r.after), { text: `${r.pts > 0 ? '+' : ''}${r.pts}`, cls: r.pts > 0 ? 'pos' : r.pts < 0 ? 'neg' : '' }] }))));
     setKids(card, ...head, viewToggle(bars, tbl),
@@ -1772,7 +1774,7 @@
     if (d.zeroLabel && ((d.unit === 'money' && v === 0) || (d.unit === 'year' && v < d.min + 1))) return d.zeroLabel;
     if (d.unit === 'money') return money(v);
     if (d.unit === 'pct' || d.unit === 'rate') return `${v}%`;
-    if (d.unit === 'pts') return v === 0 ? 'As assumed' : `${v > 0 ? '+' : ''}${v} pts`;
+    if (d.unit === 'pts') return v === 0 ? 'As assumed' : `${v > 0 ? '+' : ''}${v} points`;
     return String(v);
   }
 
@@ -1825,11 +1827,11 @@
       const when = r => (r.goal.type === 'retire' ? '' : r.expectedYear ? ` · ${r.expectedYear}` : ' · not reached');
       return {
         cells: [h('span', { class: 'goal-name' }, h('i', { class: 'key dot', style: `--key:${cssVar(goalColor(a.goal))}` }), a.title), `${pct(b.probability)}${when(b)}`, `${pct(a.probability)}${when(a)}`,
-          deltaCell(Math.round(b.probability * 100), Math.round(a.probability * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} pts`)],
+          deltaCell(Math.round(b.probability * 100), Math.round(a.probability * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} points`)],
       };
     });
     const sb = before.summary, sa = after.summary;
-    rows.push({ cls: 'sep', cells: ['Chance the money lasts', pct(sb.success), pct(sa.success), deltaCell(Math.round(sb.success * 100), Math.round(sa.success * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} pts`)] });
+    rows.push({ cls: 'sep', cells: ['Chance the money lasts', pct(sb.success), pct(sa.success), deltaCell(Math.round(sb.success * 100), Math.round(sa.success * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} points`)] });
     rows.push({ cells: [`Net worth at retirement (today's £)`, money(sb.netWorthAtRetire), money(sa.netWorthAtRetire), deltaCell(Math.round(sb.netWorthAtRetire), Math.round(sa.netWorthAtRetire), (x, y) => x > y, (x, y) => money(Math.abs(x - y)))] });
     rows.push({ cells: ['Mortgage-free', sb.debtFree ? String(sb.debtFree) : '—', sa.debtFree ? String(sa.debtFree) : '—', deltaCell(sb.debtFree, sa.debtFree, (x, y) => x < y, (x, y) => `${Math.abs(x - y)} yrs`)] });
     rows.push({ cells: ['Invest each month now', money(sb.monthly.invest), money(sa.monthly.invest), deltaCell(Math.round(sb.monthly.invest), Math.round(sa.monthly.invest), (x, y) => x > y, (x, y) => money(Math.abs(x - y)))] });
@@ -2220,7 +2222,7 @@
             option('comfortable', 'Comfortable', std.comfortable, PLSA_TEXT.comfortable),
             option('custom', 'My own amount', null, 'Type a figure, or use “What could we spend?” on the right.')),
           customBox,
-          h('p', { class: 'hint' }, `Every amount rises with prices each year, so it buys the same as it would today. Minimum, moderate and comfortable are the PLSA Retirement Living Standards 2025 for a ${people().length > 1 ? 'couple' : 'single person'}: after tax, in today’s money, with no mortgage or rent. ${debtFree ? (debtFree <= retireYear ? `Your mortgage is paid off in ${debtFree}, before you retire.` : `Your mortgage runs to ${debtFree}, after you retire: its payments come on top.`) : ''}`)),
+          h('p', { class: 'hint' }, `Every amount rises with prices each year, so it buys the same as it would today. Minimum, moderate and comfortable are the PLSA Retirement Living Standards 2025 for a ${people().length > 1 ? 'couple' : 'single person'}: after tax, in today’s money, with no mortgage or rent. ${debtFree && model.proj.rows[0].debt > 0.5 ? (debtFree <= retireYear ? `Your mortgage is paid off in ${debtFree}, before you retire.` : `Your mortgage runs to ${debtFree}, after you retire: its payments come on top.`) : ''}`)),
         sec(3, 'The active early years',
           h('div', { class: 'fields' },
             h('label', { class: 'field' }, h('span', {}, 'Extra for travel & hobbies (a year)'), moneyIn(() => r.travelExtra, v => { r.travelExtra = v; }, 'Extra travel a year')),
@@ -2290,6 +2292,7 @@
           h('li', {}, h('span', {}, mc.medianFailYear ? 'If it runs out, typically' : 'Plan runs to'), h('strong', {}, mc.medianFailYear ? `${mc.medianFailYear} (age ${p1.age + mc.medianFailYear - p.startYear})` : `age ${lastAge}`))),
         h('h3', { class: 'chart-title' }, 'Savings, investments and pensions (today’s £)'),
         chartBox,
+        mc.series.liquid.real.p10.some(v => v < -0.5) ? h('p', { class: 'hint' }, 'Below £0, the money has run out: the figure is the spending that couldn’t be paid, added up.') : null,
         answers);
       showAnswers();
       const b = mc.series.liquid.real;
@@ -2369,7 +2372,7 @@
       { label: 'Other income', color: '--s2', values: col(r => r.otherIncome) },
       { label: 'State Pension', color: '--s3', values: col(r => r.statePension) },
       { label: 'From savings', color: '--s4', values: col(r => r.withdrawals) },
-      { label: 'Unfunded', color: '--muted', values: col(r => r.unfunded) },
+      { label: 'Not covered', color: '--muted', values: col(r => r.unfunded) },
       { label: 'Spending', color: '--s5', values: col(r => r.spending, -1) },
       { label: 'Tax & NI', color: '--s6', values: col(r => r.taxes, -1) },
       { label: 'Mortgage & loans', color: '--s7', values: col(r => r.debtPay, -1) },
@@ -2481,7 +2484,7 @@
       ...cfg.lines.slice(1).map(l => ({ label: l.label, color: l.color, shape: 'line' })),
       { label: 'Median of history', series: 'Median', color: '--s1', shape: 'line' },
       { label: 'Middle half of history', series: 'Middle half of outcomes', color: '--band', shape: 'band' },
-      { label: '10th–90th percentile', color: '--band', shape: 'band' },
+      { label: '8 in 10 outcomes', color: '--band', shape: 'band' },
     ], cl);
   }
 
@@ -2547,6 +2550,13 @@
   function renderImpact() {
     const box = $(`#view-finances .money-page[data-page="${moneyPage}"] [data-impact]`);
     if (!box) return;
+    const p = plan();
+    if (!p.income.length || !model.goals.length) {
+      impactBase = null;
+      setKids(box, h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'What your changes do'),
+        h('p', { class: 'sub' }, `Once ${!p.income.length ? 'your income' : ''}${!p.income.length && !model.goals.length ? ' and ' : ''}${!model.goals.length ? 'a goal' : ''} ${!p.income.length && !model.goals.length ? 'are' : 'is'} in, this shows what each change does to your goals and to what you can invest.`))));
+      return;
+    }
     if (!impactBase) impactBase = impactNow();
     const now = impactNow();
     const dPts = g => Math.round(((now.goals[g.goal.id] || 0) - (impactBase.goals[g.goal.id] ?? now.goals[g.goal.id])) * 100);
@@ -2562,9 +2572,9 @@
           return h('li', { style: `--gc:${cssVar(goalColor(g.goal))}` }, goalBadge(g.goal, 'small'),
             h('span', { class: 'im-name' }, g.title),
             h('strong', {}, pct(g.probability)),
-            h('span', { class: `im-delta ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}` }, d ? `${d > 0 ? '▲' : '▼'} ${Math.abs(d)} pts` : ''));
+            h('span', { class: `im-delta ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}` }, d ? `${d > 0 ? '▲' : '▼'} ${Math.abs(d)} points` : ''));
         }),
-        h('li', { class: 'im-invest' }, h('span', { class: 'im-name' }, now.invest < 0 ? 'Drawing from savings' : 'Invest each month'),
+        h('li', { class: 'im-invest', title: 'What is left each month after tax, spending and the mortgage, once the cash buffer is full: so adding cash above the buffer, or a bigger buffer, moves it too.' }, h('span', { class: 'im-name' }, now.invest < 0 ? 'Drawing from savings' : 'Invest each month', h('small', {}, now.invest < 0 ? 'spending is more than comes in' : 'left over, once the cash buffer is full')),
           h('strong', {}, money(Math.abs(now.invest))),
           h('span', { class: `im-delta ${dInv > 0 ? 'pos' : dInv < 0 ? 'neg' : ''}` }, Math.abs(dInv) >= 1 ? `${dInv > 0 ? '+' : '−'}${money(Math.abs(dInv))}` : ''))));
   }
@@ -2630,8 +2640,8 @@
     const a = p.assumptions;
     const rows = model.proj.rows;
     const card = wkCard(body, 'Prices and tax thresholds by year', [
-      h('p', {}, `Prices rise ${a.inflation}% a year, so the price index for year t is (1 + ${a.inflation}%)^t. Values in today's money are future values divided by the price index.`),
-      h('p', {}, `Tax thresholds stay frozen until April ${a.thresholdFreezeUntil}, then rise with prices (threshold factor). Investments move from ${a.stockPctNow}% to ${a.stockPctRetire}% stocks by retirement; the expected return is the mix of ${a.stockReturn}% for stocks and ${a.bondReturn}% for bonds.`),
+      h('p', {}, `Prices rise ${a.inflation}% a year, so £100 of today’s shopping costs about ${money(Math.pow(1 + a.inflation / 100, 10) * 100)} in 10 years. “Today’s money” divides later amounts by how much prices have risen (the price index).`),
+      h('p', {}, `Tax thresholds stay frozen until April ${a.thresholdFreezeUntil}, then rise with prices (the line below shows by how much). Investments move from ${a.stockPctNow}% to ${a.stockPctRetire}% stocks by retirement; the expected return is the mix of ${a.stockReturn}% for stocks and ${a.bondReturn}% for bonds.`),
     ]);
     const c = chartIn(card, 220, 'Price index and tax threshold factor', { name: 'assumptions' });
     const xs = rows.map(r => r.year);
@@ -2660,7 +2670,7 @@
     const rows = model.proj.rows.slice(0, -1);
     const items = p.income;
     const card = wkCard(body, 'Income over time', [
-      h('p', {}, 'Each amount = today\'s amount × (1 + its growth rate)^years (inflation-linked items use the price index), × any exchange rate, minus costs. Shown before tax; flat taxes appear in Cash flow. Items stop at their end age (for salaries usually retirement).'),
+      h('p', {}, 'Each amount grows from today’s by its own yearly rise (with prices, for items linked to inflation), converted at any exchange rate, minus costs. Shown before tax; flat taxes appear in Cash flow. Items stop at their end age (for salaries usually retirement).'),
       h('p', {}, `State Pension = your forecast × price index from State Pension age. Simulations add random salary surprises (±${p.assumptions.salaryVolatility}% a year) and inflation surprises on top.`),
     ]);
     const xs = rows.map(r => r.year);
@@ -2798,11 +2808,11 @@
     const pts = b ? Math.round((r.probability - b.probability) * 100) : 0;
     return h('td', { class: 'sc-cell', style: `--gc:${cssVar(goalColor(c.goal))}` },
       h('div', { class: 'sc-top' }, h('strong', {}, pct(r.probability)),
-        b && pts ? h('span', { class: `sc-delta ${pts > 0 ? 'pos' : 'neg'}` }, `${pts > 0 ? '▲' : '▼'} ${Math.abs(pts)} pts`) : null),
+        b && pts ? h('span', { class: `sc-delta ${pts > 0 ? 'pos' : 'neg'}` }, `${pts > 0 ? '▲' : '▼'} ${Math.abs(pts)} points`) : null),
       h('div', { class: 'sc-bar', role: 'img', 'aria-label': `${pct(r.probability)} chance` }, h('span', { style: `width:${r.probability * 100}%` })),
       h('small', {}, goalWhen(r)));
   }
-  const invest = it => (it.monthly.shortfall > 0 ? `−${money(it.monthly.shortfall)}` : money(it.monthly.invest));
+  const invest = it => (it.monthly.shortfall > 0 ? `Draws ${money(it.monthly.shortfall)}` : money(it.monthly.invest));
 
   // Each scenario's goals (chance and expected year) and what it invests each month. The open
   // scenario uses the same numbers as everywhere else; the others are simulated alike.
@@ -2940,7 +2950,7 @@
       setKids(box, head, h('div', { class: 'table-wrap sc-wrap' }, h('table', { class: 'data sc-table cmp-table' },
         h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'Choice'),
           cols.map(g => h('th', { scope: 'col', style: `--gc:${cssVar(goalColor(g.goal))}` }, h('span', { class: 'heat-goal' }, goalBadge(g.goal, 'small'), h('span', {}, g.title)))),
-          h('th', { scope: 'col' }, `Savings & pensions when ${p1.name} retires`), h('th', { scope: 'col' }, 'Invest'))),
+          h('th', { scope: 'col' }, `Savings & pensions when ${p1.name} retires (${unitLabel()})`), h('th', { scope: 'col' }, 'Invest'))),
         h('tbody', {}, [base, ...opts].map(row)))),
       h('div', { class: 'add-row' },
         h('p', { class: 'hint' }, `Chance of each goal across simulated futures; ▲▼ compare with your plan as it is. Money in ${unitLabel()}.`),
@@ -3473,7 +3483,7 @@
       kids.push(h('h3', { class: 'chart-title' }, 'Goals then and now'), h('div', { class: 'table-wrap' }, table(['Goal', `${prev.year}`, `${latest.year}`, 'Change'],
         latest.goals.map(g => {
           const was = prev.goals.find(x => x.title === g.title);
-          return { cells: [g.title, was ? pct(was.probability) : '—', pct(g.probability), was ? deltaCell(Math.round(was.probability * 100), Math.round(g.probability * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} pts`) : '—'] };
+          return { cells: [g.title, was ? pct(was.probability) : '—', pct(g.probability), was ? deltaCell(Math.round(was.probability * 100), Math.round(g.probability * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} points`) : '—'] };
         }))));
     }
     setKids(box, ...kids);
@@ -4165,7 +4175,7 @@
       if (!hr || hr.over < 300) continue;
       const over = hr.over, line = payLine(p, x, hr.gross);
       add(`${lisaPeople.length ? 4 : 3}. Pension for ${x.name}`, line ? 'optional' : `up to ${money(over / 12)} a month`,
-        `${line ? `${x.name}’s pay is kept at ${money(line.value)}, ${line.why}. Even so, ` : ''}${x.name} pays ${hr.rates} tax on the top ${money(over)} of income${E.taxOf(pay[0], p) === 'uk' ? '' : ' (estimated)'}, after what already goes into pensions. Putting that into the pension gets the same relief now, and it is likely taxed at ${hr.drawn} or less when drawn. Salary sacrifice saves NI too.`,
+        `${line ? `${x.name}’s pay is kept at ${money(line.value)}, ${line.why}. Even so, ` : ''}${x.name} pays ${hr.rates} tax on the top ${money(over)} of income (everything above ${money(hr.gross - over)} of ${money(hr.gross)})${E.taxOf(pay[0], p) === 'uk' ? '' : ' (estimated)'}, after what already goes into pensions. Putting that into the pension gets the same relief now, and it is likely taxed at ${hr.drawn} or less when drawn. Salary sacrifice saves NI too.`,
         ['Compare pension or ISA', () => openComparison('pension-isa')]);
     }
     const isaRoom = s.isaAllowance * people().length;
@@ -4981,7 +4991,7 @@
         if (a.fixedUntil) {
           extra.push(field('Rate after the fix ends', optNumInput(...bind(a, 'rateAfterFix'), { placeholder: `Same (${a.rate}%)`, suffix: '%', step: 0.05, label: 'Rate after the fix ends' }),
             `Empty = the same rate.${MARKET ? ` Bank Rate is ${MARKET.series.bankRate.value}% (${MARKET.series.bankRate.date}).` : ''} Simulations also move it with inflation surprises.`));
-          extra.push(field('When the fix ends', selectInput([['payment', 'Keep the payment (end date moves)'], ['term', 'Keep the end date (payment changes)']], ...bind(a, 'afterFix'), { label: 'When the fix ends' }),
+          extra.push(field('When the fix ends', selectInput([['payment', 'Same payment, ends later'], ['term', 'Same end date, new payment']], ...bind(a, 'afterFix'), { label: 'When the fix ends' }),
             'Lenders usually reset the payment to keep the end date; keeping the payment shows how long it would take.'));
         }
       }
@@ -5398,7 +5408,7 @@
     } else if (step.id === 'children') {
       const kids = a.children;
       content = [
-        field('How many children?', h('input', { type: 'number', min: 0, max: 8, value: kids.length, 'aria-label': 'Number of children', oninput: e => {
+        field('How many children (still at home, or ones you’ll help)?', h('input', { type: 'number', min: 0, max: 8, value: kids.length, 'aria-label': 'Number of children', oninput: e => {
           const n = Math.max(0, Math.min(8, parseInt(e.target.value, 10) || 0));
           while (kids.length < n) kids.push({ name: '', age: 0 });
           kids.length = n;

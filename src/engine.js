@@ -2139,6 +2139,17 @@
         res.probability = variant ? successRate(variant, runs, seed) : mc.successRate;
         res.expectedYear = plan.startYear + (goal.age - who.age);
         res.summary = `Chance the money lasts to the end of the plan if ${who.name} retires at ${goal.age}${delta === 0 ? ' (as planned)' : ''}.`;
+        const vp = variant || plan, pr = variant ? project(variant) : proj;
+        const p1v = vp.household.people[0];
+        const short = pr.rows.findIndex((r, t) => t < pr.pre.N && r.shortfall > 0.5);
+        const last = pr.rows[pr.pre.N];
+        const gbp = v => `£${Math.round(v).toLocaleString('en-GB')}`;
+        const words = short >= 0
+          ? ` On average returns the money runs out at about ${p1v.age + short} (${pr.rows[short].year}), ${p1v.endAge - p1v.age - short} years before the plan ends.`
+          : ` On average returns it lasts to ${p1v.endAge}, with about ${gbp(last.liquid / last.deflator)} of savings and pensions left (today’s money).`;
+        const fb = !variant && mc.fundedByYear ? mc.fundedByYear.findIndex((v, t) => t > 0 && v < 0.75) : -1;
+        res.words = words + (fb > 0 && short < 0 ? ` In a bad run of markets (1 in 4 futures) it runs short from about ${p1v.age + fb}.` : '');
+        res.summary += res.words;
       }
       res.status = statusOf(res.probability);
       return res;

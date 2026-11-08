@@ -254,7 +254,13 @@ details.card[open] > summary::before { content: "▾ "; }
 .legend span { display: inline-flex; align-items: center; gap: 7px; }
 
 /* ---------- tables */
-.table-wrap { overflow-x: auto; margin-top: 12px; }
+.table-wrap { overflow-x: auto; margin-top: 12px;
+  /* A shadow at an edge with more columns past it, so a wide table says it scrolls. */
+  background: linear-gradient(to right, var(--surface) 30%, transparent), linear-gradient(to left, var(--surface) 30%, transparent) 100% 0,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.16), transparent), radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.16), transparent) 100% 0;
+  background-repeat: no-repeat; background-size: 40px 100%, 40px 100%, 12px 100%, 12px 100%; background-attachment: local, local, scroll, scroll; }
+/* The first column (the year or name) stays put while the rest scrolls sideways. */
+.table-wrap table.data th:first-child, .table-wrap table.data td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
 .table-wrap[hidden] { display: none; }
 .table-wrap.tall { max-height: 480px; overflow-y: auto; }
 table.data { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
@@ -748,7 +754,7 @@ dialog#reviewWiz::backdrop { background: rgba(0, 0, 0, 0.45); }
 .spend-option .amt small { font-weight: 400; color: var(--text-2); }
 .spend-option .txt { font-size: 0.8rem; color: var(--text-2); line-height: 1.35; }
 .rq-preview {
-  position: sticky; top: 0; display: grid; gap: 6px; padding: 14px 16px; border-radius: 14px;
+  position: sticky; top: 0; display: grid; gap: 6px; padding: 14px 16px; border-radius: 14px; min-width: 0; overflow: hidden;
   background: var(--surface-2); border: 1px solid var(--border);
 }
 .rq-facts { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 4px; font-size: 0.85rem; }
@@ -1102,10 +1108,19 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 .goal-tabs > .goal-tab[aria-selected="true"] { opacity: 1; color: #fff; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--gc); }
 .goal-tabs > .goal-tab:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
 @media (max-width: 760px) {
-  .goal-tabs { border-left: 1px solid var(--border-strong); margin-left: 4px; padding-left: 4px; }
-  .tab-group-label { display: inline; align-self: center; font-size: 0.66rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 0 4px 0 6px; }
-  .side-tabs { position: sticky; right: 0; background: var(--surface); border-left: 1px solid var(--border-strong); box-shadow: -10px 0 12px -8px rgba(0, 0, 0, 0.22); padding-left: 2px; }
+  /* On a phone: Home, Finances and Scenarios on the first row; the goals on a row of their own,
+     so no goal is hidden under the others. */
+  .tab-list { flex-wrap: wrap; overflow-x: visible; }
+  .side-tabs { margin-left: auto; }
+  .goal-tabs { order: 3; flex: 1 0 100%; flex-wrap: wrap; gap: 6px; padding: 6px 6px 8px; border-top: 1px solid var(--border); }
+  .tab-group-label { display: inline; align-self: center; font-size: 0.66rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 0 4px 0 2px; }
   .goal-tabs > button, .side-tabs > button { padding: 11px 10px; }
+  .goal-tabs > .goal-tab { padding: 5px 12px 5px 9px; }
+}
+/* On a phone the answer comes first: the goals, then the portfolio. */
+@media (max-width: 640px) {
+  #view-home:not([hidden]) { display: flex; flex-direction: column; }
+  #view-home > #ovGoalsCard { order: -1; }
 }
 
 /* ---------- Inputs: a section of its own, prediction beside the inputs */
@@ -1615,3 +1630,9 @@ body.setup-open main, body.setup-open .tabs { margin-right: 404px; }
 .scen-banner { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center; padding: 8px 16px; background: color-mix(in srgb, #e0a100 22%, var(--surface)); color: var(--text); border-bottom: 1px solid var(--border-strong); font-size: 0.9rem; }
 .scen-banner[hidden] { display: none; }
 .sc-main { display: inline-block; margin-left: 6px; font-size: 0.72rem; color: var(--muted); }
+.rq-preview > * { min-width: 0; }
+.rq-preview .table-wrap table.data th:first-child, .rq-preview .table-wrap table.data td:first-child { background: var(--surface-2); }
+.im-invest .im-name small { display: block; white-space: normal; font-size: 0.72rem; color: var(--muted); }
+/* A long name keeps its whole width: the tags move to the next line instead of cutting it off. */
+.item-head { flex-wrap: wrap; }
+.item-head input.name { flex: 1 1 22ch; min-width: 14ch; }

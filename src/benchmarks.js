@@ -274,7 +274,18 @@
     const firstGia = proj.rows.findIndex((r, t) => t < proj.pre.N && r.toGia > 100);
     const topRate = Math.max(0, ...m.people.map(x => (x.ani > 0 ? R.incomeTax(x.ani + 100, plan.household.region) - R.incomeTax(x.ani, plan.household.region) : 0)));
     const toPensions = taxOn && topRate >= 40 && !s.pensionFirst && m.working;
-    if (firstGia >= 0) {
+    const over = m.people.filter(x => x.ani > R.PA_TAPER_START);
+    if (taxOn && m.working && over.length && !s.stayUnder100k) {
+      out.push({ id: 'over100k', tone: 'warn', action: 'strategy', title: `${over.map(x => x.name).join(' and ')}: income over £100,000`,
+        text: `Between £100,000 and £125,140 the personal allowance is taken away, so that slice is taxed at over 60%${kids.length ? ', and Tax-Free Childcare (and in England the 30 free hours) stop' : ''}. “Keep income under £100,000” in Saving & investing salary sacrifices it into the pension instead, as far as the £60,000 pension allowance goes.` });
+    }
+    const saleRow = firstGia >= 0 && (proj.rows[firstGia].propSold || 0) > 0.5 ? proj.rows[firstGia] : null;
+    if (saleRow) {
+      const home = plan.accounts.find(a => (a.type === 'property' || a.type === 'asset') && a.sellYear === saleRow.year);
+      out.push({ id: 'isa-full', tone: 'tip', action: 'compare:pension-isa',
+        title: `${home ? `Selling ${home.name}` : 'A sale'} puts ${money(saleRow.propSold)} into savings in ${saleRow.year}`,
+        text: `Only ${money(allowance)} a year can go into ISAs, so most of it goes into a general investment account, where gains and dividends are taxed. Moving ${money(allowance)} a year from it into ISAs (“Bed and ISA”) shelters it over the following years.` });
+    } else if (firstGia >= 0) {
       const r = proj.rows[firstGia];
       const years = proj.rows.filter(x => x.toGia > 100).length;
       const total = proj.rows.reduce((acc, x) => acc + x.toGia, 0);

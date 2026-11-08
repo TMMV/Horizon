@@ -923,7 +923,7 @@ test.describe('Horizon app', () => {
     expect(s[1].crash).toBeGreaterThan(0);
     const rows = page.locator('#compareResults .sc-table tbody tr');
     await expect(rows).toHaveCount(2, { timeout: 30000 });
-    await expect(rows.nth(1)).toContainText('pts');   // compared with the open scenario
+    await expect(rows.nth(1)).toContainText('points');   // compared with the main plan
     await expect(page.locator('#scenarioPill')).toBeVisible();
     // Open it from the table; the pill at the top names it.
     await rows.nth(1).locator('button:has-text("Open")').click();
@@ -1132,7 +1132,7 @@ test.describe('Horizon app', () => {
     await expect(rows.nth(1)).toContainText('Lifetime ISA');
     await expect(rows.nth(2)).toContainText('Salary sacrifice');
     await expect(rows.nth(2)).toContainText('for £4,000 less take-home pay');
-    await expect(rows.nth(1)).toContainText('pts');
+    await expect(rows.nth(1)).toContainText('points');
     await expect(page.locator('#cmpResult thead')).toContainText('Savings & pensions when Alex retires');
     // Nothing is saved until asked.
     expect(await page.evaluate(() => window.__horizon.ws.scenarios.length)).toBe(1);
