@@ -1152,7 +1152,7 @@
       const at = t => (P.ee[t] + P.sacrificed[t]) / 12;
       const partly = over100kText(x, i, k);
       add(k === 0 ? 'now' : rows[k].year, `${x.name}: raise the salary sacrifice to about ${money(at(k))} a month`,
-        `From ${money(P.ee[k] / 12)}: the pay above £100,000 (about ${m(P.sacrificed[k])} a month) goes into the pension${partly ? ', bringing income down towards the line' : ', so income stays under the line'} where tax reaches over 60%.${partly} Take-home pay falls by what is sacrificed, less the tax${P.sacrificed[k] && rows[k].year < R.SACRIFICE_NI_CAP_FROM ? ' and NI' : ''} saved. Keep raising it as pay rises: about ${money(at(last))} a month by ${rows[last].year}.`,
+        `From ${money(P.ee[k] / 12)}: the pay above ${money(E.stayUnderLine(p.strategy))} (about ${m(P.sacrificed[k])} a month) goes into the pension${partly ? ', bringing income down towards the line' : ', so income stays under the line'}${E.stayUnderLine(p.strategy) < R.PA_TAPER_START ? ', where the Child Benefit charge starts' : ' where tax reaches over 60%'}. How: ask payroll to raise the salary sacrifice each time pay goes up (most allow changes at any time, or once a year).${partly} Take-home pay falls by what is sacrificed, less the tax${P.sacrificed[k] && rows[k].year < R.SACRIFICE_NI_CAP_FROM ? ' and NI' : ''} saved. Keep raising it as pay rises: about ${money(at(last))} a month by ${rows[last].year}.`,
         go('Saving & investing', 'finances/saving'));
     });
 
@@ -2224,7 +2224,7 @@
     if (ab.stockPctNow !== aa.stockPctNow || ab.stockPctRetire !== aa.stockPctRetire) out.push(`${aa.stockPctNow}% in shares now, ${aa.stockPctRetire}% at retirement (was ${ab.stockPctNow}% and ${ab.stockPctRetire}%)`);
     const onOff = (key, label) => { if (!!sb[key] !== !!sa[key]) out.push(`${label}: ${sa[key] ? 'on' : 'off'}`); };
     onOff('pensionFirst', 'Pensions before the general account');
-    onOff('stayUnder100k', 'Keep income under £100,000');
+    if (E.stayUnderLine(sb) !== E.stayUnderLine(sa)) out.push(E.stayUnderLine(sa) ? `Keep income under ${money(E.stayUnderLine(sa))}` : 'No longer keeping income under a line');
     onOff('claimRelief', 'Claim higher-rate relief');
     onOff('sweepCash', 'Invest cash above the buffer');
     if (sb.overpayPct !== sa.overpayPct) out.push(`Overpay the mortgage with ${sa.overpayPct}% of what is left (was ${sb.overpayPct}%)`);
@@ -3923,7 +3923,8 @@
   }
   // When the £60,000 annual allowance stops pay from coming under £100k: what is still over.
   function over100kText(x, i, t) {
-    const { ani, line } = aniAt(i, t);
+    const { ani } = aniAt(i, t);
+    const line = (E.stayUnderLine(plan().strategy) || R.PA_TAPER_START) * model.proj.pre.g[t];
     if (ani <= line + 100) return '';
     const g = model.proj.pre.g[t];
     return ` It only gets ${x.name} to about ${money(ani / g)} of income (today’s thresholds): the ${money(R.PENSION_ANNUAL_ALLOWANCE)} annual allowance caps what can go into a pension. Unused allowance from the last 3 years can be carried forward for a year or two (not in the plan).`;
@@ -4159,7 +4160,8 @@
           h('span', { class: 'hint' }, s.giaMonthly !== null ? 'Off while the general account has a set amount.'
             : 'What is left goes into the pension of whoever pays the highest rate of tax and is still working (within the £60,000 annual allowance and their pay), then the general account. It can be drawn from the minimum pension age, a quarter tax-free; skipped for anyone retiring before then.')),
         p.household.ignoreTax ? null : h('div', { class: 'field' }, h('span', {}, 'Above £100,000'),
-          switchInput('Keep income under £100,000', ...bind(s, 'stayUnder100k'), { rerender: 'saving' }),
+          selectInput([['0', 'No'], ['60000', 'Keep income under £60,000 (Child Benefit)'], ['100000', 'Keep income under £100,000']],
+            () => String(E.stayUnderLine(s)), v => { s.stayUnderLine = +v; s.stayUnder100k = +v === 100000; }, { rerender: 'saving', label: 'Keep income under a line' }),
           flow('sacrificed'),
           h('span', { class: 'hint' }, 'Pay that would take someone over £100,000 is salary sacrificed into their pension instead (within the £60,000 annual allowance), where it would otherwise be taxed at over 60%. Over £100,000 Tax-Free Childcare stops and, in England, so do the 30 hours of free childcare. Needs an employer that offers salary sacrifice; take-home pay falls by what is sacrificed, less the tax saved.')),
         autoOrSet('giaMonthly', 'General investment account', s.pensionFirst ? 'Automatic: whatever is left once the ISAs and pensions are full.' : 'Automatic: whatever is left once the ISAs are full.'),
@@ -4215,7 +4217,7 @@
       const r = k >= 0 ? rows[k] : null;
       const sk = rows.findIndex(x => (x.sacrificed || 0) > 0.5);
       const sr = sk >= 0 ? rows[sk] : null;
-      set('sacrificed', !plan().strategy.stayUnder100k ? '' : !sr ? 'Nobody’s income reaches £100,000 in the plan.'
+      set('sacrificed', !E.stayUnderLine(plan().strategy) ? '' : !sr ? `Nobody’s income reaches ${money(E.stayUnderLine(plan().strategy))} in the plan.`
         : `${sk === 0 ? 'This year' : `From ${sr.year}`}: about ${money(sr.sacrificed / 12 / (real() ? sr.deflator : 1))} a month more into pensions${sk && real() ? ' (today’s money)' : ''}, rising with pay.${people().map((x, i) => over100kText(x, i, sk)).join('')}`);
       set('toPension', !plan().strategy.pensionFirst ? '' : !r ? 'Nothing goes this way in the plan: the ISAs take it all.'
         : `${k === 0 ? 'This year' : `From ${r.year}`}: about ${money(r.toPension / 12 / (real() ? r.deflator : 1))} a month from what is left${k ? (real() ? ' (today’s money)' : '') : ''}, with tax relief on top.`);
@@ -5824,12 +5826,12 @@
     if (taxOn && working.length && highEarner) out.push({
       id: 'under100k', title: 'Would you salary sacrifice pay above £100,000 into your pension?',
       why: 'Between £100,000 and £125,140 the personal allowance is taken away, so that pay is taxed at over 60% (69.5% in Scotland, with NI), Tax-Free Childcare stops and, in England, the 30 hours of free childcare too. Sacrificing it into the pension keeps nearly all of it, up to the £60,000 a year that can go into a pension.',
-      current: p.strategy.stayUnder100k ? 'yes' : null,
+      current: E.stayUnderLine(p.strategy) === 100000 ? 'yes' : null,
       options: [
         { value: 'yes', label: 'Yes, stay under £100,000', text: ani.some(a => a.ani > R.PA_TAPER_START + R.PENSION_ANNUAL_ALLOWANCE) ? 'The plan raises the sacrifice each year, as far as the £60,000 pension allowance goes: with income this high it brings it down but not under the line.' : 'The plan raises the sacrifice each year so income stays just under the line.', recommended: true },
         { value: 'no', label: 'No', text: 'The pay is taken as salary and taxed.' },
       ],
-      apply: (q, v) => { q.strategy.stayUnder100k = v === 'yes'; },
+      apply: (q, v) => { q.strategy.stayUnder100k = v === 'yes'; q.strategy.stayUnderLine = v === 'yes' ? 100000 : 0; },
     });
     const giaLater = proj.rows.some((r, t) => t < proj.pre.N && r.toGia > 100);
     const topRate = Math.max(0, ...ani.map(a => (a.ani > 0 ? R.incomeTax(a.ani + 100, p.household.region) - R.incomeTax(a.ani, p.household.region) : 0)));

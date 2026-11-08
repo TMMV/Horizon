@@ -252,7 +252,7 @@
 
     // 4b. Pay rises that carry someone over the £100k line later (it rises with the other thresholds
     // after the freeze, as the plan assumes). Not when the plan already sacrifices the rest.
-    if (taxOn && !s.stayUnder100k) {
+    if (taxOn && !(s.stayUnderLine > 0 || s.stayUnder100k)) {
       plan.household.people.forEach((x, i) => {
         const P = proj.pre.people[i], ani = m.people[i].ani;
         if (!(P.gross[0] + P.netPay[0] > 0) || ani >= R.PA_TAPER_START || ani < R.PA_TAPER_START * 0.6) return;
@@ -288,7 +288,7 @@
       }
     }
     const over = m.people.filter(x => x.ani > R.PA_TAPER_START);
-    if (taxOn && m.working && over.length && !s.stayUnder100k) {
+    if (taxOn && m.working && over.length && !(s.stayUnderLine > 0 || s.stayUnder100k)) {
       out.push({ id: 'over100k', tone: 'warn', action: 'strategy', title: `${over.map(x => x.name).join(' and ')}: income over £100,000`,
         text: `Between £100,000 and £125,140 the personal allowance is taken away, so that slice is taxed at over 60%${kids.length ? ', and Tax-Free Childcare (and in England the 30 free hours) stop' : ''}. “Keep income under £100,000” in Saving & investing salary sacrifices it into the pension instead, as far as the £60,000 pension allowance goes.` });
     }

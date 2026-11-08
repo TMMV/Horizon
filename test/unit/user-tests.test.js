@@ -490,3 +490,20 @@ test('equity release: a lump sum from the home, rolled-up interest repaid from t
   const end = big.rows.length - 1;
   assert.ok(big.out.debts.find(d => d.id === 'home:release').bal[end] <= big.rows[end].property + 1);
 });
+
+test('keep income under £60,000: the pay above it is sacrificed as pay rises', () => {
+  const plan = line => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Iain', age: 40, retireAge: 60 }] },
+    accounts: [{ id: 'pen', type: 'pension', owner: 'p1', balance: 50000 }],
+    income: [{ name: 'Pay', kind: 'salary', owner: 'p1', tax: 'uk', amount: 90000, freq: 'year', growth: 3, pensionMode: 'fixed', employeePension: 2500, employerPension: 100, sacrifice: true }],
+    expenses: [{ name: 'Living', amount: 2500, freq: 'month' }], events: [], goals: [],
+    strategy: { stayUnderLine: line },
+  });
+  const off = E.precompute(plan(0)).people[0], on = E.precompute(plan(60000)).people[0];
+  assert.ok(off.taxable[5] > 64000, `drifts up without it: ${off.taxable[5]}`);
+  near(on.taxable[5], 60000, 1);                       // thresholds frozen to 2031: £60,000
+  assert.ok(on.contrib[5] > off.contrib[5] + 4000);    // the extra goes into the pension
+  // The older switch still means £100,000.
+  assert.equal(E.stayUnderLine({ stayUnder100k: true, stayUnderLine: 0 }), 100000);
+});

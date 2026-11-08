@@ -1179,7 +1179,7 @@ test.describe('Horizon app', () => {
     await sw.uncheck();
     await settle(page);
     // Keep income under £100,000: nobody in the example gets there.
-    await page.locator('#sec-saving label.switch', { hasText: 'Keep income under £100,000' }).locator('input').check();
+    await page.locator('#sec-saving select[aria-label="Keep income under a line"]').selectOption('100000');
     await expect(page.locator('#sec-saving [data-flow="sacrificed"]')).toContainText('Nobody’s income reaches £100,000');
     expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.strategy.stayUnder100k)).toBe(true);
     await tab(page, 'scenarios');

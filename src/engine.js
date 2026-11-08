@@ -119,6 +119,10 @@
       // Salary sacrifice whatever would take someone's income over £100,000 (where the personal
       // allowance starts to go), into their pension, within the annual allowance.
       stayUnder100k: false,
+      // Keep income under a line by salary sacrificing the pay above it: 0 = off, 60000 (the
+      // Child Benefit charge starts) or 100000 (the personal allowance starts to go). An older
+      // plan with stayUnder100k on means 100000.
+      stayUnderLine: 0,
       // Your own amounts a month (today's money); null = automatic (everything left, in order).
       // Whatever your amounts leave over stays in cash.
       isaMonthly: null,
@@ -909,6 +913,9 @@
     return item.bonus * g * (item.fx || 1) * swing;
   }
 
+  // The income line pay is kept under by salary sacrifice (0 = none).
+  const stayUnderLine = s => (s.stayUnderLine > 0 ? s.stayUnderLine : s.stayUnder100k ? R.PA_TAPER_START : 0);
+
   // How an income stream is taxed, after the household-wide switch.
   const taxOf = (item, plan) => (plan.household.ignoreTax && item.tax === 'uk' ? 'none' : item.tax);
 
@@ -1186,13 +1193,14 @@
           P.extraOut[t] = p.extraPension * 12 * price;
           P.extraPot[t] = P.extraOut[t] / (1 - BASIC_RELIEF);
         }
-        // Stay under £100,000: sacrifice the pay above it (take-home pay falls by what that pay would
-        // have left after tax, and NI while sacrifice still saves it).
-        if (s.stayUnder100k && !household.ignoreTax && age < p.retireAge) {
+        // Stay under a line (£60,000 or £100,000): sacrifice the pay above it (take-home pay falls by
+        // what that pay would have left after tax, and NI while sacrifice still saves it).
+        const line = stayUnderLine(s);
+        if (line > 0 && !household.ignoreTax && age < p.retireAge) {
           const fromNet = grossUp(P.netPay[t]);
           const ani = P.gross[t] - P.employee[t] + P.other[t] + P.statePension[t] + fromNet - P.extraPot[t];
           const room = Math.max(0, R.PENSION_ANNUAL_ALLOWANCE - P.contrib[t] - P.extraPot[t]);
-          const E = Math.min(room, Math.max(0, ani - R.PA_TAPER_START * g));
+          const E = Math.min(room, Math.max(0, ani - line * g));
           const niSaved = plan.startYear + t < R.SACRIFICE_NI_CAP_FROM;
           if (E > 0.5 && P.netPay[t] > 0 && fromNet >= E) {
             const taxCut = T.incomeTax(fromNet, household.region, g) - T.incomeTax(fromNet - E, household.region, g);
@@ -2686,7 +2694,7 @@
 
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
-    incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
+    incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     streamAt, streamWindow, isActive, growthFactor, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
