@@ -1139,8 +1139,9 @@
       if (k < 0) return;
       const last = Math.min(N - 1, x.retireAge - x.age - 1);
       const at = t => (P.ee[t] + P.sacrificed[t]) / 12;
+      const partly = over100kText(x, i, k);
       add(k === 0 ? 'now' : rows[k].year, `${x.name}: raise the salary sacrifice to about ${money(at(k))} a month`,
-        `From ${money(P.ee[k] / 12)}: the pay above £100,000 (about ${m(P.sacrificed[k])} a month) goes into the pension, so income stays under the line where tax reaches over 60%. Keep raising it as pay rises: about ${money(at(last))} a month by ${rows[last].year}.`,
+        `From ${money(P.ee[k] / 12)}: the pay above £100,000 (about ${m(P.sacrificed[k])} a month) goes into the pension${partly ? ', bringing income down towards the line' : ', so income stays under the line'} where tax reaches over 60%.${partly} Take-home pay falls by what is sacrificed, less the tax${P.sacrificed[k] && rows[k].year < R.SACRIFICE_NI_CAP_FROM ? ' and NI' : ''} saved. Keep raising it as pay rises: about ${money(at(last))} a month by ${rows[last].year}.`,
         go('Saving & investing', 'finances/saving'));
     });
 
@@ -1180,7 +1181,12 @@
       `${budgets.map(r => `${money(r.yearly)} for ${r.name.toLowerCase()}`).join(', ')} this year, in ${[...new Set(budgets.map(r => accountName(r.accountId) || 'an account'))].join(' and ')}. The plan counts it as spent; what is left can be kept for the year after or freed up to invest.`, ['Start review', () => openReview()]);
     for (const r of pots) {
       const where = accountName(r.accountId) || 'an account';
-      if (r.kind === 'emergency') add('now', `Keep ${money(r.amount)} in ${where} as the emergency fund`, 'Marked on Home as set aside: not for spending or investing. It rises with prices.', go('Set aside', 'finances/saving'));
+      if (r.kind === 'emergency') {
+        const acc = p.accounts.find(a => a.id === r.accountId);
+        const has = acc ? (model.est && model.est.byId[acc.id] !== undefined ? model.est.byId[acc.id] : acc.balance) : r.amount;
+        add('now', has + 0.5 < r.amount ? `Build the emergency fund in ${where} to ${money(r.amount)}` : `Keep ${money(r.amount)} in ${where} as the emergency fund`,
+          `${has + 0.5 < r.amount ? `It holds about ${money(has)} now, so ${money(r.amount - has)} is still to put aside. ` : ''}Marked on Home as set aside: not for spending or investing. It rises with prices.`, go('Set aside', 'finances/saving'));
+      }
       else if (r.kind === 'saving' && r.dueYear) {
         const spare = Math.max(0, mp.surplus || 0);
         const needs = pots.filter(x => x.kind === 'saving' && x.dueYear).reduce((acc, x) => acc + x.perYear / 12, 0);
@@ -2284,8 +2290,8 @@
     gw.timer = setTimeout(() => {
       const { p, g } = draftPlan(false);
       const proj = E.project(p);
-      const mc = E.monteCarlo(p, EXPLORE_RUNS, ws.settings.seed);
-      const res = E.evaluateGoals(p, proj, mc, { runs: EXPLORE_RUNS, seed: ws.settings.seed }).find(x => x.goal.id === g.id);
+      const mc = E.monteCarlo(p, ws.settings.runs, ws.settings.seed);
+      const res = E.evaluateGoals(p, proj, mc, { runs: 500, seed: ws.settings.seed }).find(x => x.goal.id === g.id);
       const st = goalStatus(res.probability);
       setKids(box, h('div', { class: 'goal-figure' }, h('span', { class: 'goal-pct big' }, pct(res.probability)), badge(st)),
         h('p', {}, `${res.title}. ${res.summary}`));
@@ -3797,6 +3803,21 @@
   // A person's income for tax this year as the projection has it: pay after salary sacrifice and
   // pension contributions, other taxable income, take-home pay grossed up, less personal pension
   // contributions. The figure the tax bands, the £100k line and the Child Benefit charge use.
+  // Adjusted net income in year t, as the projection has it (after salary sacrifice, including
+  // what "Keep income under £100,000" sacrifices), in that year's pounds; and the £100k line then.
+  function aniAt(i, t) {
+    const pre = model.proj.pre, P = pre.people[i], g = pre.g[t];
+    const fromNet = P.netPay[t] > 0 ? R.grossFromTakeHome(P.netPay[t] / g, plan().household.region) * g : 0;
+    return { ani: Math.max(0, P.taxable[t] + fromNet - (P.extraPot[t] || 0)), line: R.PA_TAPER_START * g };
+  }
+  // When the £60,000 annual allowance stops pay from coming under £100k: what is still over.
+  function over100kText(x, i, t) {
+    const { ani, line } = aniAt(i, t);
+    if (ani <= line + 100) return '';
+    const g = model.proj.pre.g[t];
+    return ` It only gets ${x.name} to about ${money(ani / g)} of income (today’s thresholds): the ${money(R.PENSION_ANNUAL_ALLOWANCE)} annual allowance caps what can go into a pension. Unused allowance from the last 3 years can be carried forward for a year or two (not in the plan).`;
+  }
+
   function incomeForTax(p, x) {
     const P = model && model.proj && model.proj.pre.people[E.personIndex(p, x.id)];
     if (!P) return 0;
@@ -4017,7 +4038,7 @@
         p.household.ignoreTax ? null : h('div', { class: 'field' }, h('span', {}, 'Above £100,000'),
           switchInput('Keep income under £100,000', ...bind(s, 'stayUnder100k'), { rerender: 'saving' }),
           flow('sacrificed'),
-          h('span', { class: 'hint' }, 'Pay that would take someone over £100,000 is salary sacrificed into their pension instead (within the £60,000 annual allowance), where it would otherwise be taxed at over 60% and Tax-Free Childcare would stop. Needs an employer that offers salary sacrifice.')),
+          h('span', { class: 'hint' }, 'Pay that would take someone over £100,000 is salary sacrificed into their pension instead (within the £60,000 annual allowance), where it would otherwise be taxed at over 60%. Over £100,000 Tax-Free Childcare stops and, in England, so do the 30 hours of free childcare. Needs an employer that offers salary sacrifice; take-home pay falls by what is sacrificed, less the tax saved.')),
         autoOrSet('giaMonthly', 'General investment account', s.pensionFirst ? 'Automatic: whatever is left once the ISAs and pensions are full.' : 'Automatic: whatever is left once the ISAs are full.'),
         people().map(x => field(`Extra into ${x.name}’s pension`, moneyInput(...bind(x, 'extraPension'), { label: `Extra pension for ${x.name} a month` }),
           'From take-home pay until retirement; 20% tax relief is added, and higher-rate relief is claimed back. Salary sacrifice (on the salary in Income) saves NI too.'))),
@@ -4072,7 +4093,7 @@
       const sk = rows.findIndex(x => (x.sacrificed || 0) > 0.5);
       const sr = sk >= 0 ? rows[sk] : null;
       set('sacrificed', !plan().strategy.stayUnder100k ? '' : !sr ? 'Nobody’s income reaches £100,000 in the plan.'
-        : `${sk === 0 ? 'This year' : `From ${sr.year}`}: about ${money(sr.sacrificed / 12 / (real() ? sr.deflator : 1))} a month more into pensions${sk && real() ? ' (today’s money)' : ''}, rising with pay.`);
+        : `${sk === 0 ? 'This year' : `From ${sr.year}`}: about ${money(sr.sacrificed / 12 / (real() ? sr.deflator : 1))} a month more into pensions${sk && real() ? ' (today’s money)' : ''}, rising with pay.${people().map((x, i) => over100kText(x, i, sk)).join('')}`);
       set('toPension', !plan().strategy.pensionFirst ? '' : !r ? 'Nothing goes this way in the plan: the ISAs take it all.'
         : `${k === 0 ? 'This year' : `From ${r.year}`}: about ${money(r.toPension / 12 / (real() ? r.deflator : 1))} a month from what is left${k ? (real() ? ' (today’s money)' : '') : ''}, with tax relief on top.`);
     }
@@ -4092,9 +4113,11 @@
       add('1. Emergency fund', em.short > 0.5 ? `${money(em.short)} short` : 'Covered',
         em.short > 0.5 ? `Your goal is ${em.months} months of spending and mortgage payments (${money(em.need)}) in ${what}. Build that before investing more.` : `Your ${what} cover${em.investments ? '' : 's'} the ${em.months} months your emergency-fund goal asks for (${money(em.need)}).`);
     } else {
-      const months = monthlyOut > 0 ? s.cashReserve / monthlyOut : 0;
+      const held = r0.cash + (r0.cashIsa || 0);
+      const months = monthlyOut > 0 ? held / monthlyOut : 0;
+      const buffer = monthlyOut > 0 ? ` The plan keeps at least ${money(s.cashReserve)} (${(s.cashReserve / monthlyOut).toFixed(1)} months) as a buffer before investing.` : '';
       add('1. Emergency fund', months >= 3 ? `${months.toFixed(1)} months` : `${money(3 * monthlyOut)}–${money(6 * monthlyOut)}`,
-        months >= 3 ? `Your cash buffer covers ${months.toFixed(1)} months of spending and mortgage payments (3–6 is the usual guide).` : `Keep 3–6 months of spending in easy-access cash before investing. Yours covers ${months.toFixed(1)} months.`,
+        months >= 3 ? `Your cash (${money(held)}) covers ${months.toFixed(1)} months of spending and mortgage payments (3–6 is the usual guide).${buffer}` : `Keep 3–6 months of spending in easy-access cash before investing. Your cash (${money(held)}) covers ${months.toFixed(1)} months.${buffer}`,
         months >= 3 ? null : ['Set the buffer', () => { s.cashReserve = Math.round(3 * monthlyOut / 100) * 100; renderSection('strategy'); schedule(); }]);
     }
     add('2. Workplace pension match', 'In full', 'Pay at least what your employer matches: their contribution is free money. Check your payslip or scheme rules.');
@@ -4197,6 +4220,10 @@
       const v = model.est.byId[el.dataset.est];
       const a = plan().accounts.find(x => x.id === el.dataset.est);
       el.textContent = a && notYet(a, model.est.years || 0) ? `buying in ${a.buyYear}` : v === undefined ? '' : `≈ ${money(v)} today`;
+    }    // A loan's payoff year follows the balance, rate and payment as they are typed.
+    for (const el of $$('[data-payoff]')) {
+      const a = plan().accounts.find(x => x.id === el.dataset.payoff);
+      if (a) el.textContent = payoffText(a);
     }
   }
 
@@ -4818,6 +4845,21 @@
   }
   const noteText = item => (item.note ? `“${item.note.length > 60 ? `${item.note.slice(0, 57)}…` : item.note}”` : null);
 
+  // When a loan is paid off at its payment and today's rate, and whether that fits the years left.
+  function payoffText(a) {
+    if (!(a.balance > 0) || !(a.payment > 0)) return '';
+    const i = a.rate / 100 / 12, m = a.payment;
+    if (m <= a.balance * i) return 'This payment doesn’t cover the interest, so the loan never ends.';
+    const months = i > 0 ? -Math.log(1 - (i * a.balance) / m) / Math.log(1 + i) : a.balance / m;
+    const end = Math.round(plan().startYear + months / 12);
+    let out = `At this payment it’s paid off in about ${end} (${Math.round(months / 12)} years, at ${a.rate}%).`;
+    if (a.termYears > 0 && Math.abs(months / 12 - a.termYears) >= 1.5) {
+      const n = a.termYears * 12, need = i > 0 ? (a.balance * i) / (1 - Math.pow(1 + i, -n)) : a.balance / n;
+      out += ` To clear it in ${a.termYears} years the payment would be about ${money(need)} a month: check the balance, rate and payment on the statement.`;
+    }
+    return out;
+  }
+
   function renderAccounts() {
     const p = plan();
     const items = p.accounts.map(a => {
@@ -4842,6 +4884,12 @@
         }
         extra.push(h('p', { class: 'hint' }, `Withdrawals before 60 for anything else lose 25%, so the plan only uses it that way as a last resort. It counts within the ${money(R.ISA_ALLOWANCE)} ISA allowance and must be opened before 40.`));
       }
+      if (a.type === 'pension') extra.push(h('div', { class: 'field' }, h('span', {}, 'Inherited'),
+        switchInput('Inherited from someone who died before 75', ...bind(a, 'inherited'), { rerender: 'accounts' }),
+        h('span', { class: 'hint' }, a.inherited ? 'Tax-free to take out, at any age, so the plan draws it before taxed pension and ISAs. (If they died at 75 or over, leave this off: it is taxed as your income.)' : 'A pension left to you by someone who died before 75 is tax-free to draw.')));
+      if (a.type === 'isa') main.push(field('Held as', selectInput([['invested', 'Stocks & shares (invested)'], ['cash', 'Cash ISA']], ...bind(a, 'holding'), { rerender: 'accounts', label: 'Held as' }),
+        a.holding === 'cash' ? 'Earns the cash rate, doesn’t fall, and counts as cash for an emergency fund.' : 'Grows with your investment mix; it can fall in a bad year.'));
+      if (a.type === 'cash') extra.push(h('p', { class: 'hint' }, 'Premium Bonds go here too: no interest, but prizes average about the cash rate, tax-free, and you can take the money out within days.'));
       if (a.type === 'gia') extra.push(field('Amount you paid in', moneyInput(...bind(a, 'basis')), 'Used to work out capital gains.'));
       if (a.type === 'bonds') {
         main.push(field('Interest', numInput(...bind(a, 'rate'), { step: 0.05, suffix: '%' })));
@@ -4883,7 +4931,8 @@
       }
       if (a.type === 'debt') {
         main.push(field('Interest rate', numInput(...bind(a, 'rate'), { step: 0.05, suffix: '%' })));
-        main.push(field('Monthly payment', moneyInput(...bind(a, 'payment'))));
+        main.push(field('Monthly payment', moneyInput(...bind(a, 'payment')), h('span', { 'data-payoff': a.id }, payoffText(a))));
+        extra.push(field('Years left on the loan', numInput(...bind(a, 'termYears'), { min: 0, max: 40, label: 'Years left on the loan', rerender: 'accounts' }), '0 = not sure. From the statement; checked against the payment.'));
         extra.push(field('Rate fixed until', numInput(...bind(a, 'fixedUntil'), { min: 0, max: 2100, rerender: 'accounts' }), '0 = fixed for good. The new rate applies from the following year.'));
         const buy = p.accounts.find(x => x.type === 'property' && x.buyYear >= p.startYear);
         extra.push(field('Written off in', numInput(...bind(a, 'forgiveYear'), { min: 0, max: 2100, label: 'Year the loan is written off' }),
@@ -5551,10 +5600,10 @@
     const highEarner = ani.some(a => a.ani > 70000) || p.strategy.stayUnder100k;
     if (taxOn && working.length && highEarner) out.push({
       id: 'under100k', title: 'Would you salary sacrifice pay above £100,000 into your pension?',
-      why: 'Between £100,000 and £125,140 the personal allowance is taken away, so that pay is taxed at over 60% (69.5% in Scotland, with NI) and Tax-Free Childcare stops. Sacrificing it into the pension keeps nearly all of it.',
+      why: 'Between £100,000 and £125,140 the personal allowance is taken away, so that pay is taxed at over 60% (69.5% in Scotland, with NI), Tax-Free Childcare stops and, in England, the 30 hours of free childcare too. Sacrificing it into the pension keeps nearly all of it, up to the £60,000 a year that can go into a pension.',
       current: p.strategy.stayUnder100k ? 'yes' : null,
       options: [
-        { value: 'yes', label: 'Yes, stay under £100,000', text: 'The plan raises the sacrifice each year so income stays just under the line.', recommended: true },
+        { value: 'yes', label: 'Yes, stay under £100,000', text: ani.some(a => a.ani > R.PA_TAPER_START + R.PENSION_ANNUAL_ALLOWANCE) ? 'The plan raises the sacrifice each year, as far as the £60,000 pension allowance goes: with income this high it brings it down but not under the line.' : 'The plan raises the sacrifice each year so income stays just under the line.', recommended: true },
         { value: 'no', label: 'No', text: 'The pay is taken as salary and taxed.' },
       ],
       apply: (q, v) => { q.strategy.stayUnder100k = v === 'yes'; },
@@ -5576,9 +5625,22 @@
       const sp = Math.max(...ps.map(x => E.spStart(x) - x.age));
       const k = Math.min(proj.pre.N - 1, Math.max(1, sp));
       const cover = proj.rows[k] && proj.rows[k].spending > 0 ? proj.rows[k].nonWork / proj.rows[k].spending : 0;
-      const mixes = { growth: [100, 80], balanced: [100, 60], cautious: [70, 40] };
+      // Already retired: one mix for the money being drawn, more careful than while working.
+      const retired = ps.every(x => x.retireAge <= x.age);
+      const mixes = retired ? { more: [80, 80], middle: [60, 60], careful: [40, 40] } : { growth: [100, 80], balanced: [100, 60], cautious: [70, 40] };
       const cur = Object.keys(mixes).find(m => mixes[m][0] === a.stockPctNow && mixes[m][1] === a.stockPctRetire) || null;
-      out.push({
+      if (retired) out.push({
+        id: 'mix', title: 'How much of your investments should be in shares?',
+        why: `Shares grow more over long periods but can fall by a third in a bad year, and money being drawn can’t wait years to recover. Retired, most people keep around half in shares and the rest in bonds, gilts or cash.${cover >= 0.8 ? ` Your pensions and other income cover about ${Math.round(cover * 100)}% of your spending, so your savings can take a little more risk.` : ''}`,
+        current: cur,
+        options: [
+          { value: 'more', label: '80% in shares', text: 'More growth, for money you won’t need for 10 years or more.', recommended: cover >= 1 },
+          { value: 'middle', label: '60% in shares', text: 'The common middle way in retirement.', recommended: cover < 1 },
+          { value: 'careful', label: '40% in shares', text: 'Smaller falls, slower growth.' },
+        ],
+        apply: (q, v) => { if (mixes[v]) [q.assumptions.stockPctNow, q.assumptions.stockPctRetire] = mixes[v]; },
+      });
+      else out.push({
         id: 'mix', title: 'How much of your investments should be in shares?',
         why: `Shares grow more over long periods but can fall by a third in a bad year; bonds and gilts move less. The usual approach is mostly shares while retirement is far off, then more bonds as it nears.${cover >= 0.8 ? ` From ${proj.rows[k].year} your pensions and other income cover about ${Math.round(Math.min(1, cover) * 100)}% of spending, so you can afford more in shares than most.` : ''}`,
         current: cur,
@@ -5634,7 +5696,7 @@
         id: 'reserve-emergency', title: 'Where do you keep your emergency fund?',
         why: `Money for the unexpected (losing a job, a boiler, the car): usually 3–6 months of spending, in easy-access cash. The plan keeps the cash buffer (${money(p.strategy.cashReserve)}) aside; Home then marks it as set aside in that account, so you know it is not for spending or investing.`,
         current: em ? em.accountId || null : null,
-        options: holders.map(a => ({ value: a.id, label: a.name, text: a.type === 'cash' ? 'Reachable at once, and it doesn’t fall.' : 'Invested: it can fall just when it is needed, and takes a few days to sell.', recommended: a === firstCash }))
+        options: holders.map(a => ({ value: a.id, label: a.name, text: a.type === 'cash' || a.holding === 'cash' ? 'Reachable at once, and it doesn’t fall.' : 'Invested: it can fall just when it is needed, and takes a few days to sell.', recommended: a === firstCash }))
           .concat([{ value: 'none', label: 'I don’t keep one', text: 'Worth building one before investing more.' }]),
         apply: (q, v) => setReserve(q, r => r.kind === 'emergency', v, { kind: 'emergency', name: 'Emergency fund' }),
       });

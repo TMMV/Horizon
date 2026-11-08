@@ -326,3 +326,46 @@ test('a big pension is drawn at the basic rate before ISAs; a small one is not h
   near(small.persons[0].taxable, 12570, 2);
   assert.ok(small.wIsa > 40000);
 });
+
+test('a cash ISA earns the cash rate and counts as cash for an emergency fund', () => {
+  const plan = holding => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Eileen', age: 72, retireAge: 60, statePensionAge: 66 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 4000 }, { id: 'ci', type: 'isa', owner: 'p1', balance: 38000, holding }],
+    income: [{ name: 'State Pension', kind: 'other', owner: 'p1', tax: 'uk', amount: 30000, freq: 'year' }],
+    expenses: [{ name: 'Living', amount: 1600, freq: 'month' }], events: [],
+    goals: [{ id: 'ef', type: 'emergency', months: 6, counts: 'cash', year: 2027, confidence: 80 }],
+  });
+  const cashIsa = E.project(plan('cash')), invested = E.project(plan('invested'));
+  const cr = plan('cash').assumptions.cashRate / 100;
+  near(cashIsa.rows[0].gIsa, 38000 * cr, 0.5);   // the year's growth: the cash rate
+  assert.notEqual(Math.round(invested.rows[0].gIsa), Math.round(cashIsa.rows[0].gIsa));
+  assert.equal(cashIsa.rows[0].cashIsa, 38000);
+  // Six months of spending (£9,600) is covered by the cash ISA, not by £4,000 in the bank alone.
+  const g = plan('cash').goals[0];
+  assert.ok(E.emergencyHave(g, cashIsa.rows[0]) >= 42000 - 1);
+  assert.equal(E.emergencyHave(g, invested.rows[0]), 4000);
+});
+
+test('a pension inherited from someone who died before 75 is drawn tax-free, at any age', () => {
+  const plan = inherited => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Eileen', age: 52, retireAge: 50, statePensionAge: 67 }] },
+    accounts: [{ id: 'pot', type: 'pension', owner: 'p1', balance: 85000, inherited }, { id: 'isa', type: 'isa', owner: 'p1', balance: 50000 }],
+    income: [{ name: 'Survivor pension', kind: 'other', owner: 'p1', tax: 'uk', amount: 20000, freq: 'year' }],
+    expenses: [{ name: 'Living', amount: 2000, freq: 'month' }], events: [], goals: [],
+  });
+  const r = E.project(plan(true)).rows[0];
+  // At 52 (before the minimum pension age) it is drawn, with no tax, before the ISA.
+  assert.ok(r.wPension > 5000, `drawn ${r.wPension}`);
+  near(r.withdrawTax, 0, 0.01);
+  near(r.wIsa, 0, 0.01);
+  // Her own pension (not inherited) can't be touched until 57: the ISA pays.
+  const own = E.project(plan(false)).rows[0];
+  near(own.wPension, 0, 0.01);
+  assert.ok(own.wIsa > 5000);
+  // Looking ahead it is its own account.
+  const RV = require('../../src/review');
+  const p = plan(true), pr = E.project(p);
+  near(RV.expectedBalances(p, 3, pr).byId.pot, pr.out.byAccount.pot[3], 1);
+});

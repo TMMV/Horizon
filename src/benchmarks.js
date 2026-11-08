@@ -189,10 +189,10 @@
         text: `Your emergency-fund goal counts ISAs and investments (${ef.months} months is ${money(monthlyOut * ef.months)}). Cash alone covers ${(r0.cash / monthlyOut).toFixed(1)} months; investments can be down when you need them, which the goal's chance allows for.`,
       });
     } else if (monthlyOut > 0) {
-      const months = r0.cash / monthlyOut;
+      const months = (r0.cash + (r0.cashIsa || 0)) / monthlyOut;
       const bufMonths = s.cashReserve / monthlyOut;
       if (months < 3) {
-        out.push({ id: 'buffer', tone: 'warn', title: `Cash covers ${months.toFixed(1)} months of spending`, text: `A common aim is 3–6 months of spending and mortgage payments (${money(monthlyOut * 3)}–${money(monthlyOut * 6)}) in easy-access savings. An emergency fund goal tracks it.`, action: plan.goals.some(g => g.type === 'emergency') ? 'strategy' : 'emergency' });
+        out.push({ id: 'buffer', tone: 'warn', title: `Your cash covers ${months.toFixed(1)} months of spending`, text: `A common aim is 3–6 months of spending and mortgage payments (${money(monthlyOut * 3)}–${money(monthlyOut * 6)}) in easy-access savings. An emergency fund goal tracks it.`, action: plan.goals.some(g => g.type === 'emergency') ? 'strategy' : 'emergency' });
       } else if (!s.sweepCash && months > 12) {
         out.push({ id: 'buffer', tone: 'tip', title: `Cash covers ${Math.round(months)} months of spending`, text: 'Beyond 6 months or so, cash tends to lose ground to inflation. Turning on “Invest cash above the buffer” would put the rest to work.', action: 'strategy' });
       } else {

@@ -133,7 +133,9 @@
         const pot = i => persons[i].pension[k] + (persons[i].pension[k + 1] - persons[i].pension[k]) * x;
         const owned = i => counted.filter(a => E.personIndex(plan, a.owner) === i);
         persons.forEach((_, i) => {
-          const list = owned(i), sum = list.reduce((s, a) => s + a.balance, 0);
+          // An inherited pension is followed on its own; the rest share the person's own pot.
+          for (const a of owned(i)) { const v = ownValue(proj, a.id, k, x); if (v !== null) out[a.id] = Math.max(0, v); }
+          const list = owned(i).filter(a => out[a.id] === undefined), sum = list.reduce((s, a) => s + a.balance, 0);
           for (const a of list) out[a.id] = Math.max(0, pot(i) * (sum > 0 ? a.balance / sum : 1 / list.length));
         });
         continue;

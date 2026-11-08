@@ -341,11 +341,15 @@
         maturityYear: Math.round(num(a.maturityYear, 0)),
         sellYear: Math.round(num(a.sellYear, 0)),
         fixedUntil: Math.round(num(a.fixedUntil, 0)),
+        // Years left on a loan, from the statement: only to check the payment against (0 = not given).
+        ...(type === 'debt' ? { termYears: Math.max(0, Math.min(40, Math.round(num(a.termYears, 0)))) } : {}),
         // When a fixed rate ends: the new rate (null = same as now) and whether the monthly
         // payment stays the same (the end date moves) or is reset to keep the end date.
         rateAfterFix: a.rateAfterFix === null || a.rateAfterFix === undefined || a.rateAfterFix === '' || !Number.isFinite(+a.rateAfterFix) ? null : +a.rateAfterFix,
         afterFix: oneOf(a.afterFix, ['payment', 'term'], 'payment'),
         excluded: !!a.excluded,
+        // A pension inherited from someone who died before 75: drawn tax-free, at any age.
+        ...(type === 'pension' ? { inherited: !!a.inherited } : {}),
         inIsa: type === 'bonds' && !!a.inIsa,   // gilts held inside an ISA: maturing money stays in the ISA
         // Coupons: bought back into the gilt (as if reinvested at its rate), or paid out: into the
         // ISA's other investments when held in one, else into cash.
@@ -353,6 +357,8 @@
         // Lifetime ISA: yearly payment (up to £4,000), and whether it is for retirement or a first home
         contribution: Math.min(R.LISA.maxContribution, Math.max(0, num(a.contribution, type === 'lisa' ? R.LISA.maxContribution : 0))),
         purpose: oneOf(a.purpose, ['retirement', 'home'], 'retirement'),
+        // A cash ISA earns the cash rate and counts as cash (e.g. for an emergency fund).
+        ...(type === 'isa' ? { holding: oneOf(a.holding, ['invested', 'cash'], 'invested') } : {}),
         // An ISA's own amount a month (today's money); null = automatic.
         monthly: type === 'isa' && a.monthly !== null && a.monthly !== undefined && a.monthly !== '' && Number.isFinite(+a.monthly) ? Math.max(0, +a.monthly) : null,
         homeYear: Math.round(num(a.homeYear, 0)),
@@ -1192,7 +1198,7 @@
 
   function newPath(N, detail, nPeople = 2) {
     const out = {};
-    for (const k of ['cash', 'isa', 'gia', 'pension', 'bonds', 'property', 'debt', 'short', 'locked']) out[k] = new Float64Array(N + 1);
+    for (const k of ['cash', 'isa', 'gia', 'pension', 'bonds', 'property', 'debt', 'short', 'locked', 'cashIsa']) out[k] = new Float64Array(N + 1);
     if (detail) {
       for (const k of FLOW_KEYS) out[k] = new Float64Array(N + 1);
       out.persons = Array.from({ length: nPeople }, () => ({
@@ -1248,7 +1254,7 @@
   // Cash needed for an emergency-fund goal in year t: months of regular spending and debt payments.
   // What an emergency-fund goal counts: cash, or cash plus investments that can be sold within days.
   function emergencyHave(goal, b) {
-    return goal.counts === 'investments' ? b.cash + b.isa + b.gia + b.bonds : b.cash;
+    return goal.counts === 'investments' ? b.cash + b.isa + b.gia + b.bonds : b.cash + (b.cashIsa || 0);
   }
 
   function emergencyNeed(goal, pre, debtPayYear, t) {
@@ -1277,7 +1283,7 @@
     const pension = people.map(() => 0);
     // Each ISA and general investment account is followed on its own: the same return for all,
     // each person's money into their own accounts. `owner` is a person's index, or -1 for joint.
-    const isas = [], gias = [];
+    const isas = [], gias = [], inherited = [];
     const lsaLeft = people.map(() => R.LUMP_SUM_ALLOWANCE);
     const bonds = [], props = [], debts = [], lisas = [];
     // Your own amount for each ISA, totalled per person (null when the ISAs are automatic).
@@ -1287,8 +1293,9 @@
     for (const x of plan.accounts) {
       if (x.excluded) continue;
       if (x.type === 'cash') cash += x.balance;
-      else if (x.type === 'isa') isas.push({ id: x.id, owner: personIndex(plan, x.owner), bal: x.balance, monthly: x.monthly || 0 });
+      else if (x.type === 'isa') isas.push({ id: x.id, owner: personIndex(plan, x.owner), bal: x.balance, monthly: x.monthly || 0, cash: x.holding === 'cash' });
       else if (x.type === 'gia') gias.push({ id: x.id, owner: x.owner === 'joint' ? -1 : personIndex(plan, x.owner), bal: x.balance, basis: Math.min(x.basis, x.balance) });
+      else if (x.type === 'pension' && x.inherited) inherited.push({ id: x.id, owner: personIndex(plan, x.owner), bal: x.balance });
       else if (x.type === 'pension') pension[personIndex(plan, x.owner)] += x.balance;
       else if (x.type === 'lisa') {
         const owner = personIndex(plan, x.owner);
@@ -1352,14 +1359,15 @@
     // account id (a home sold, or not bought yet, is 0), so displays need not split totals.
     if (detail) {
       out.byAccount = {};
-      for (const x of [...lisas, ...bonds, ...props, ...isas, ...gias]) out.byAccount[x.id] = new Float64Array(N + 1);
+      for (const x of [...lisas, ...bonds, ...props, ...isas, ...gias, ...inherited]) out.byAccount[x.id] = new Float64Array(N + 1);
     }
 
     const sum = xs => xs.reduce((acc, v) => acc + v, 0);
     const record = t => {
       const lisaBal = lisas.reduce((acc, l) => acc + l.bal, 0);
       if (out.lisa) out.lisa[t] = lisaBal;
-      out.cash[t] = cash; out.isa[t] = total(isas) + lisaBal; out.gia[t] = total(gias); out.pension[t] = sum(pension);
+      out.cash[t] = cash; out.isa[t] = total(isas) + lisaBal;
+      let ci = 0; for (const a of isas) if (a.cash) ci += a.bal; out.cashIsa[t] = ci; out.gia[t] = total(gias); out.pension[t] = sum(pension) + total(inherited);
       out.bonds[t] = bonds.reduce((acc, b) => acc + b.bal, 0);
       out.property[t] = props.reduce((acc, p) => acc + (p.owned ? p.val : 0), 0);
       out.debt[t] = debts.reduce((acc, d) => acc + d.bal, 0);
@@ -1368,7 +1376,7 @@
       if (detail) {
         for (let i = 0; i < n; i++) out.persons[i].pension[t] = pension[i];
         debts.forEach((d, k) => { out.debts[k].bal[t] = d.bal; });
-        for (const l of [...lisas, ...isas, ...gias]) out.byAccount[l.id][t] = l.bal;
+        for (const l of [...lisas, ...isas, ...gias, ...inherited]) out.byAccount[l.id][t] = l.bal;
         for (const b of bonds) out.byAccount[b.id][t] = b.bal;
         for (const p of props) out.byAccount[p.id][t] = p.owned ? p.val : 0;
       }
@@ -1388,7 +1396,7 @@
       const rPen = (penOverride === null ? r : r - econ.mean[t] + penOverride) - fee;
       // gIsa reports ISA growth including Lifetime ISAs; each balance grows once.
       let gIsa = 0;
-      for (const a of isas) { const x = a.bal * rInv; a.bal += x; gIsa += x; }
+      for (const a of isas) { const x = a.bal * (a.cash ? cashRate : rInv); a.bal += x; gIsa += x; }
       for (const l of lisas) { const x = l.bal * rInv; l.bal += x; gIsa += x; }
       // A Lifetime ISA saved for a first home is paid out in the year of the purchase.
       let lisaHome = 0;
@@ -1399,6 +1407,7 @@
       for (const a of gias) { const x = a.bal * rInv; a.bal += x; gGia += x; }
       let gPension = 0;
       for (let i = 0; i < n; i++) { const x = pension[i] * rPen; pension[i] += x; gPension += x; }
+      for (const a of inherited) { const x = a.bal * rPen; a.bal += x; gPension += x; }
       let gBonds = 0, bondsMatured = 0, bondsToIsa = 0;
       for (const b of bonds) {
         const x = b.bal * b.rate;
@@ -1635,6 +1644,17 @@
           need -= drawPension(i, W);
         }
 
+        // An inherited pension (the person died before 75) is tax-free to draw at any age: next.
+        for (const a of inherited) {
+          if (need <= 1e-9) break;
+          const x = Math.min(a.bal, need);
+          a.bal -= x;
+          need -= x;
+          wPension += x;
+          drawn[a.owner] += x;
+          taxFreeTaken[a.owner] += x;
+        }
+
         // Then pension at the basic rates (in Scotland up to the 21% band), lower income first, up
         // to a steady level that would spread the pot over the rest of the plan. A big pot drawn
         // only within the allowance keeps growing, to be taxed at 40% or more once the State
@@ -1805,7 +1825,7 @@
         cash: out.cash[t], isa: out.isa[t], gia: out.gia[t], pension: out.pension[t], bonds: out.bonds[t],
         property: out.property[t], debt: out.debt[t], shortfall: out.short[t],
         liquid, netWorth: liquid + out.property[t] - out.debt[t] - out.locked[t], locked: out.locked[t],
-        lisa: out.lisa ? out.lisa[t] : 0,
+        lisa: out.lisa ? out.lisa[t] : 0, cashIsa: out.cashIsa[t],
       };
       for (const k of FLOW_KEYS) row[k] = t < pre.N ? out[k][t] : 0;
       row.persons = out.persons.map(o => {
@@ -1902,7 +1922,7 @@
     const out = newPath(N, false);
     const p1 = plan.household.people[0];
     const debtPayments = plan.accounts.filter(a => a.type === 'debt' && !a.excluded).reduce((acc, a) => acc + a.payment * 12, 0);
-    const snap = { cash: 0, isa: 0, gia: 0, pension: 0, bonds: 0, property: 0, debt: 0, short: 0, locked: 0 };
+    const snap = { cash: 0, isa: 0, gia: 0, pension: 0, bonds: 0, property: 0, debt: 0, short: 0, locked: 0, cashIsa: 0 };
     const tOf = g => Math.max(0, Math.min(N, g.year - plan.startYear));
 
     // One pass over every start year for a plan; `check` records per-run goal results.
@@ -2190,7 +2210,7 @@
     for (const g of nwGoals.concat(efGoals)) { hits[g.id] = new Float64Array(T); gvals[g.id] = new Float64Array(T * runs); }
     const debtPayments = plan.accounts.filter(a => a.type === 'debt' && !a.excluded).reduce((acc, a) => acc + a.payment * 12, 0);
     const failYears = [];
-    const snap = { cash: 0, isa: 0, gia: 0, pension: 0, bonds: 0, property: 0, debt: 0, short: 0, locked: 0 };
+    const snap = { cash: 0, isa: 0, gia: 0, pension: 0, bonds: 0, property: 0, debt: 0, short: 0, locked: 0, cashIsa: 0 };
 
     for (let i = 0; i < runs; i++) {
       const econ = draw();

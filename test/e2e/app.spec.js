@@ -1857,6 +1857,50 @@ test.describe('round 2 fixes', () => {
     expect(problems).toEqual([]);
   });
 
+  test('a mortgage payment is checked against the years left; an ISA can be a cash ISA; an inherited pension', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/portfolio');
+    const plan = () => page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    // £420,000 at 4.6% and £2,350 a month takes about 26 years, not the 21 on the statement.
+    await page.evaluate(() => {
+      const H = window.__horizon, m = H.ws.scenarios[0].plan.accounts.find(a => a.type === 'debt');
+      Object.assign(m, { balance: 420000, rate: 4.6, payment: 2350, termYears: 21, fixedUntil: 0 });
+      H.refresh();
+    });
+    await page.locator('#sec-accounts .sum-row', { hasText: 'Mortgage' }).first().click();
+    const ed = page.locator('#sec-accounts [data-editing]');
+    await expect(ed.locator('[data-payoff]')).toContainText(/paid off in about 205\d/);
+    await expect(ed.locator('[data-payoff]')).toContainText(/To clear it in 21 years the payment would be about £2,[67]\d\d a month/);
+    await ed.locator('.edit-done button.primary').click();
+    // An ISA held as cash.
+    await page.locator('#sec-accounts .sum-row', { hasText: 'Sam' }).filter({ hasText: 'ISA' }).first().click();
+    await page.locator('#sec-accounts [data-editing] select[aria-label="Held as"]').selectOption('cash');
+    await expect(page.locator('#sec-accounts [data-editing]')).toContainText('counts as cash for an emergency fund');
+    expect((await plan()).accounts.find(a => a.type === 'isa' && a.owner === 'p2').holding).toBe('cash');
+    await page.locator('#sec-accounts [data-editing] .edit-done button.primary').click();
+    // An inherited pension.
+    await page.locator('#sec-accounts .sum-row', { hasText: 'pension' }).first().click();
+    const pen = page.locator('#sec-accounts [data-editing]');
+    await pen.locator('summary', { hasText: 'More options' }).click().catch(() => {});
+    await pen.locator('label.switch', { hasText: 'Inherited from someone who died before 75' }).click();
+    await expect(pen).toContainText('Tax-free to take out, at any age');
+    expect((await plan()).accounts.filter(a => a.type === 'pension').some(a => a.inherited)).toBe(true);
+    expect(problems).toEqual([]);
+  });
+
+  test('keeping income under £100,000 says when the pension allowance can’t get there', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/saving');
+    await page.evaluate(() => {
+      const H = window.__horizon, p = H.ws.scenarios[0].plan;
+      const pay = p.income.find(i => i.owner === 'p1' && i.kind === 'salary');
+      pay.amount = 200000; pay.freq = 'year'; pay.tax = 'uk';
+      p.strategy.stayUnder100k = true;
+      H.refresh();
+    });
+    await expect(page.locator('[data-flow="sacrificed"]')).toContainText(/It only gets Alex to about £1\d\d,\d\d\d of income .*annual allowance caps/);
+    await expect(page.locator('#view-finances')).toContainText('the 30 hours of free childcare');
+    expect(problems).toEqual([]);
+  });
+
   test('a goal that leaves out pensions says what it counts, next to what Home shows', async ({ page }) => {
     const { problems } = await openApp(page);
     await page.evaluate(() => {
