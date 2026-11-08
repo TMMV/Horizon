@@ -417,7 +417,7 @@
 
   function renderPortfolio() {
     const p = plan();
-    const now = estimateToday();
+    const now = estimateToday(), todayEst = now;
     const ahead = aheadYears();
     const futureDate = (() => { const d = new Date(`${today()}T00:00:00Z`); d.setUTCFullYear(d.getUTCFullYear() + ahead); return d.toISOString().slice(0, 10); })();
     const est = ahead ? RV.estimateAt(p, futureDate, model.proj) : now;
@@ -478,9 +478,12 @@
     const typeRows = g => {
       const debtish = g.key === 'debt';
       const accounts = p.accounts.filter(a => a.type === g.key);
+      // Money for an ISA or general account someone has yet to open: shown under their name.
+      const toOpen = missingOf(est.missing, g.key).filter(m => m.owner);
+      const openWas = m => (ahead ? (todayEst.missing.find(x => x.type === m.type && x.owner === m.owner) || { value: 0 }).value : 0);
       const was = typeWas(g.key), now = typeTotal(g.key);
       // A type with one account is a single row: the type, with the account named under it.
-      if (accounts.length === 1) {
+      if (accounts.length === 1 && !toOpen.length) {
         const a = accounts[0];
         return h('div', { class: `pf-row group single${a.excluded ? ' excluded' : ''}`, role: 'row', 'data-account': a.id, 'data-type': g.key, style: `--item-color:${cssVar(g.color)}` },
           h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }),
@@ -490,14 +493,15 @@
           h('span', { class: 'pf-now', role: 'cell' }, h('strong', {}, signed(est.byId[a.id], debtish)), changeTag(est.byId[a.id] - baseOf(a), debtish)));
       }
       const open = pfOpen.has(g.key);
+      const rows = accounts.length + toOpen.length;
       const nUpdated = accounts.filter(a => est.reading[a.id]).length;
       const toggle = () => { if (open) pfOpen.delete(g.key); else pfOpen.add(g.key); renderPortfolio(); };
       return [
         h('div', { class: `pf-row group${open ? ' open' : ''}`, role: 'row', 'data-type': g.key, style: `--item-color:${cssVar(g.color)}` },
           h('span', { class: 'pf-name', role: 'cell' }, h('i', { class: 'key square', style: `--key:${cssVar(g.color)}` }), h('strong', {}, g.label),
-            accounts.length
-              ? h('button', { type: 'button', class: 'pf-toggle', 'aria-expanded': String(open), 'aria-label': `${open ? 'Hide' : 'Show'} the ${accounts.length} ${g.label} accounts`, onclick: toggle },
-                `${accounts.length} accounts`, h('span', { class: 'chev', 'aria-hidden': 'true' }, '▸'))
+            rows
+              ? h('button', { type: 'button', class: 'pf-toggle', 'aria-expanded': String(open), 'aria-label': `${open ? 'Hide' : 'Show'} the ${rows} ${g.label} accounts`, onclick: toggle },
+                accounts.length ? `${rows} accounts` : `${rows} to open`, h('span', { class: 'chev', 'aria-hidden': 'true' }, '▸'))
               : h('small', { class: 'muted' }, 'expected; no account yet'),
             nUpdated ? h('span', { class: 'src updated' }, glyph('good'), `${nUpdated} updated`) : null),
           h('span', { class: 'pf-was', role: 'cell' }, signed(was, debtish)),
@@ -510,6 +514,14 @@
               h('small', {}, [owner(a), a.excluded ? 'not counted' : '', later(a) ? `buying in ${a.buyYear}: not counted yet` : ''].filter(Boolean).join(' · '), resTag(a))),
             h('span', { class: 'pf-was', role: 'cell' }, signed(baseOf(a), debtish)),
             h('span', { class: 'pf-now', role: 'cell' }, signed(v, debtish), changeTag(v - baseOf(a), debtish)));
+        }),
+        toOpen.map(m => {
+          const who = people().find(x => x.id === m.owner);
+          return h('div', { class: 'pf-row acct to-open', role: 'row', 'data-to-open': `${m.type}:${m.owner}`, hidden: !open },
+            h('span', { class: 'pf-name', role: 'cell' }, h('span', {}, `${who ? who.name : ''} ${m.type === 'isa' ? 'stocks & shares ISA' : 'general investment account'}`),
+              h('small', {}, m.type === 'isa' ? 'Not opened yet: the plan uses this person’s own ISA allowance' : 'Not opened yet: the plan puts money here once the ISAs are full')),
+            h('span', { class: 'pf-was', role: 'cell' }, money(openWas(m))),
+            h('span', { class: 'pf-now', role: 'cell' }, money(m.value), changeTag(m.value - openWas(m), false)));
         }),
       ];
     };
@@ -824,8 +836,8 @@
         : 'England, Wales and Northern Ireland: 20% basic, 40% higher and 45% additional rate, after a £12,570 personal allowance. Above £100,000 the allowance shrinks by £1 for every £2, so each £1 between £100,000 and £125,140 costs about 62% with NI. NI: 8% up to £50,270, then 2%.') },
     { match: /^(Net worth|Estimated net worth today|Expected net worth in \d{4})$/, title: 'Net worth',
       text: () => 'Everything you own (cash, investments, pensions, homes) minus what you owe. Pensions and homes count in full even though they cannot be spent today; “Available now” is what could be.' },
-    { match: /^Suggested split of what is left$/, title: 'The usual order',
-      text: () => 'A common UK order for what is left each month: an emergency fund first, then the employer’s full pension match, pension where it gets 40%+ relief, Lifetime ISAs (if the money can wait until 60), then ISAs, and a general account last. Rules of thumb, not advice.' },
+    { match: /^Another way to split it$/, title: 'The usual order',
+      text: () => 'Not extra money: another way to split what your plan already puts away each month. A common UK order: an emergency fund first (counting ISAs if your emergency-fund goal does), then the employer’s full pension match, pension where it gets 40%+ relief (unless your pay is kept at a line such as £60,000 for Child Benefit), Lifetime ISAs (for a first home, or money that can wait until 60), then stocks & shares ISAs, and a general account last. Rules of thumb, not advice.' },
     { match: /^(State Pension \(£\/year, today\)|State Pension age)$/, title: 'State Pension',
       text: () => `The full new State Pension is ${money(R.STATE_PENSION_FULL)} a year, rising each year at least with prices. It needs 35 qualifying years of NI (10 for any at all), and starts at 66–68 depending on when you were born. Check your own forecast and record at gov.uk/check-state-pension.` },
     { match: /^(Tax-free lump sum|Scheme|Joined in)$/, title: 'Defined benefit pensions',
@@ -1350,13 +1362,15 @@
   let gp = null;   // { id, values, open, timer }
 
   function goalTargetText(res) {
-    const g = res.goal, p1 = people()[0];
+    const g = res.goal;
     const basis = g.basis === 'real' ? 'in today’s £' : 'in future £';
     if (g.type === 'netWorth') return `${money(g.amount)} ${basis} by ${g.year}: ${E.GOAL_MEASURES[g.measure].toLowerCase()}`;
     if (g.type === 'passiveIncome') return `${money(g.amount)} a year ${basis} by ${g.year}, at ${g.withdrawalRate}% of investments${g.includePensions ? ' including pensions' : ''}`;
     if (g.type === 'emergency') return `${g.months} months (${money(res.need || 0)} today) by ${g.year}, ${g.counts === 'investments' ? 'counting ISAs and investments' : 'in cash'}`;
     if (g.type === 'debtFree') return `No mortgage or loans left by ${g.year}`;
-    return `${p1.name} retires at ${g.age} (${res.expectedYear}), with ${g.confidence}% confidence wanted`;
+    // The person the goal is for (its owner), not always the first.
+    const who = people().find(x => x.id === g.owner) || people()[0];
+    return `${who.name} retires at ${g.age} (${res.expectedYear}), with ${g.confidence}% confidence wanted`;
   }
 
   function renderGoalPage(id) {
@@ -1645,7 +1659,7 @@
     const net = xs.map((_, i) => paidIn[i] + growth[i] + out[i]);
     const card = h('section', { class: 'card', id: 'gpFlows' },
       h('h2', {}, 'Why your savings grow or shrink'),
-      h('p', { class: 'sub' }, `Each year: what goes in from pay and pensions, what investments earn, and what is taken out to live on, in ${unitLabel()}. Savings grow whenever earnings on them are bigger than what is taken out. Money is taken from cash, then pensions up to the tax-free allowance, then the general account, and ISAs last, so ISAs can keep growing while you draw on the rest.`));
+      h('p', { class: 'sub' }, `Each year: what goes in from pay and pensions, what investments earn, and what is taken out to live on, in ${unitLabel()}. Savings grow whenever earnings on them are bigger than what is taken out. Money is taken from cash, then pensions: tax-free up to each person’s allowance, and a big pot also at the basic rates, at a steady pace that would last the plan. Then the general account and ISAs, and only then pension taxed at 40% or more. ISAs keep growing while you draw on the rest.`));
     const c = chartIn(card, 260, 'Savings: paid in, investment growth and taken out each year', { name: 'savings-flows' });
     c.set({
       xs,
@@ -3773,42 +3787,109 @@
 
   // A suggested way to split what is left each month, in the usual UK order for this household:
   // an emergency fund first, then pension where it gets higher-rate relief, Lifetime ISAs, ISAs.
+  // A person's income for tax this year as the projection has it: pay after salary sacrifice and
+  // pension contributions, other taxable income, take-home pay grossed up, less personal pension
+  // contributions. The figure the tax bands, the £100k line and the Child Benefit charge use.
+  function incomeForTax(p, x) {
+    const P = model && model.proj && model.proj.pre.people[E.personIndex(p, x.id)];
+    if (!P) return 0;
+    const fromNet = P.netPay[0] > 0 ? R.grossFromTakeHome(P.netPay[0], p.household.region) : 0;
+    return Math.max(0, P.taxable[0] + fromNet - (P.extraPot[0] || 0));
+  }
+
+  // Pay taxed at 40% or more, and what paying it into a pension saves: `over` a year from where
+  // that band starts; `rates` such as "42%" or "42–45%" (the top slice can be in a higher band);
+  // `costOf(m)` the take-home a month that m a month into the pension costs (income tax only).
+  function higherRelief(p, x) {
+    const region = p.household.region, gross = incomeForTax(p, x);
+    const tax = v => R.incomeTax(Math.max(0, v), region);
+    const rate = v => (tax(v + 100) - tax(v)) / 100;
+    if (!gross || rate(gross) < 0.4) return null;
+    let lo = 0, hi = gross;
+    for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (rate(mid) >= 0.4) hi = mid; else lo = mid; }
+    const low = Math.round(rate(hi + 150) * 100), top = Math.round(rate(gross) * 100);
+    return {
+      gross, over: Math.max(0, gross - hi), rates: low === top ? `${top}%` : `${low}–${top}%`,
+      costOf: m => m - (tax(gross) - tax(gross - m * 12)) / 12,
+      drawn: region === 'scotland' ? '21%' : '20%',
+    };
+  }
+
+  // A line someone keeps their pay just under: the Child Benefit charge (with children) or the
+  // £100k trap. Within £1,500 of it, the split does not push more pension (they chose the line).
+  function payLine(p, x, gross) {
+    const kids = ((p.life && p.life.children) || []).some(c => c.age < 18)
+      || p.income.some(i => /child benefit/i.test(i.name || ''));
+    const lines = [...(kids ? [[R.CHILD_BENEFIT.chargeFrom, 'where the Child Benefit charge starts']] : []), [R.PA_TAPER_START, 'where the personal allowance starts to go']];
+    const hit = lines.find(([v]) => gross <= v + 1 && v - gross < 1500);
+    return hit ? { value: hit[0], why: hit[1] } : null;
+  }
+
+  // The emergency step: the household's own emergency-fund goal when there is one (cash, or cash
+  // and investments), else 3 months of spending and mortgage payments in the cash buffer.
+  function emergencyStep(p, proj) {
+    const r0 = proj.rows[0];
+    const goal = p.goals.find(g => g.type === 'emergency');
+    if (goal) {
+      const need = E.emergencyNeed(goal, proj.pre, r0.debtRegular, 0), have = E.emergencyHave(goal, r0);
+      return { need, short: Math.max(0, need - have), months: goal.months, investments: goal.counts === 'investments' };
+    }
+    const need = 3 * (r0.spending + r0.debtRegular) / 12;
+    return { need, short: Math.max(0, need - p.strategy.cashReserve), months: 3, investments: false };
+  }
+
   function suggestedSplit() {
-    const p = plan(), st = p.strategy, r0 = model.proj.rows[0];
+    const p = plan(), r0 = model.proj.rows[0];
     let left = inOutSeries()[0].left / 12;
     if (left <= 1) return null;
     const all = left;
-    const out = [];
+    const out = [], options = [];
     // Amounts under £25 a month are left for the ISAs rather than listed.
     const take = (key, label, want, note, extra) => { const x = Math.max(0, Math.min(left, want)); if (x >= 25) { out.push({ key, label, amount: x, note, ...extra }); left -= x; } };
-    const monthlyOut = (r0.spending + r0.debtRegular) / 12;
-    if (st.cashReserve < 3 * monthlyOut) take('cash', 'Emergency fund', (3 * monthlyOut - st.cashReserve) / 12, `until cash covers 3 months (${money(3 * monthlyOut)})`);
-    const region = p.household.region;
+    const em = emergencyStep(p, model.proj);
+    // In cash: build it up over a year. Counting ISAs: the ISA line below builds it.
+    if (em.short > 0.5 && !em.investments) take('cash', 'Emergency fund', em.short / 12, `cash until it covers ${em.months} months (${money(em.need)})`);
     for (const x of people()) {
       if (p.household.ignoreTax || x.retireAge <= x.age) continue;
-      const pay = p.income.filter(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 0) > 0);
-      const gross = pay.reduce((acc, i) => acc + (i.tax === 'uk' ? E.incomeAfterCosts(i, p, 0) : i.tax === 'none' ? R.grossFromTakeHome(E.incomeAfterCosts(i, p, 0), region) : 0), 0);
-      const rate = v => (R.incomeTax(v + 100, region) - R.incomeTax(v, region)) / 100;
-      if (!gross || rate(gross) < 0.4) continue;
-      let lo = 0, hi = gross;
-      for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (rate(mid) >= 0.4) hi = mid; else lo = mid; }
-      const over = Math.max(0, gross - hi) / 12;           // gross pay a month taxed at the higher rate
-      const cost = over * (1 - rate(gross));                 // what putting it in costs from take-home pay
+      const hr = higherRelief(p, x);   // income after salary sacrifice and pension contributions
+      if (!hr) continue;
+      const over = hr.over / 12;                     // a month of pay taxed at 40% or more
+      const cost = hr.costOf(over);                  // what putting it all in costs from take-home pay
+      const line = payLine(p, x, hr.gross);
+      if (line) {
+        // Pay kept just under a line: more pension is an option, not the first thing to do.
+        options.push(`${x.name}’s pay is at ${money(line.value)}, ${line.why}. More pension would still get ${hr.rates} relief, on up to ${money(over)} a month.`);
+        continue;
+      }
       // At most half of what is left, so some stays within reach before pensions can be drawn.
       const pen = Math.min(cost, all / 2);
-      take(`pension-${x.id}`, `Pension for ${x.name}`, pen, `from take-home pay; with ${Math.round(rate(gross) * 100)}% relief about ${money(pen / (1 - rate(gross)))} goes in${pen < cost - 1 ? `. Up to ${money(cost)} would get that relief` : ''}`, { person: x.id });
+      let a = 0, b = over;                           // what that amount of take-home puts in
+      for (let k = 0; k < 30; k++) { const mid = (a + b) / 2; if (hr.costOf(mid) < pen) a = mid; else b = mid; }
+      // The amount shown is take-home pay; with the relief more goes into the pension.
+      take(`pension-${x.id}`, `Pension for ${x.name}`, pen, `of take-home pay puts about ${money(a)} into the pension, with ${hr.rates} relief${pen < cost - 1 ? `. Putting in all ${money(over)} a month taxed at that rate would cost ${money(cost)} of take-home` : ''}`, { person: x.id });
     }
     for (const x of people()) {
       const has = p.accounts.some(a => a.type === 'lisa' && a.owner === x.id && !a.excluded);
-      if (x.age >= 18 && (x.age < R.LISA.openBefore || has) && x.age < R.LISA.payUntil) take(`lisa-${x.id}`, `Lifetime ISA for ${x.name}`, R.LISA.maxContribution / 12, `+25% bonus, from 60`, { person: x.id });
+      if (x.age >= 18 && (x.age < R.LISA.openBefore || has) && x.age < R.LISA.payUntil) take(`lisa-${x.id}`, `Lifetime ISA for ${x.name}`, R.LISA.maxContribution / 12, `+25% bonus; for a first home, or from 60`, { person: x.id });
     }
-    take('isa', 'ISAs', left, 'tax-free, available any time');
-    return out;
+    const names = people().map(x => x.name).join(' and ');
+    take('isa', people().length > 1 ? `Stocks & shares ISAs (${names})` : 'Stocks & shares ISA', left,
+      `tax-free, available any time${em.investments ? (em.short > 0.5 ? `; first builds your emergency fund (${money(em.short)} short of ${em.months} months)` : '; also your emergency fund') : ''}`);
+    return { parts: out, options, all };
+  }
+
+  // Where the plan puts what is left this month: "ISAs", "ISAs and the mortgage".
+  function whereItGoes() {
+    const m = E.monthlyPlan(model.proj);
+    const list = [[m.isa, 'ISAs'], [m.lisa, 'Lifetime ISAs'], [m.toPension, 'pensions'], [m.gia, 'a general investment account'], [m.overpay, 'mortgage overpayments'], [m.hiDebt, 'paying off debts'], [m.cash, 'cash']]
+      .filter(([v]) => v >= 25).sort((x, y) => y[0] - x[0]).map(([, label]) => label);
+    return list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0] || 'cash';
   }
 
   function suggestedSplitCard() {
-    const parts = suggestedSplit();
-    if (!parts || !parts.length) return null;
+    const split = suggestedSplit();
+    if (!split || !split.parts.length) return null;
+    const { parts, options, all } = split;
     const tryIt = () => {
       const q = E.clonePlan(plan());
       for (const x of parts) {
@@ -3827,8 +3908,10 @@
       toast(`Added “${name}”: compare it with your plan on every goal.`);
     };
     return h('div', { class: 'io-split', id: 'ioSplit' },
-      h('div', { class: 'io-split-head' }, h('strong', {}, 'Suggested split of what is left'), h('small', {}, 'The usual UK order for your household. Rules of thumb, not advice.')),
+      h('div', { class: 'io-split-head' }, h('strong', {}, 'Another way to split it'),
+        h('small', {}, `Your plan puts the ${money(all)} a month left over into ${whereItGoes()}. The usual UK order for your household would split the same ${money(all)} like this. Rules of thumb, not advice.`)),
       h('ol', {}, parts.map(x => h('li', {}, h('span', {}, h('b', {}, x.label), h('small', {}, x.note)), h('strong', {}, `${money(x.amount)}`)))),
+      options.map(t => h('p', { class: 'io-split-option muted' }, t)),
       h('button', { type: 'button', class: 'btn small', onclick: tryIt }, 'Try it as a scenario'));
   }
 
@@ -3980,10 +4063,18 @@
     const out = [];
     const add = (title, amount, text, action) => out.push({ title, amount, text, action });
     const monthlyOut = (r0.spending + r0.debtRegular) / 12;
-    const months = monthlyOut > 0 ? s.cashReserve / monthlyOut : 0;
-    add('1. Emergency fund', months >= 3 ? `${months.toFixed(1)} months` : `${money(3 * monthlyOut)}–${money(6 * monthlyOut)}`,
-      months >= 3 ? `Your cash buffer covers ${months.toFixed(1)} months of spending and mortgage payments (3–6 is the usual guide).` : `Keep 3–6 months of spending in easy-access cash before investing. Yours covers ${months.toFixed(1)} months.`,
-      months >= 3 ? null : ['Set the buffer', () => { s.cashReserve = Math.round(3 * monthlyOut / 100) * 100; renderSection('strategy'); schedule(); }]);
+    const em = emergencyStep(p, model.proj);
+    if (p.goals.some(g => g.type === 'emergency')) {
+      // Your own emergency-fund goal: what it counts and how many months.
+      const what = em.investments ? 'cash and ISAs' : 'cash';
+      add('1. Emergency fund', em.short > 0.5 ? `${money(em.short)} short` : 'Covered',
+        em.short > 0.5 ? `Your goal is ${em.months} months of spending and mortgage payments (${money(em.need)}) in ${what}. Build that before investing more.` : `Your ${what} cover${em.investments ? '' : 's'} the ${em.months} months your emergency-fund goal asks for (${money(em.need)}).`);
+    } else {
+      const months = monthlyOut > 0 ? s.cashReserve / monthlyOut : 0;
+      add('1. Emergency fund', months >= 3 ? `${months.toFixed(1)} months` : `${money(3 * monthlyOut)}–${money(6 * monthlyOut)}`,
+        months >= 3 ? `Your cash buffer covers ${months.toFixed(1)} months of spending and mortgage payments (3–6 is the usual guide).` : `Keep 3–6 months of spending in easy-access cash before investing. Yours covers ${months.toFixed(1)} months.`,
+        months >= 3 ? null : ['Set the buffer', () => { s.cashReserve = Math.round(3 * monthlyOut / 100) * 100; renderSection('strategy'); schedule(); }]);
+    }
     add('2. Workplace pension match', 'In full', 'Pay at least what your employer matches: their contribution is free money. Check your payslip or scheme rules.');
     const lisaPeople = people().filter(x => x.age >= 18 && x.age < R.LISA.payUntil && (x.age < R.LISA.openBefore || p.accounts.some(a => a.type === 'lisa' && a.owner === x.id)));
     if (lisaPeople.length) {
@@ -3995,18 +4086,16 @@
     for (const x of people()) {
       const pay = p.income.filter(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 0) > 0);
       if (!pay.length || p.household.ignoreTax || x.retireAge <= x.age) continue;
-      const gross = pay.reduce((acc, i) => acc + (i.tax === 'uk' ? E.incomeAfterCosts(i, p, 0) : i.tax === 'none' ? R.grossFromTakeHome(E.incomeAfterCosts(i, p, 0), region) : 0), 0);
-      const rate = v => R.incomeTax(v + 100, region) - R.incomeTax(v, region);
-      if (rate(gross) / 100 < 0.4) continue;
-      let lo = 0, hi = gross;
-      for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (rate(mid) / 100 >= 0.4) hi = mid; else lo = mid; }
-      const over = Math.max(0, gross - hi);
-      add(`${lisaPeople.length ? 4 : 3}. Pension for ${x.name}`, `up to ${money(over / 12)} a month`,
-        `${x.name} pays ${Math.round(rate(gross))}% tax on the top ${money(over)} of pay (estimated). Putting that into the pension gets the same relief now, and it is likely taxed at 20% or less when drawn. Salary sacrifice saves NI too.`,
+      const hr = higherRelief(p, x);   // income after salary sacrifice and pension contributions
+      // Under £25 a month at the higher rate is not worth a line.
+      if (!hr || hr.over < 300) continue;
+      const over = hr.over, line = payLine(p, x, hr.gross);
+      add(`${lisaPeople.length ? 4 : 3}. Pension for ${x.name}`, line ? 'optional' : `up to ${money(over / 12)} a month`,
+        `${line ? `${x.name}’s pay is kept at ${money(line.value)}, ${line.why}. Even so, ` : ''}${x.name} pays ${hr.rates} tax on the top ${money(over)} of income${E.taxOf(pay[0], p) === 'uk' ? '' : ' (estimated)'}, after what already goes into pensions. Putting that into the pension gets the same relief now, and it is likely taxed at ${hr.drawn} or less when drawn. Salary sacrifice saves NI too.`,
         ['Compare pension or ISA', () => openComparison('pension-isa')]);
     }
     const isaRoom = s.isaAllowance * people().length;
-    add(`${out.length + 1}. ISAs`, `up to ${money(isaRoom / 12)} a month`, `${money(s.isaAllowance)} each a year, tax-free for good and available any time. This year the plan puts in ${money(m.isa + m.lisa)} a month.`);
+    add(`${out.length + 1}. Stocks & shares ISAs`, `up to ${money(isaRoom / 12)} a month`, `${money(s.isaAllowance)} each a year (a Lifetime ISA counts within it), tax-free for good and available any time${em.investments ? '; your emergency fund counts them too' : ''}. This year the plan puts in ${money(m.isa + m.lisa)} a month.`);
     if (m.gia > 0.5 || r0.gia > 0.5) add(`${out.length + 1}. General investment account`, `${money(m.gia)} a month now`, 'Only once ISAs are full: gains above the allowance are taxed when you sell. Move it into ISAs each April ("Bed and ISA").');
     const debt = p.accounts.find(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
     if (debt) {
@@ -4476,6 +4565,7 @@
               field('Contributions as', selectInput([['pct', '% of salary'], ['fixed', '£ per month']], ...bind(item, 'pensionMode'), { rerender: 'income' })),
               field('You pay', item.pensionMode === 'pct' ? numInput(...bind(item, 'employeePension'), { step: 0.5, suffix: '%' }) : moneyInput(...bind(item, 'employeePension'))),
               field('Employer pays', item.pensionMode === 'pct' ? numInput(...bind(item, 'employerPension'), { step: 0.5, suffix: '%' }) : moneyInput(...bind(item, 'employerPension'))),
+              item.pensionTo === 'db' ? potAlongside(item) : null,
               !ignore
                 ? h('div', { class: 'field' }, h('span', {}, 'Paid by'), switchInput('Salary sacrifice', ...bind(item, 'sacrifice')), h('span', { class: 'hint' }, item.tax === 'uk' ? 'Saves NI too (only on the first £2,000 a year from April 2029).' : 'Take-home pay is after your contributions; both still go into the pot. With salary sacrifice, the plan can also keep your income under £100,000.'))
                 : h('p', { class: 'hint', style: 'align-self:center' }, 'Take-home pay is after your contributions; both still go into the pot.'))) : null),
@@ -4625,6 +4715,28 @@
     cash: 'Cash & savings', isa: 'ISA', lisa: 'Lifetime ISA', gia: 'General investment account', pension: 'Pension (workplace / SIPP)',
     bonds: 'Bonds & gilts', property: 'Property', asset: 'Other asset', debt: 'Mortgage or loan',
   };
+
+  // Pay in a defined benefit scheme can also pay into a pot (USS: the Investment Builder, with
+  // The Match of 1% + 1%). Contributions into it by the same salary sacrifice as the pay.
+  function potAlongside(item) {
+    const pct = item.potMode === 'pct';
+    const match = () => {
+      // The Match: 1% from you, 1% from the employer, added to anything else paid in.
+      if (pct) { item.potEmployee = Math.round(((item.potEmployee || 0) + 1) * 100) / 100; item.potEmployer = Math.round(((item.potEmployer || 0) + 1) * 100) / 100; } else {
+        const v = E.incomeAfterCosts(item, plan(), 0) / 12 * 0.01;
+        item.potEmployee = Math.round(((item.potEmployee || 0) + v) * 100) / 100; item.potEmployer = Math.round(((item.potEmployer || 0) + v) * 100) / 100;
+      }
+      renderSection('income'); refresh();
+    };
+    return h('div', { class: 'field-group pot-alongside' },
+      h('h4', {}, 'Also into a pension pot'),
+      h('p', { class: 'hint' }, 'Extra contributions into a pot next to the scheme, such as the USS Investment Builder. They build the pension pot under Accounts.'),
+      h('div', { class: 'fields' },
+        field('Contributions as', selectInput([['pct', '% of salary'], ['fixed', '£ per month']], ...bind(item, 'potMode'), { rerender: 'income', label: 'Pot contributions as' })),
+        field('You pay into the pot', pct ? numInput(...bind(item, 'potEmployee'), { step: 0.5, suffix: '%', label: 'You pay into the pot' }) : moneyInput(...bind(item, 'potEmployee'), { label: 'You pay into the pot' })),
+        field('Employer adds', pct ? numInput(...bind(item, 'potEmployer'), { step: 0.5, suffix: '%', label: 'Employer adds to the pot' }) : moneyInput(...bind(item, 'potEmployer'), { label: 'Employer adds to the pot' })),
+        h('div', { class: 'field' }, h('span', {}, 'USS'), h('button', { type: 'button', class: 'btn small', onclick: match }, 'Add The Match (1% + 1%)'))));
+  }
 
   // "In 2030 it costs about £247,600: a £24,800 deposit from your savings and a £222,800 mortgage…"
   function buyWorking(a) {
@@ -4790,7 +4902,7 @@
           field('Spend less from age', numInput(...bind(s, 'slowDownAge'), { min: 0, max: 110 }), '0 = never. Future costs (in Spending) can set this.'),
           field('Spending from then', numInput(...bind(s, 'slowDownPct'), { min: 0, max: 200, step: 5, suffix: '%' }), 'Of normal spending.'))),
       reservesEditor(),
-      h('p', { class: 'sub', style: 'margin-top:12px' }, 'In retirement, money comes from: cash above the buffer → pensions up to each person’s tax-free allowance → general investment account → ISAs → more pension (taxed) → the cash buffer.'),
+      h('p', { class: 'sub', style: 'margin-top:12px' }, 'In retirement, money comes from: cash above the buffer → pensions up to each person’s tax-free allowance → a big pot also at the basic rates (20%, or up to 21% in Scotland), at a pace that would last the plan → general investment account → ISAs → pension taxed at 40% or more → the cash buffer.'),
     ];
   }
 
@@ -5846,7 +5958,7 @@
     const region = p.household.region;
     for (const x of ps) {
       const pay = p.income.filter(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 0) > 0);
-      const gross = pay.reduce((acc, i) => acc + (i.tax === 'uk' ? E.incomeAfterCosts(i, p, 0) : i.tax === 'none' ? R.grossFromTakeHome(E.incomeAfterCosts(i, p, 0), region) : 0), 0);
+      const gross = incomeForTax(p, x);   // after salary sacrifice and pension contributions
       if (!gross || p.household.ignoreTax) continue;
       const rate = R.incomeTax(gross + 100, region) - R.incomeTax(gross, region);
       if (rate >= 40) add(`pension-${x.id}`, `${x.name}: pension top-up at ${Math.round(rate)}% relief`, `${x.name} pays ${Math.round(rate)}% on the top of their pay (estimated). A pension contribution before 5 April gets that relief; unused allowance from the last 3 years can be carried forward (up to ${money(R.PENSION_ANNUAL_ALLOWANCE)} a year). ${pay.some(i => i.sacrifice) ? 'By salary sacrifice the relief is automatic (and saves NI): ask payroll to sacrifice more before April.' : 'Paid from take-home pay (relief at source), claim relief above 20% in the self-assessment return.'}`);

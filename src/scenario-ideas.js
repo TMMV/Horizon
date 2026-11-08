@@ -37,6 +37,7 @@
       const during = { ...it, id: E.uid(), name: `${it.name} (${factor === 0 ? 'break' : `${Math.round(factor * 100)}%`})`, amount: it.amount * factor, startRef: 'age', startAge: a0 };
       if (a1 !== null) { during.endRef = 'age'; during.endAge = a1; } else { during.endRef = it.endRef; during.endAge = it.endAge; }
       if (it.pensionMode === 'fixed') { during.employeePension = it.employeePension * factor; during.employerPension = it.employerPension * factor; }
+      if (it.potMode === 'fixed') { during.potEmployee = (it.potEmployee || 0) * factor; during.potEmployer = (it.potEmployer || 0) * factor; }
       out.push(before);
       if (factor > 0) out.push(during);
       if (a1 !== null) out.push({ ...it, id: E.uid(), startRef: 'age', startAge: a1 });
@@ -190,7 +191,14 @@
     const v2 = item.tax === 'uk' ? v : v - takeHomeCost(p, item, gross);
     item.amount *= v2 / v;
     item.sacrifice = true;
-    if (item.pensionMode === 'pct') {
+    // Pay in a defined benefit scheme: the extra goes into the pot alongside it, not the scheme.
+    if (item.pensionTo === 'db') {
+      if (item.potMode === 'pct') {
+        item.potEmployee = (item.potEmployee * v / 100 + gross) / v2 * 100;
+        item.potEmployer = item.potEmployer * v / v2;
+      } else item.potEmployee = (item.potEmployee || 0) + gross / 12;
+      if (item.pensionMode === 'pct') { item.employeePension *= v / v2; item.employerPension *= v / v2; }
+    } else if (item.pensionMode === 'pct') {
       item.employeePension = (item.employeePension * v / 100 + gross) / v2 * 100;
       item.employerPension = item.employerPension * v / v2;
     } else item.employeePension += gross / 12;
@@ -320,7 +328,7 @@
     };
   }
 
-  const api = { DRIVERS, IDEAS, COMPARISONS, driversFor, ideasFor, comparisonsFor, optionsOf, variantOf, textOf, driverImpacts, changeSalary, retirementSpending, grossForTakeHome, takeHome };
+  const api = { DRIVERS, IDEAS, COMPARISONS, driversFor, ideasFor, comparisonsFor, optionsOf, variantOf, textOf, driverImpacts, changeSalary, sacrificeMore, retirementSpending, grossForTakeHome, takeHome };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ScenarioIdeas = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

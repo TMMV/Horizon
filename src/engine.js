@@ -409,6 +409,11 @@
       sacrifice: !!i.sacrifice,
       // Workplace pension contributions build a pot ('pot') or pay for a defined benefit scheme ('db').
       pensionTo: oneOf(i.pensionTo, ['pot', 'db'], 'pot'),
+      // Paying into a defined benefit scheme and a pot from the same pay (USS: the Retirement
+      // Income Builder and the Investment Builder): the pot's contributions, % of salary or £ a month.
+      potMode: oneOf(i.potMode, ['pct', 'fixed'], 'fixed'),
+      potEmployee: Math.max(0, num(i.potEmployee)),
+      potEmployer: Math.max(0, num(i.potEmployer)),
       // How much it can swing from year to year (± %, typical), e.g. self-employed profit.
       vary: Math.min(60, Math.max(0, num(i.vary))),
       note: note(i.note),
@@ -619,6 +624,8 @@
       const db = p.income.some(i => i.kind === 'dbpension' && i.owner === person.id);
       const pot = p.accounts.some(a => a.type === 'pension' && a.owner === person.id);
       const pay = p.income.filter(i => i.kind === 'salary' && i.owner === person.id && i.pensionTo !== 'db' && (i.employeePension > 0 || i.employerPension > 0));
+      const potToo = p.income.find(i => i.kind === 'salary' && i.owner === person.id && i.pensionTo === 'db' && (i.potEmployee > 0 || i.potEmployer > 0));
+      if (potToo && !pot) out.push(`${person.name}: “${potToo.name}” also pays into a pension pot. Add the pot under Accounts (a pension in ${person.name}’s name) so its balance is counted.`);
       if (db && !pot && pay.length) out.push(`${person.name}: the workplace pension on “${pay[0].name}” builds a pension pot, and there is also a defined benefit pension. If the contributions go into that scheme, set “Pays into” on the pay to the defined benefit scheme, or they count twice.`);
     }
     for (const x of p.income.filter(i => i.kind === 'annuity')) {
@@ -759,12 +766,28 @@
     return annual(item) * (econ ? growthFactor(item, plan, t, econ) : expectedGrowth(item, plan, t));
   }
 
-  // Pension contributions (employee, employer) for a salary in year t, nominal.
+  // Pension contributions for a salary in year t, nominal: what the employee and the employer pay,
+  // and how much of each goes into a pot (all of it, unless the pay is in a defined benefit scheme,
+  // where only its extra contributions into a pot do).
+  function pensionSplit(item, salary, plan, t, econ) {
+    const none = { ee: 0, er: 0, potEe: 0, potEr: 0 };
+    if (item.kind !== 'salary' || salary <= 0) return none;
+    let g = null;
+    const pay = (mode, v) => {
+      if (mode === 'pct') return salary * v / 100;
+      if (g === null) g = econ ? growthFactor(item, plan, t, econ) : expectedGrowth(item, plan, t);
+      return v * 12 * g;
+    };
+    const ee = pay(item.pensionMode, item.employeePension), er = pay(item.pensionMode, item.employerPension);
+    if (item.pensionTo !== 'db') return { ee, er, potEe: ee, potEr: er };
+    const pe = pay(item.potMode, item.potEmployee || 0), pr = pay(item.potMode, item.potEmployer || 0);
+    return { ee: ee + pe, er: er + pr, potEe: pe, potEr: pr };
+  }
+
+  // Pension contributions (employee, employer) for a salary in year t, nominal: all of them.
   function pensionContrib(item, salary, plan, t, econ) {
-    if (item.kind !== 'salary' || salary <= 0) return [0, 0];
-    if (item.pensionMode === 'pct') return [salary * item.employeePension / 100, salary * item.employerPension / 100];
-    const g = econ ? growthFactor(item, plan, t, econ) : expectedGrowth(item, plan, t);
-    return [item.employeePension * 12 * g, item.employerPension * 12 * g];
+    const c = pensionSplit(item, salary, plan, t, econ);
+    return [c.ee, c.er];
   }
 
   // Tax functions for a plan: UK rules, or all zero when the household switches tax off.
@@ -1020,6 +1043,8 @@
       const g = pre.g[t];
       const price = econ.price[t];
       const niable = people.map(() => 0);
+      // From April 2029 only £2,000 a year of each person's salary sacrifice is free of NI.
+      const niCapLeft = people.map(() => R.SACRIFICE_NI_CAP);
       for (const item of plan.income) {
         const v = incomeAfterCosts(item, plan, t, econ);
         if (v <= 0) continue;
@@ -1032,16 +1057,20 @@
           pre.annuityBuy[personIndex(plan, item.owner)][t] += item.cost * price;
         }
         if (item.kind === 'salary' && P) {
-          const [ee, er] = pensionContrib(item, v, plan, t, econ);
-          // Paid into a defined benefit scheme: it comes off pay but builds that pension, not a pot.
-          if (item.pensionTo !== 'db') P.contrib[t] += ee + er;
+          const c = pensionSplit(item, v, plan, t, econ), ee = c.ee;
+          // Paid into a defined benefit scheme: it comes off pay but builds that pension, not a pot
+          // (except any extra contributions into a pot alongside it).
+          P.contrib[t] += c.potEe + c.potEr;
           P.ee[t] += ee;
           if (tax === 'uk') {
             P.gross[t] += v;
             P.employee[t] += ee;
-            // Salary sacrifice avoids NI on the sacrificed amount (capped at £2,000 from April 2029).
-            const niFree = !item.sacrifice ? 0 : plan.startYear + t >= R.SACRIFICE_NI_CAP_FROM ? Math.min(ee, R.SACRIFICE_NI_CAP) : ee;
-            niable[personIndex(plan, item.owner)] += v - niFree;
+            // Salary sacrifice avoids NI on the sacrificed amount (capped at £2,000 a person from April 2029).
+            const i = personIndex(plan, item.owner);
+            let niFree = 0;
+            if (item.sacrifice && plan.startYear + t >= R.SACRIFICE_NI_CAP_FROM) { niFree = Math.min(ee, niCapLeft[i]); niCapLeft[i] -= niFree; }
+            else if (item.sacrifice) niFree = ee;
+            niable[i] += v - niFree;
           } else {
             // Take-home pay: contributions are assumed to come out before it is paid.
             P.netPay[t] += v;
@@ -1241,9 +1270,14 @@
     const invOverride = a.investReturn === null ? null : a.investReturn / 100;
     const penOverride = a.pensionReturn === null ? null : a.pensionReturn / 100;
     const fee = (a.fees || 0) / 100;
+    // Top of the basic-rate bands (income before the 40%+ rates start), at today's thresholds.
+    const basicTop = household.ignoreTax ? 0 : R.PERSONAL_ALLOWANCE + (R.INCOME_TAX[region] || R.INCOME_TAX.scotland).bands.filter(b => b.rate < 0.4).reduce((acc, b) => acc + b.width, 0);
 
-    let cash = 0, isa = 0, gia = 0, basis = 0, short = 0;
+    let cash = 0, short = 0;
     const pension = people.map(() => 0);
+    // Each ISA and general investment account is followed on its own: the same return for all,
+    // each person's money into their own accounts. `owner` is a person's index, or -1 for joint.
+    const isas = [], gias = [];
     const lsaLeft = people.map(() => R.LUMP_SUM_ALLOWANCE);
     const bonds = [], props = [], debts = [], lisas = [];
     // Your own amount for each ISA, totalled per person (null when the ISAs are automatic).
@@ -1253,27 +1287,27 @@
     for (const x of plan.accounts) {
       if (x.excluded) continue;
       if (x.type === 'cash') cash += x.balance;
-      else if (x.type === 'isa') isa += x.balance;
-      else if (x.type === 'gia') { gia += x.balance; basis += Math.min(x.basis, x.balance); }
+      else if (x.type === 'isa') isas.push({ id: x.id, owner: personIndex(plan, x.owner), bal: x.balance, monthly: x.monthly || 0 });
+      else if (x.type === 'gia') gias.push({ id: x.id, owner: x.owner === 'joint' ? -1 : personIndex(plan, x.owner), bal: x.balance, basis: Math.min(x.basis, x.balance) });
       else if (x.type === 'pension') pension[personIndex(plan, x.owner)] += x.balance;
       else if (x.type === 'lisa') {
         const owner = personIndex(plan, x.owner);
         lisas.push({
-          bal: x.balance, owner, pay: Math.min(x.contribution, R.LISA.maxContribution),
+          id: x.id, bal: x.balance, owner, pay: Math.min(x.contribution, R.LISA.maxContribution),
           // Can pay in only if it is already open or the owner is still under 40.
           canOpen: x.balance > 0 || people[owner].age < R.LISA.openBefore,
           // Saving for a first home: paid out in its year, or the year the home to buy is bought.
           home: x.purpose === 'home' && lisaHomeYear(plan, x) ? lisaHomeYear(plan, x) - plan.startYear : Infinity,
         });
       }
-      else if (x.type === 'bonds') bonds.push({ bal: x.balance, rate: x.rate / 100, t: x.maturityYear ? x.maturityYear - plan.startYear : Infinity, inIsa: x.inIsa, payout: x.coupons === 'payout' });
+      else if (x.type === 'bonds') bonds.push({ id: x.id, owner: x.owner === 'joint' ? -1 : personIndex(plan, x.owner), bal: x.balance, rate: x.rate / 100, t: x.maturityYear ? x.maturityYear - plan.startYear : Infinity, inIsa: x.inIsa, payout: x.coupons === 'payout' });
       else if (x.type === 'property' || x.type === 'asset') {
         // A home bought later is not owned yet: its price rises with house prices until the year
         // it is bought, when the deposit is paid and its mortgage starts.
         const buy = x.type === 'property' && x.buyYear >= plan.startYear ? x.buyYear - plan.startYear : -1;
         const mort = buy >= 0 && x.deposit < 100 ? { id: `${x.id}:mortgage`, bal: 0, rate: x.mortRate / 100, pay: 0, varFrom: Infinity, after: x.mortRate / 100, keepTerm: false } : null;
         if (mort) debts.push(mort);
-        props.push({ val: x.balance, rate: x.rate / 100, t: x.sellYear ? x.sellYear - plan.startYear : Infinity, buy, owned: buy < 0, deposit: x.deposit / 100, years: x.mortYears, mort });
+        props.push({ id: x.id, val: x.balance, rate: x.rate / 100, t: x.sellYear ? x.sellYear - plan.startYear : Infinity, buy, owned: buy < 0, deposit: x.deposit / 100, years: x.mortYears, mort });
       }
       else if (x.type === 'debt') {
         debts.push({
@@ -1287,13 +1321,45 @@
       }
     }
     debts.sort((d1, d2) => d2.rate - d1.rate); // overpay the most expensive first
+    // Someone with no ISA (or no general account, and no joint one) gets one to open, so their
+    // share stays theirs: id `new:isa:<person id>` or `new:gia:<person id>`.
+    people.forEach((pp, i) => {
+      if (!isas.some(a => a.owner === i)) isas.push({ id: `new:isa:${pp.id}`, owner: i, bal: 0, monthly: 0, isNew: true });
+      if (!gias.some(a => a.owner === i || a.owner === -1)) gias.push({ id: `new:gia:${pp.id}`, owner: i, bal: 0, basis: 0, isNew: true });
+    });
+    const total = list => { let v = 0; for (const a of list) v += a.bal; return v; };
+    // Shares `x` out over `list` by `weight` (evenly when the weights are all 0).
+    const share = (list, x, weight) => {
+      if (!list.length || x === 0) return;
+      const w = list.map(weight), sw = w.reduce((acc, v) => acc + v, 0);
+      list.forEach((a, k) => { const y = x * (sw > 0 ? w[k] / sw : 1 / list.length); a.bal += y; if (a.basis !== undefined) a.basis += y; });
+    };
+    // A person's own accounts in `list`, else the joint ones.
+    const ownedBy = (list, i) => { const own = list.filter(a => a.owner === i); return own.length ? own : list.filter(a => a.owner === -1); };
+    // Into person i's ISAs: by their own monthly amounts when set, else by balance.
+    const payIsa = (i, x) => share(ownedBy(isas, i), x, a => (isaSet ? a.monthly : a.bal));
+    // Into the ISAs of everyone, in proportion to each person's room (`caps`).
+    const payByCap = (x, caps) => {
+      const sc = caps.reduce((acc, v) => acc + v, 0);
+      caps.forEach((c, i) => payIsa(i, x * (sc > 0 ? c / sc : 1 / n)));
+    };
+    // Into the general accounts: split evenly between the people, as the ISAs are.
+    const payEach = (list, x) => { for (let i = 0; i < n; i++) share(ownedBy(list, i), x / n, a => a.bal); };
+    // Gilts held in an ISA pay into their owner's ISA (a joint holding: both, evenly).
+    const bondIsa = (b, x) => { if (b.owner >= 0) payIsa(b.owner, x); else for (let i = 0; i < n; i++) payIsa(i, x / n); };
     if (detail) out.debts = debts.map(d => ({ id: d.id, bal: new Float64Array(N + 1), rate: new Float64Array(N + 1) }));
+    // Each Lifetime ISA, bond, home and asset is followed on its own: its value every year, by
+    // account id (a home sold, or not bought yet, is 0), so displays need not split totals.
+    if (detail) {
+      out.byAccount = {};
+      for (const x of [...lisas, ...bonds, ...props, ...isas, ...gias]) out.byAccount[x.id] = new Float64Array(N + 1);
+    }
 
     const sum = xs => xs.reduce((acc, v) => acc + v, 0);
     const record = t => {
       const lisaBal = lisas.reduce((acc, l) => acc + l.bal, 0);
       if (out.lisa) out.lisa[t] = lisaBal;
-      out.cash[t] = cash; out.isa[t] = isa + lisaBal; out.gia[t] = gia; out.pension[t] = sum(pension);
+      out.cash[t] = cash; out.isa[t] = total(isas) + lisaBal; out.gia[t] = total(gias); out.pension[t] = sum(pension);
       out.bonds[t] = bonds.reduce((acc, b) => acc + b.bal, 0);
       out.property[t] = props.reduce((acc, p) => acc + (p.owned ? p.val : 0), 0);
       out.debt[t] = debts.reduce((acc, d) => acc + d.bal, 0);
@@ -1302,6 +1368,9 @@
       if (detail) {
         for (let i = 0; i < n; i++) out.persons[i].pension[t] = pension[i];
         debts.forEach((d, k) => { out.debts[k].bal[t] = d.bal; });
+        for (const l of [...lisas, ...isas, ...gias]) out.byAccount[l.id][t] = l.bal;
+        for (const b of bonds) out.byAccount[b.id][t] = b.bal;
+        for (const p of props) out.byAccount[p.id][t] = p.owned ? p.val : 0;
       }
     };
 
@@ -1318,14 +1387,16 @@
       const rInv = (invOverride === null ? r : r - econ.mean[t] + invOverride) - fee;
       const rPen = (penOverride === null ? r : r - econ.mean[t] + penOverride) - fee;
       // gIsa reports ISA growth including Lifetime ISAs; each balance grows once.
-      let gIsa = isa * rInv;
-      isa += gIsa;
+      let gIsa = 0;
+      for (const a of isas) { const x = a.bal * rInv; a.bal += x; gIsa += x; }
       for (const l of lisas) { const x = l.bal * rInv; l.bal += x; gIsa += x; }
       // A Lifetime ISA saved for a first home is paid out in the year of the purchase.
       let lisaHome = 0;
       for (const l of lisas) if (t === l.home && l.bal > 0) { cash += l.bal; lisaHome += l.bal; l.bal = 0; }
-      const gCash = cash * cashRate, gGia = gia * rInv;
-      cash += gCash; gia += gGia;
+      const gCash = cash * cashRate;
+      cash += gCash;
+      let gGia = 0;
+      for (const a of gias) { const x = a.bal * rInv; a.bal += x; gGia += x; }
       let gPension = 0;
       for (let i = 0; i < n; i++) { const x = pension[i] * rPen; pension[i] += x; gPension += x; }
       let gBonds = 0, bondsMatured = 0, bondsToIsa = 0;
@@ -1334,12 +1405,12 @@
         gBonds += x;
         if (b.payout && b.bal > 0) {
           // Paid out: into the ISA's investments (no allowance used), or cash.
-          if (b.inIsa) { isa += x; bondsToIsa += x; } else { cash += x; bondsMatured += x; }
+          if (b.inIsa) { bondIsa(b, x); bondsToIsa += x; } else { cash += x; bondsMatured += x; }
           gBonds -= x;
         } else b.bal += x;
         if (t + 1 >= b.t && b.bal > 0) {
           // Inside an ISA the money stays sheltered without using the year's allowance.
-          if (b.inIsa) { isa += b.bal; bondsToIsa += b.bal; } else { cash += b.bal; bondsMatured += b.bal; }
+          if (b.inIsa) { bondIsa(b, b.bal); bondsToIsa += b.bal; } else { cash += b.bal; bondsMatured += b.bal; }
           b.bal = 0;
         }
       }
@@ -1442,7 +1513,7 @@
       let toCash = 0, overpay = 0, toIsa = 0, toGia = 0, toLisa = 0, lisaBonus = 0, wLisa = 0, lisaCharge = 0, toPension = 0;
       let wCash = 0, wGia = 0, wIsa = 0, wPension = 0;
       const drawn = people.map(() => 0), taxFreeTaken = people.map(() => 0);
-      let gains = 0;
+      const gains = people.map(() => 0);
 
       let hiDebtPay = 0;
       if (net >= 0) {
@@ -1488,7 +1559,9 @@
           : s.isaMonthly === null ? Infinity : Math.max(0, s.isaMonthly) * 12 * f;
         const capGia = s.giaMonthly === null ? Infinity : Math.max(0, s.giaMonthly) * 12 * f;
         toIsa = Math.min(left, allowance, capIsa);
-        isa += toIsa;
+        // Each person's room this year; the ISA money is shared out by it.
+        const isaRoom = people.map((_, i) => Math.max(0, Math.min(isaSet ? isaSet[i] * f : Infinity, s.isaAllowance * g - lisaPaid[i])));
+        payByCap(toIsa, isaRoom);
         // Pensions first: £1,000 of contribution at a time, at the relief it gets, highest rate first.
         if (s.pensionFirst && s.giaMonthly === null) {
           const room = people.map((_, i) => {
@@ -1512,8 +1585,7 @@
           }
         }
         toGia = Math.min(left - toIsa - toPension, capGia);
-        gia += toGia;
-        basis += toGia;
+        payEach(gias, toGia);
         const rest = left - toIsa - toPension - toGia;   // left over by your own amounts: kept as cash
         if (rest > 0) { cash += rest; toCash += rest; }
         // Cash above the buffer (e.g. matured gilts) is invested too, within your own amounts.
@@ -1521,9 +1593,9 @@
         if (s.sweepCash && excess > 0.5) {
           sweepIsa = Math.min(excess, Math.max(0, s.isaAllowance * g * n - toLisa - toIsa), Math.max(0, capIsa - toIsa));
           sweepGia = Math.min(excess - sweepIsa, Math.max(0, capGia - toGia));
-          isa += sweepIsa;
-          gia += sweepGia;
-          basis += sweepGia;
+          const roomSum = isaRoom.reduce((acc, v) => acc + v, 0);
+          payByCap(sweepIsa, isaRoom.map(v => Math.max(0, v - (roomSum > 0 ? toIsa * v / roomSum : 0))));
+          payEach(gias, sweepGia);
           cash -= sweepIsa + sweepGia;
         }
       } else {
@@ -1563,22 +1635,51 @@
           need -= drawPension(i, W);
         }
 
+        // Then pension at the basic rates (in Scotland up to the 21% band), lower income first, up
+        // to a steady level that would spread the pot over the rest of the plan. A big pot drawn
+        // only within the allowance keeps growing, to be taxed at 40% or more once the State
+        // Pension fills the lower bands (or left to count for inheritance tax from April 2027); a
+        // smaller one still comes out mostly tax-free, a slice each year, and is not hurried.
+        const yearsLeft = Math.max(1, N - t);
+        const real = Math.max(0.001, (1 + econ.mean[t] - fee) / (1 + a.inflation / 100) - 1);
+        const level = i => pension[i] * real / (1 - Math.pow(1 + real, -yearsLeft));
+        for (const i of people.map((_, k) => k).filter(canDraw).sort((x, y) => income[x] - income[y])) {
+          if (need <= 1e-9) break;
+          const room = basicTop * g - income[i];
+          const want = level(i) - drawn[i];
+          if (room <= 1 || want <= 1) continue;
+          const taxableShare = lsaLeft[i] > 0 ? 1 - R.PENSION_TAX_FREE_SHARE : 1;
+          const W = Math.min(grossUp(need, w => pensionTax(i, w), pension[i]), room / taxableShare, want);
+          if (W > 0.01) need -= drawPension(i, W);
+        }
+
         // General investment account (CGT on the gain share)
-        if (need > 1e-9 && gia > 0) {
-          const gainShare = Math.max(0, 1 - basis / gia);
+        const G = total(gias);
+        if (need > 1e-9 && G > 0) {
+          // Each account gives up its share by balance; its gain is its owner's (joint: both, evenly).
+          const gainPer = people.map(() => 0);
+          for (const a of gias) {
+            if (a.bal <= 0) continue;
+            const x = (a.bal / G) * Math.max(0, 1 - a.basis / a.bal);
+            if (a.owner >= 0) gainPer[a.owner] += x; else for (let i = 0; i < n; i++) gainPer[i] += x / n;
+          }
           const cgtOn = x => {
             let tax = 0;
             for (let i = 0; i < n; i++) {
-              tax += T.capitalGainsTax((gains + x * gainShare) / n, income[i], g) - T.capitalGainsTax(gains / n, income[i], g);
+              tax += T.capitalGainsTax(gains[i] + x * gainPer[i], income[i], g) - T.capitalGainsTax(gains[i], income[i], g);
             }
             return tax;
           };
-          const S = grossUp(need, cgtOn, gia);
+          const S = grossUp(need, cgtOn, G);
           const tax = cgtOn(S);
-          gains += S * gainShare;
-          basis -= basis * (S / gia);
-          gia -= S;
-          if (gia < 1e-9) { gia = 0; basis = 0; }
+          for (let i = 0; i < n; i++) gains[i] += S * gainPer[i];
+          for (const a of gias) {
+            if (a.bal <= 0) continue;
+            const y = S * (a.bal / G);
+            a.basis -= a.basis * (y / a.bal);
+            a.bal -= y;
+            if (a.bal < 1e-9) { a.bal = 0; a.basis = 0; }
+          }
           extraTax += tax;
           cgt += tax;
           need -= S - tax;
@@ -1586,9 +1687,10 @@
         }
 
         // ISA (tax-free)
-        if (need > 1e-9 && isa > 0) {
-          wIsa = Math.min(isa, need);
-          isa -= wIsa;
+        const I = total(isas);
+        if (need > 1e-9 && I > 0) {
+          wIsa = Math.min(I, need);
+          for (const a of isas) a.bal -= wIsa * (a.bal / I);
           need -= wIsa;
         }
 
@@ -2430,7 +2532,7 @@
 
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
-    incomeAfterCosts, taxOf, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
+    incomeAfterCosts, taxOf, pensionSplit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     streamAt, streamWindow, isActive, growthFactor, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,

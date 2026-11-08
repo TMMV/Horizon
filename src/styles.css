@@ -304,6 +304,9 @@ table.data td.neg { color: var(--bad-text); }
 .item-head input.name:hover, .item-head input.name:focus { border-color: var(--border-strong); background: var(--surface); }
 .item-head .tag { font-size: 0.75rem; color: var(--text-2); background: var(--surface-2); border-radius: 20px; padding: 2px 8px; white-space: nowrap; }
 .item .sub-fields { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--grid); }
+.item .pot-alongside { grid-column: 1 / -1; margin-top: 4px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2, rgba(0,0,0,0.03)); }
+.item .pot-alongside h4 { margin: 0 0 2px; font-size: 0.9rem; }
+.item .pot-alongside .fields { margin-top: 8px; }
 .add-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .people { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
 .rules-table { margin-top: 6px; }
@@ -1432,6 +1435,7 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 .io-split li > span { display: grid; }
 .io-split li small { color: var(--muted); font-size: 0.74rem; }
 .io-split li strong { font-variant-numeric: tabular-nums; }
+.io-split-option { grid-column: 1 / -1; margin: 0; font-size: 0.8rem; }
 @media (max-width: 640px) { .io-split { grid-template-columns: 1fr; } }
 /* market card */
 .mk-table { margin: 6px 0 10px; }

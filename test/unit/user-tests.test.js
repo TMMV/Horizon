@@ -148,3 +148,181 @@ test('defined benefit schemes are cut when taken early, roughly 5% a year', () =
   near(E.dbEarly({ ...db, startAge: 60 }, x).factor, 0.675, 1e-9);
   assert.ok(R.DB_SCHEMES.civil && R.DB_SCHEMES.other.early);
 });
+
+test('each pension account shows its owner\'s own pot, not a share of the household total', () => {
+  const RV = require('../../src/review');
+  // One partner pays a lot into a big pot; the other pays a little into a small new one.
+  const p = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ id: 'p1', name: 'Sam', age: 40, retireAge: 60 }, { id: 'p2', name: 'Alex', age: 40, retireAge: 60 }] },
+    accounts: [
+      { id: 'big', type: 'pension', owner: 'p1', balance: 80000 },
+      { id: 'small', type: 'pension', owner: 'p2', balance: 1000 },
+    ],
+    income: [
+      { kind: 'salary', owner: 'p1', tax: 'uk', amount: 90000, freq: 'year', pensionMode: 'fixed', employeePension: 2000, employerPension: 100, sacrifice: true },
+      { kind: 'salary', owner: 'p2', tax: 'uk', amount: 45000, freq: 'year', pensionMode: 'fixed', employeePension: 180, employerPension: 40, sacrifice: true },
+    ],
+    expenses: [], events: [], goals: [],
+  });
+  const pr = E.project(p);
+  const t = 10, est = RV.estimateAt(p, '2036-01-01', pr);
+  near(est.byId.big, pr.out.persons[0].pension[t], 1);
+  near(est.byId.small, pr.out.persons[1].pension[t], 1);
+  // Splitting by starting balance would have given the small pot about 1.2% of the total.
+  assert.ok(est.byId.small > 0.05 * pr.rows[t].pension);
+  near(est.byId.big + est.byId.small, pr.rows[t].pension, 1);
+});
+
+test('looking ahead, homes, loans, bonds and Lifetime ISAs each show their own value', () => {
+  const RV = require('../../src/review');
+  const p = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ id: 'p1', name: 'Sam', age: 30, retireAge: 65 }, { id: 'p2', name: 'Alex', age: 30, retireAge: 65 }] },
+    accounts: [
+      { id: 'cash', type: 'cash', balance: 60000 },
+      { id: 'slow', type: 'property', balance: 300000, rate: 2 },
+      { id: 'fast', type: 'property', balance: 200000, rate: 6 },
+      { id: 'sold', type: 'property', balance: 100000, rate: 3, sellYear: 2030 },
+      { id: 'later', type: 'property', balance: 250000, rate: 3, buyYear: 2029, deposit: 20, mortRate: 4, mortYears: 25 },
+      { id: 'mort', type: 'debt', balance: 200000, rate: 4, payment: 1200 },
+      { id: 'car', type: 'debt', balance: 9000, rate: 7, payment: 400 },
+      { id: 'g1', type: 'bonds', balance: 10000, rate: 4, maturityYear: 2028 },
+      { id: 'g2', type: 'bonds', balance: 10000, rate: 4, maturityYear: 2040 },
+      { id: 'l1', type: 'lisa', owner: 'p1', balance: 5000, contribution: 4000, purpose: 'retirement' },
+      { id: 'l2', type: 'lisa', owner: 'p2', balance: 5000, contribution: 0, purpose: 'retirement' },
+    ],
+    income: [{ kind: 'salary', owner: 'p1', tax: 'uk', amount: 70000, freq: 'year' }, { kind: 'salary', owner: 'p2', tax: 'uk', amount: 50000, freq: 'year' }],
+    expenses: [{ name: 'Living', amount: 2500, freq: 'month' }], events: [], goals: [],
+  });
+  const pr = E.project(p);
+  const t = 6, b = RV.expectedBalances(p, t, pr).byId, own = id => pr.out.byAccount[id][t];
+  near(b.slow, 300000 * 1.02 ** t, 1);
+  near(b.fast, 200000 * 1.06 ** t, 1);
+  assert.equal(b.sold, 0);
+  near(b.later, own('later'), 1);
+  near(b.car, pr.out.debts.find(d => d.id === 'car').bal[t], 1);
+  near(b.mort, pr.out.debts.find(d => d.id === 'mort').bal[t], 1);
+  assert.equal(b.g1, 0);
+  near(b.g2, own('g2'), 1);
+  assert.ok(b.l1 > b.l2 + 20000, 'the one paid into is bigger');
+  // The mortgage on the home bought in 2029 has no account yet: shown as expected, not added to the others.
+  const miss = RV.expectedBalances(p, t, pr).missing.find(m => m.type === 'debt');
+  near(miss.value, pr.out.debts.find(d => d.id === 'later:mortgage').bal[t], 1);
+  // Each type still adds up to the projection.
+  near(b.slow + b.fast + b.sold + b.later, pr.rows[t].property, 1);
+  near(b.mort + b.car + miss.value, pr.rows[t].debt, 1);
+});
+
+test('each ISA and general account is followed on its own, each person paying into their own', () => {
+  const RV = require('../../src/review');
+  const base = (accounts, strategy = {}) => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ id: 'p1', name: 'Sam', age: 40, retireAge: 67 }, { id: 'p2', name: 'Alex', age: 40, retireAge: 67 }] },
+    accounts: [{ id: 'cash', type: 'cash', balance: 10000 }, ...accounts],
+    income: [{ kind: 'salary', owner: 'p1', tax: 'uk', amount: 90000, freq: 'year' }, { kind: 'salary', owner: 'p2', tax: 'uk', amount: 80000, freq: 'year' }],
+    expenses: [{ name: 'Living', amount: 3000, freq: 'month' }], events: [], goals: [], strategy,
+  });
+  // Automatic: each person's allowance goes into their own ISA, so a small ISA catches up.
+  let p = base([{ id: 'big', type: 'isa', owner: 'p1', balance: 100000 }, { id: 'small', type: 'isa', owner: 'p2', balance: 1000 }]);
+  let pr = E.project(p), own = (id, t) => pr.out.byAccount[id][t];
+  const r0 = pr.rows[0], g = 1 + r0.gIsa / (100000 + 1000);
+  near(own('small', 1), 1000 * g + r0.toIsa / 2, 1);
+  near(own('big', 1), 100000 * g + r0.toIsa / 2, 1);
+  let b = RV.expectedBalances(p, 5, pr);
+  near(b.byId.big + b.byId.small, pr.rows[5].isa, 1);
+  near(b.byId.small, own('small', 5), 1);
+  // Money beyond the ISAs goes to a general account for each person, evenly.
+  assert.ok(pr.rows[0].toGia > 1000, 'the ISAs fill up');
+  near(own('new:gia:p1', 3), own('new:gia:p2', 3), 1);
+  const miss = b.missing.filter(m => m.type === 'gia');
+  assert.deepEqual(miss.map(m => m.owner).sort(), ['p1', 'p2']);
+  near(miss.reduce((s, m) => s + m.value, 0), pr.rows[5].gia, 1);
+
+  // Your own amounts: each ISA gets its own.
+  p = base([{ id: 'a', type: 'isa', owner: 'p1', balance: 0, monthly: 500 }, { id: 'c', type: 'isa', owner: 'p2', balance: 0, monthly: 100 }]);
+  pr = E.project(p);
+  near(pr.out.byAccount.a[1], 5 * pr.out.byAccount.c[1], 1);
+
+  // Only one person has an ISA: the other's allowance goes to an ISA they have yet to open.
+  p = base([{ id: 'only', type: 'isa', owner: 'p1', balance: 5000 }]);
+  pr = E.project(p);
+  b = RV.expectedBalances(p, 3, pr);
+  const theirs = b.missing.find(m => m.type === 'isa');
+  assert.equal(theirs.owner, 'p2');
+  near(b.byId.only + theirs.value, pr.rows[3].isa, 1);
+  // The yearly review opens it in their name.
+  const ws = E.normalizeWorkspace({ scenarios: [{ id: 's', name: 'Plan', plan: p }], activeId: 's' });
+  const d = RV.start(ws, { date: '2029-01-01', year: 2029 });
+  const opened = d.plan.accounts.find(a => a.type === 'isa' && a.owner === 'p2');
+  assert.equal(opened.name, 'Alex stocks & shares ISA');
+
+  // A joint general account takes both people's money; the projection is as before for it.
+  p = base([{ id: 'j', type: 'gia', owner: 'joint', balance: 20000, basis: 10000 }]);
+  pr = E.project(p);
+  assert.equal(pr.out.byAccount['new:gia:p1'], undefined);
+  near(pr.out.byAccount.j[4], pr.rows[4].gia, 0.01);
+});
+
+test('a general account’s gains are taxed as its owner’s', () => {
+  // Retired couple living off a general account: Sam's holds the gain, Alex's none.
+  const plan = (samBasis, alexBasis) => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ id: 'p1', name: 'Sam', age: 70, retireAge: 60 }, { id: 'p2', name: 'Alex', age: 70, retireAge: 60 }] },
+    accounts: [{ id: 's', type: 'gia', owner: 'p1', balance: 200000, basis: samBasis }, { id: 'a', type: 'gia', owner: 'p2', balance: 200000, basis: alexBasis }],
+    income: [], expenses: [{ name: 'Living', amount: 3000, freq: 'month' }], events: [], goals: [],
+  });
+  const lopsided = E.project(plan(0, 200000)).rows[0].cgt;
+  const even = E.project(plan(100000, 100000)).rows[0].cgt;
+  // The same gain overall, but all of it in one name uses one annual exempt amount, not two.
+  assert.ok(lopsided > even + 100, `${lopsided} vs ${even}`);
+});
+
+test('pay in a defined benefit scheme can also pay into a pot, with the NI cap across both', () => {
+  // A lecturer: 6.1% into the scheme, The Match (1% + 1%) and £100 a month more into a pot.
+  const plan = extra => E.normalizePlan({
+    startYear: 2028, asOf: '2028-01-01',
+    household: { region: 'scotland', people: [{ name: 'Morven', age: 40, retireAge: 66 }] },
+    accounts: [{ id: 'ib', type: 'pension', owner: 'p1', balance: 1000 }],
+    income: [
+      { name: 'University pay', kind: 'salary', owner: 'p1', tax: 'uk', amount: 50000, freq: 'year', growth: 0, pensionMode: 'pct', employeePension: 6.1, employerPension: 14.5, sacrifice: true, pensionTo: 'db', ...extra },
+      { name: 'USS pension', kind: 'dbpension', owner: 'p1', tax: 'uk', amount: 4000, dbAccrual: 667, startAge: 68, freq: 'year' },
+    ],
+    expenses: [{ name: 'Living', amount: 1500, freq: 'month' }], events: [], goals: [],
+  });
+  const P = E.precompute(plan({ potMode: 'pct', potEmployee: 1, potEmployer: 1 })).people[0];
+  near(P.employee[0], 50000 * 0.071, 0.01);        // both come off pay
+  near(P.contrib[0], 50000 * 0.02, 0.01);          // only the pot's builds the pot
+  near(P.taxable[0], 50000 * 0.929, 0.01);
+  const F = E.precompute(plan({ potMode: 'fixed', potEmployee: 141, potEmployer: 41 })).people[0];
+  near(F.contrib[0], (141 + 41) * 12, 0.01);
+  // 2028: all sacrifice is free of NI. From April 2029, £2,000 of it across both, not £2,000 each.
+  const none = E.precompute(plan({ sacrifice: false })).people[0];
+  const ni = (x, t) => x.ni[t];
+  near(none.ni[0] - ni(F, 0), 0.08 * (3050 + 141 * 12), 1);
+  near(none.ni[1] - ni(F, 1), 0.08 * 2000, 1);
+  // More salary sacrifice for this pay goes into the pot, not the scheme.
+  const SI = require('../../src/scenario-ideas');
+  const q = plan({ potMode: 'fixed', potEmployee: 141, potEmployer: 41 });
+  SI.sacrificeMore(q, 'p1', 1200);
+  assert.equal(q.income[0].employeePension, 6.1);
+  near(q.income[0].potEmployee, 241, 0.01);
+});
+
+test('a big pension is drawn at the basic rate before ISAs; a small one is not hurried', () => {
+  // Retired at 60 in Scotland, State Pension at 67, spending £60k a year.
+  const plan = pot => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Iain', age: 60, retireAge: 60, statePensionAge: 67 }] },
+    accounts: [{ id: 'pen', type: 'pension', owner: 'p1', balance: pot }, { id: 'isa', type: 'isa', owner: 'p1', balance: 400000 }],
+    income: [], expenses: [{ name: 'Living', amount: 5000, freq: 'month' }], events: [], goals: [],
+  });
+  const big = E.project(plan(1500000)).rows[0];
+  // Taxable income goes up to the top of the 21% band (£43,662), then ISAs pay the rest.
+  near(big.persons[0].taxable, 43662, 2);
+  assert.ok(big.wIsa > 0 && big.wIsa < 15000, `ISA ${big.wIsa}`);
+  const small = E.project(plan(150000)).rows[0];
+  // A pot that spreads to about £8k a year: only the tax-free allowance's worth, ISAs the rest.
+  near(small.persons[0].taxable, 12570, 2);
+  assert.ok(small.wIsa > 40000);
+});

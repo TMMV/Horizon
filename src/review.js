@@ -14,6 +14,8 @@
     bonds: 'Bonds & gilts', property: 'Property', debt: 'Mortgage & loans',
   };
   const MARKET_FIELDS = ['inflation', 'cashRate', 'bondReturn'];
+  // A new account opened in someone's name: "Sam stocks & shares ISA".
+  const NEW_NAMES = { isa: 'stocks & shares ISA', gia: 'general investment account' };
 
   // A review is for the calendar year it happens in (the October review updates this
   // year's numbers and sets up the months ahead); never earlier than the plan's year.
@@ -86,37 +88,16 @@
     return p;
   }
 
-  // ISAs and Lifetime ISAs: the projection's totals split by following each account: it grows at
-  // the ISA return, receives its own amount a month (or an even share when automatic), and gives
-  // up its share of withdrawals. Lifetime ISAs share the Lifetime ISA total by balance.
-  function isaShares(plan, proj, f, row, out) {
-    const at = (key, t) => proj.rows[t][key] || 0;
-    const lisas = plan.accounts.filter(a => a.type === 'lisa' && !a.excluded);
-    const isas = plan.accounts.filter(a => a.type === 'isa' && !a.excluded);
-    const k = Math.min(proj.pre.N - 1, Math.floor(f)), x = f - k;
-    const lisaTotal = at('lisa', k) + (at('lisa', k + 1) - at('lisa', k)) * x;
-    const lb = lisas.reduce((s, a) => s + a.balance, 0);
-    for (const a of lisas) out[a.id] = Math.max(0, lisaTotal * (lb > 0 ? a.balance / lb : 1 / lisas.length));
-    if (!isas.length) return;
-    const set = isas.some(a => a.monthly !== null);
-    const weight = isas.map(a => (set ? (a.monthly || 0) : 1));
-    const wSum = weight.reduce((s, v) => s + v, 0);
-    let bal = isas.map(a => a.balance);
-    const path = [bal.slice()];
-    for (let t = 0; t <= k && t < proj.rows.length - 1; t++) {
-      const r = proj.rows[t];
-      const base = Math.max(1, r.isa - (r.lisa || 0));
-      const rate = (r.gIsa - (r.lisa || 0) * (r.gIsa / Math.max(1, r.isa))) / base;
-      const paidIn = r.toIsa + r.sweepIsa + r.bondsToIsa;
-      const total = bal.reduce((s, v) => s + v, 0);
-      bal = bal.map((v, i) => Math.max(0, v * (1 + rate) + paidIn * (wSum > 0 ? weight[i] / wSum : 1 / isas.length) - r.wIsa * (total > 0 ? v / total : 1 / isas.length)));
-      path.push(bal.slice());
-    }
-    const lo = path[Math.min(k, path.length - 1)], hi = path[Math.min(k + 1, path.length - 1)];
-    const mix = lo.map((v, i) => v + (hi[i] - v) * x);
-    const mixSum = mix.reduce((s, v) => s + v, 0);
-    const isaTotal = Math.max(0, row.isa - lisaTotal);
-    isas.forEach((a, i) => { out[a.id] = mixSum > 0 ? isaTotal * (mix[i] / mixSum) : isaTotal / isas.length; });
+  // An account's own value `k + x` years in, when the projection follows it on its own (ISAs,
+  // Lifetime ISAs, general accounts, bonds, homes, other assets, debts), else null. A home sold,
+  // or not bought yet, is 0.
+  function ownValue(proj, id, k, x) {
+    const o = proj.out || {};
+    let arr = o.byAccount && o.byAccount[id];
+    if (!arr && o.debts) { const d = o.debts.find(z => z.id === id); if (d) arr = d.bal; }
+    if (!arr) return null;
+    const hi = Math.min(k + 1, arr.length - 1);
+    return arr[k] + (arr[hi] - arr[k]) * x;
   }
 
   // Lifetime ISAs are part of the ISA total in a projection; other assets are with property.
@@ -125,32 +106,58 @@
   const notYet = (plan, a, f) => a.type === 'property' && a.buyYear >= plan.startYear && f < a.buyYear - plan.startYear;
 
   // What the plan expects each account to hold `years` (may be a fraction) after its figures
-  // date, on average returns. Each account takes its share of its type's projected total;
-  // between two years the values are interpolated.
+  // date, on average returns. Every account takes its own value from the projection (pensions by
+  // person); only cash, held in one pool, is shared out by balance. Between two years values are
+  // interpolated. `missing` is money in a type with no account to hold it: an ISA or general
+  // account someone has yet to open (with `owner`), or e.g. the mortgage on a home bought since.
   function expectedBalances(plan, years, proj = E.project(plan)) {
     const N = proj.pre.N;
     const f = Math.min(Math.max(0, years), N);
     const k = Math.min(N - 1, Math.floor(f)), x = f - k;
     const row = {};
     for (const type of TYPES) row[type] = proj.rows[k][type] + (proj.rows[k + 1][type] - proj.rows[k][type]) * x;
-    const out = {};
-    isaShares(plan, proj, f, row, out);
+    const out = {}, leftover = {}, toOpen = [];
+    // ISAs and general accounts someone has yet to open: theirs, by person.
+    const byAccount = (proj.out && proj.out.byAccount) || {};
+    for (const id of Object.keys(byAccount)) {
+      const m = /^new:(isa|gia):(.+)$/.exec(id);
+      const v = m ? ownValue(proj, id, k, x) : 0;
+      if (m && v > 0.5) toOpen.push({ type: m[1], owner: m[2], value: v });
+    }
     for (const type of TYPES) {
-      if (type === 'isa') continue;
       const counted = plan.accounts.filter(a => typeOf(a) === type && !a.excluded && !notYet(plan, a, f));
-      const total = counted.reduce((s, a) => s + a.balance, 0);
-      for (const a of counted) {
-        const share = total > 0 ? a.balance / total : 1 / counted.length;
-        out[a.id] = Math.max(0, row[type] * share);
+      // Pensions belong to one person each: share out that person's own pot (contributions and
+      // withdrawals differ between people), not the household total by starting balance.
+      const persons = proj.out && proj.out.persons;
+      if (type === 'pension' && persons && persons.length && persons[0].pension) {
+        const pot = i => persons[i].pension[k] + (persons[i].pension[k + 1] - persons[i].pension[k]) * x;
+        const owned = i => counted.filter(a => E.personIndex(plan, a.owner) === i);
+        persons.forEach((_, i) => {
+          const list = owned(i), sum = list.reduce((s, a) => s + a.balance, 0);
+          for (const a of list) out[a.id] = Math.max(0, pot(i) * (sum > 0 ? a.balance / sum : 1 / list.length));
+        });
+        continue;
       }
+      let rest = row[type] - toOpen.filter(m => m.type === type).reduce((s, m) => s + m.value, 0);
+      const pooled = [];
+      for (const a of counted) {
+        const v = ownValue(proj, a.id, k, x);
+        if (v === null) pooled.push(a);
+        else { out[a.id] = Math.max(0, v); rest -= v; }
+      }
+      const total = pooled.reduce((s, a) => s + a.balance, 0);
+      for (const a of pooled) out[a.id] = Math.max(0, rest * (total > 0 ? a.balance / total : 1 / pooled.length));
+      // Money in a type with no account to hold it (e.g. the mortgage on a home bought since).
+      if (!pooled.length && rest > 0.5) leftover[type] = rest;
     }
     // Not counted, or a home not bought yet: its own value, moved on at its growth rate.
     for (const a of plan.accounts.filter(x => x.excluded || notYet(plan, x, f))) {
       out[a.id] = a.type === 'property' || a.type === 'asset' ? a.balance * grow(a.rate, f) : a.balance;
     }
     // Money the plan expects in a type with no account yet (e.g. a first general investment account).
-    const missing = TYPES.filter(type => row[type] > 0.5 && !plan.accounts.some(a => typeOf(a) === type && !a.excluded && !notYet(plan, a, f)));
-    return { byId: out, missing: missing.map(type => ({ type, value: row[type] })), row };
+    const missing = TYPES.filter(type => !toOpen.some(m => m.type === type) && row[type] > 0.5 && !plan.accounts.some(a => typeOf(a) === type && !a.excluded && !notYet(plan, a, f)));
+    for (const type of Object.keys(leftover)) if (!missing.includes(type)) missing.push(type);
+    return { byId: out, missing: [...toOpen, ...missing.map(type => ({ type, value: leftover[type] !== undefined ? leftover[type] : row[type] }))], row };
   }
 
   // Years from one date to another, counting whole anniversaries (15 Oct to 15 Oct is
@@ -240,7 +247,9 @@
     for (const a of plan.accounts) a.latest = null;
     const est = estimateAt(original, date);
     for (const m of est.missing) {
-      plan.accounts.push(E.normalizePlan({ ...plan, accounts: [{ name: TYPE_LABELS[m.type], type: m.type, owner: 'p1', balance: Math.round(m.value), basis: Math.round(m.value) }] }).accounts[0]);
+      const who = m.owner && original.household.people.find(x => x.id === m.owner);
+      const name = who ? `${who.name} ${NEW_NAMES[m.type] || TYPE_LABELS[m.type]}` : TYPE_LABELS[m.type];
+      plan.accounts.push(E.normalizePlan({ ...plan, accounts: [{ name, type: m.type, owner: m.owner || (m.type === 'gia' ? 'joint' : 'p1'), balance: Math.round(m.value), basis: Math.round(m.value) }] }).accounts[0]);
     }
     const snap = list => Object.fromEntries(list.map(x => [x.id, x.type ? x.balance : x.amount]));
     const prev = previousCheckin(ws.checkins || [], year);
@@ -285,7 +294,7 @@
     }
     for (const a of draft.plan.accounts) {
       const added = !draft.original.accounts.some(x => x.id === a.id);
-      const m = added ? est.missing.find(x => x.type === a.type) : null;
+      const m = added ? est.missing.find(x => x.type === a.type && (!x.owner || x.owner === a.owner)) : null;
       const exp = added ? (m ? m.value : a.balance) : est.expected[a.id];
       if (exp === undefined) continue;
       draft.expected.accounts[a.id] = Math.round(exp);

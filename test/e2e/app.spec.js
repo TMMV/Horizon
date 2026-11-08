@@ -686,7 +686,8 @@ test.describe('Horizon app', () => {
     await page.click('#rvNext'); // markets
     await expect(page.locator('#rvBody .rv-market')).toHaveCount(3);
     await page.click('#rvNext'); // results
-    await expect(page.locator('#rvBody .rv-delta')).toContainText('+£10,000');
+    // Each account's estimate is rounded to the pound, so the total can be a pound or two off.
+    await expect(page.locator('#rvBody .rv-delta')).toContainText(/\+£(9,99[89]|10,00[0-2])/);
     await expect(page.locator('#rvBody .divbar')).not.toHaveCount(0);
     // Why: parts that add up, and saying what was paid in splits markets from saving.
     await expect(page.locator('#rvExplain')).toContainText('Why you are where you are');
@@ -704,7 +705,7 @@ test.describe('Horizon app', () => {
     await page.click('#progList summary');
     await expect(page.locator('#progTable tbody tr')).toHaveCount(2);
     await expect(page.locator('#progTable tbody tr').first()).toContainText(String(year + 1));
-    await expect(page.locator('#progTable tbody tr').first().locator('td').nth(4)).toContainText('+£10,000');
+    await expect(page.locator('#progTable tbody tr').first().locator('td').nth(4)).toContainText(/\+£(9,99[89]|10,00[0-2])/);
     await expect(page.locator('#progReview')).toContainText('What made the difference');
     await expect(page.locator('#progReview')).toContainText('Goals then and now');
   });
@@ -939,7 +940,7 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#gpTradeoffs')).toContainText('No State Pension for 13 years');
     await expect(page.locator('#gpTradeoffs')).toContainText('can’t be drawn until 57');
     await expect(page.locator('#gpFlows canvas')).toBeVisible();
-    await expect(page.locator('#gpFlows')).toContainText('ISAs last');
+    await expect(page.locator('#gpFlows')).toContainText('ISAs keep growing');
   });
 
   test('home: what to put away each month, and the guides', async ({ page }) => {
@@ -1720,6 +1721,99 @@ test.describe('fixes from the pretend-user tests', () => {
       window.__horizon.refresh();
     });
     await expect(page.locator('#pfReserves .pf-res-head')).toContainText('still to put aside');
+    expect(problems).toEqual([]);
+  });
+  test('pension advice uses income after salary sacrifice; looking ahead, each pension shows its own pot', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/saving');
+    // Alex (Scotland): £62,000 with 5% salary sacrifice, so about £58,900 is taxed and about £15,240
+    // is above where 42% starts (£43,663), not £18,337 from pay before the sacrifice.
+    await expect(page.locator('#view-finances')).toContainText(/Alex pays 42% tax on the top £15,2\d\d of income/);
+    // Looking ahead, each person's pension account is their own pot from the projection.
+    const ok = await page.evaluate(() => {
+      const H = window.__horizon, p = H.ws.scenarios.find(s => s.id === H.ws.activeId).plan, pr = H.model.proj;
+      const RV = window.Review, b = RV.expectedBalances(p, 10, pr).byId;
+      return p.accounts.filter(a => a.type === 'pension').every(a => Math.abs(b[a.id] - pr.out.persons[window.Engine.personIndex(p, a.owner)].pension[10]) < 1);
+    });
+    expect(ok).toBe(true);
+    expect(problems).toEqual([]);
+  });
+
+  test('the split is another way to split the same money, with your emergency fund and pay line', async ({ page }) => {
+    const { problems } = await openApp(page);
+    const split = page.locator('#ioSplit');
+    await expect(split.locator('.io-split-head')).toContainText('Another way to split it');
+    await expect(split.locator('.io-split-head')).toContainText(/Your plan puts the £[\d,]+ a month left over into/);
+    await expect(split.locator('li', { hasText: 'Pension for Alex' })).toContainText(/of take-home pay puts about £[\d,]+ into the pension, with 42% relief/);
+    // An emergency fund that counts ISAs: no cash step, the ISA line says it.
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan;
+      p.income.find(i => i.owner === 'p2' && i.kind === 'salary').amount += 1500;   // more left over, so the ISA line shows
+      p.goals.push({ id: 'em', type: 'emergency', name: '', months: 6, counts: 'investments', year: p.startYear + 1, confidence: 80 });
+      window.__horizon.refresh();
+    });
+    await expect(split.locator('li b', { hasText: /^Emergency fund$/ })).toHaveCount(0);
+    await expect(split.locator('li', { hasText: 'Stocks & shares ISAs (Alex and Sam)' })).toContainText('emergency fund');
+    // Pay kept just under £60,000 with children: more pension is an option, not a step.
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan;
+      const pay = p.income.find(i => i.owner === 'p1' && i.kind === 'salary');
+      pay.amount = 63000; pay.pensionMode = 'pct'; pay.employeePension = 5; pay.sacrifice = true;   // £59,850 taxed
+      p.life = { ...(p.life || {}), children: [{ name: 'Robin', age: 4 }] };
+      window.__horizon.refresh();
+    });
+    await expect(split).not.toContainText('Pension for Alex');
+    await expect(split.locator('.io-split-option')).toContainText('Alex’s pay is at £60,000, where the Child Benefit charge starts');
+    expect(problems).toEqual([]);
+  });
+
+  test('each person’s ISA is their own: one not opened yet shows under their name', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan;
+      p.accounts = p.accounts.filter(a => !(a.type === 'isa' && a.owner === 'p2'));
+      window.__horizon.refresh();
+    });
+    await page.click('#homePortfolio [data-ahead="5"]');
+    await page.click('#homePortfolio [data-access="now"] .pf-class-btn');
+    await page.click('#homePortfolio [data-type="isa"] .pf-toggle');
+    const row = page.locator('#homePortfolio [data-to-open="isa:p2"]');
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('Sam stocks & shares ISA');
+    // Alex's ISA and Sam's to open add up to the ISA total.
+    const sums = await page.evaluate(() => {
+      const H = window.__horizon, p = H.ws.scenarios.find(s => s.id === H.ws.activeId).plan;
+      const b = window.Review.expectedBalances(p, 5, H.model.proj);
+      const alex = p.accounts.find(a => a.type === 'isa');
+      return [b.byId[alex.id] + b.missing.find(m => m.type === 'isa' && m.owner === 'p2').value, H.model.proj.rows[5].isa];
+    });
+    expect(Math.abs(sums[0] - sums[1])).toBeLessThan(1);
+    expect(problems).toEqual([]);
+  });
+
+  test('pay into a defined benefit scheme can also pay into a pot; the goal subtitle names its person', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/income');
+    const plan = () => page.evaluate(() => window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan);
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan;
+      p.income.find(i => i.owner === 'p1' && i.kind === 'salary').pensionTo = 'db';
+      window.__horizon.refresh();
+    });
+    await page.locator('#sec-income .sum-row', { hasText: 'Alex salary' }).click();
+    const item = page.locator('#sec-income [data-editing]');
+    await item.locator('summary', { hasText: 'More options' }).click();
+    await expect(item.locator('.pot-alongside')).toContainText('Also into a pension pot');
+    await item.locator('.pot-alongside button', { hasText: 'Add The Match (1% + 1%)' }).click();
+    const pay = (await plan()).income.find(i => i.owner === 'p1' && i.kind === 'salary');
+    expect(pay.potEmployee).toBeGreaterThan(40);
+    expect(pay.potEmployer).toBe(pay.potEmployee);
+    // A retirement goal for the second person names them, not the first.
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios.find(s => s.id === window.__horizon.ws.activeId).plan;
+      p.goals.push({ id: 'samret', type: 'retire', owner: 'p2', age: 58, confidence: 85 });
+      window.__horizon.refresh();
+    });
+    await go(page, 'goal/samret');
+    await expect(page.locator('main')).toContainText(/Sam retires at 58 \(\d{4}\), with 85% confidence wanted/);
     expect(problems).toEqual([]);
   });
 });
