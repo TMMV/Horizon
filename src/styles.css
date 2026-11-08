@@ -1609,3 +1609,6 @@ body.setup-open main, body.setup-open .tabs { margin-right: 404px; }
 .timing-year { display: grid; gap: 2px; }
 .callout.db-pay { display: grid; gap: 6px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); margin-top: 8px; }
 .callout.db-pay p { margin: 0; }
+.sp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sp-pair > span { display: grid; gap: 2px; }
+.sp-pair small { color: var(--muted); font-size: 0.74rem; }

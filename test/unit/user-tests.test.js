@@ -369,3 +369,24 @@ test('a pension inherited from someone who died before 75 is drawn tax-free, at 
   const p = plan(true), pr = E.project(p);
   near(RV.expectedBalances(p, 3, pr).byId.pot, pr.out.byAccount.pot[3], 1);
 });
+
+test('already retired: no advice for workers, a pension in payment is not cut, the estate is shown', () => {
+  const B = require('../../src/benchmarks');
+  const p = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Eileen', age: 72, retireAge: 72, statePensionAge: 66 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 4000 }, { id: 'home', type: 'property', balance: 240000, rate: 3 }],
+    income: [
+      { name: 'Council pension', kind: 'dbpension', owner: 'p1', tax: 'uk', amount: 8400, dbScheme: 'uss', startAge: 60, freq: 'year' },
+    ],
+    expenses: [{ name: 'Living', amount: 1600, freq: 'month' }], events: [], goals: [],
+  });
+  // Paid since 60: what it pays now, not cut by early retirement factors.
+  assert.equal(E.dbEarly(p.income[0], p.household.people[0]).factor, 1);
+  near(E.incomeAfterCosts(p.income[0], p, 0), 8400, 1);
+  const ids = B.insights ? B.insights(p, E.project(p)).map(i => i.id) : null;
+  if (ids) {
+    assert.ok(!ids.includes('saving-rate'), 'no "you keep x% of take-home pay" in retirement');
+    assert.ok(ids.includes('iht'), 'what she would leave');
+  }
+});

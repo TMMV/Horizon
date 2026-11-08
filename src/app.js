@@ -1233,7 +1233,7 @@
   function goalWhen(res) {
     const g = res.goal;
     if (g.type === 'retire') return `Retire ${res.expectedYear}`;
-    if (g.type === 'debtFree') return res.expectedYear ? `Paid off ${res.expectedYear}` : 'Not paid off in the plan';
+    if (g.type === 'debtFree') return !plan().accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded) ? 'Nothing owed' : res.expectedYear ? `Paid off ${res.expectedYear}` : 'Not paid off in the plan';
     if (g.type === 'emergency') return res.expectedYear ? `Covered from ${res.expectedYear}` : 'Not covered yet';
     return res.expectedYear ? `Expected ${res.expectedYear}` : 'Not reached on average';
   }
@@ -1339,7 +1339,7 @@
     const has = t => p.goals.some(g => g.type === t);
     const hasDebt = p.accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
     return {
-      retire: p.household.people.some(x => !p.goals.some(g => g.type === 'retire' && E.retiree(p, g).id === x.id)),
+      retire: p.household.people.some(x => x.retireAge > x.age && !p.goals.some(g => g.type === 'retire' && E.retiree(p, g).id === x.id)),
       emergency: !has('emergency'),
       debtFree: hasDebt && !has('debtFree'),
       fi: !has('retire') && !p.goals.some(g => g.type === 'netWorth' && g.name === 'Financial independence'),
@@ -1618,14 +1618,14 @@
       const built = db.amount + db.dbAccrual * Math.max(0, Math.min(x.retireAge, npa) - x.age);
       const lost = Math.max(0, npa - x.retireAge) * db.dbAccrual;
       if (lost > 0.5) out.push(`${db.name}: stopping at ${x.retireAge} instead of ${npa} means ${npa - x.retireAge} fewer years building it, about ${money(lost)} a year less pension (today’s money).`);
-      if (early.npa) {
+      if (early.npa && db.startAge > x.age) {
         const at = age => {
           const f = E.dbEarly({ ...db, startAge: age }, x).factor;
           return `${money(built * f)} a year${f < 1 ? ` (${(f * 100).toFixed(1)}%)` : ''}${db.lumpMultiple ? ` + ${money(built * f * db.lumpMultiple)} lump sum` : ''}`;
         };
         out.push(db.startAge < npa
           ? `${db.name} is taken at ${db.startAge}, ${npa - db.startAge} years before its Normal Pension Age of ${npa}, so it is cut to ${at(db.startAge)}. Waiting until ${npa}: ${at(npa)}.`
-          : `${db.name} is paid in full from ${npa}: ${at(npa)}. Taking it at ${Math.max(x.retireAge, x.pensionAccessAge)} instead would cut it to ${at(Math.max(x.retireAge, x.pensionAccessAge))} (USS early retirement factors).`);
+          : `${db.name} is paid in full from ${npa}: ${at(npa)}. Taking it at ${Math.max(x.retireAge, x.pensionAccessAge)} instead would cut it to ${at(Math.max(x.retireAge, x.pensionAccessAge))} (${(R.DB_SCHEMES[db.dbScheme] || {}).label || 'the scheme'}’s early retirement factors).`);
       }
     }
     return out;
@@ -2188,7 +2188,8 @@
 
     return h('div', { class: 'rq' },
       h('div', { class: 'rq-questions' },
-        sec(1, 'When do you want to stop working?',
+        people().every(x => x.retireAge <= x.age) ? sec(1, 'You’re retired already',
+          h('p', { class: 'hint' }, 'The plan draws on pensions and savings from now. The questions below are about what you spend and what you have coming in.')) : sec(1, 'When do you want to stop working?',
           people().length > 1 && gw.goal ? h('div', { class: 'field' }, h('span', {}, 'This goal is about'), h('div', { class: 'idea-chips', role: 'group', 'aria-label': 'Whose retirement' },
             people().map(x => h('button', { type: 'button', class: 'idea-chip', 'data-owner': x.id, 'aria-pressed': String(E.retiree(p, gw.goal).id === x.id),
               onclick: () => { gw.goal.owner = x.id; changed(); renderGoalWizard(); } }, `${x.name} retiring`)))) : null,
@@ -3619,6 +3620,13 @@
     a.owner = v;
   }];
 
+  // The State Pension a year or a week (as letters give it); each fills in the other.
+  function statePensionInput(x) {
+    const year = moneyInput(() => Math.round(x.statePension * 100) / 100, v => { x.statePension = v; week.querySelector('input').value = (v / 52).toFixed(2); }, { label: 'State Pension a year' });
+    const week = moneyInput(() => Math.round(x.statePension / 52 * 100) / 100, v => { x.statePension = Math.round(v * 52 * 100) / 100; year.querySelector('input').value = x.statePension.toLocaleString('en-GB'); }, { label: 'State Pension a week' });
+    return h('div', { class: 'sp-pair' }, h('span', {}, year, h('small', {}, 'a year')), h('span', {}, week, h('small', {}, 'a week')));
+  }
+
   function ownerOptions(includeJoint) {
     const o = people().map(p => [p.id, p.name]);
     if (includeJoint && people().length > 1) o.push(['joint', 'Joint']);
@@ -4120,7 +4128,9 @@
         months >= 3 ? `Your cash (${money(held)}) covers ${months.toFixed(1)} months of spending and mortgage payments (3–6 is the usual guide).${buffer}` : `Keep 3–6 months of spending in easy-access cash before investing. Your cash (${money(held)}) covers ${months.toFixed(1)} months.${buffer}`,
         months >= 3 ? null : ['Set the buffer', () => { s.cashReserve = Math.round(3 * monthlyOut / 100) * 100; renderSection('strategy'); schedule(); }]);
     }
-    add('2. Workplace pension match', 'In full', 'Pay at least what your employer matches: their contribution is free money. Check your payslip or scheme rules.');
+    if (people().some(x => x.retireAge > x.age && p.income.some(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 0) > 0))) {
+      add('2. Workplace pension match', 'In full', 'Pay at least what your employer matches: their contribution is free money. Check your payslip or scheme rules.');
+    }
     const lisaPeople = people().filter(x => x.age >= 18 && x.age < R.LISA.payUntil && (x.age < R.LISA.openBefore || p.accounts.some(a => a.type === 'lisa' && a.owner === x.id)));
     if (lisaPeople.length) {
       add('3. Lifetime ISA', `${money(R.LISA.maxContribution / 12)} a month each`, `${lisaPeople.map(x => x.name).join(' and ')} can get a 25% bonus (${money(R.LISA.maxContribution * R.LISA.bonus)} a year each) until 50, usable from 60${E.ownsHome(p) ? '' : ' or for a first home'}. Good if you won’t need it before 60.`,
@@ -4269,6 +4279,8 @@
           const input = numInput(...bind(p, 'age'), { min: 16, max: 100 });
           input.addEventListener('change', () => {
             if (p.statePensionAge === R.statePensionAge(sy - was)) p.statePensionAge = R.statePensionAge(sy - p.age);
+            // Retired (retirement age = age): stays retired as the age is corrected.
+            if (p.retireAge === was) p.retireAge = p.age;
             was = p.age;
             renderSection('household');
             schedule();
@@ -4279,7 +4291,7 @@
       more(`person-${i}`, 'More options',
         h('div', { class: 'fields' },
           field('Plan until age', numInput(...bind(p, 'endAge'), { min: 50, max: 120 })),
-          field('State Pension (£/year, today)', moneyInput(...bind(p, 'statePension')), `Full new State Pension is ${money(R.STATE_PENSION_FULL)}. Forecast at gov.uk/check-state-pension.`),
+          field('State Pension (today)', statePensionInput(p), `Full new State Pension is ${money(R.STATE_PENSION_FULL)} a year (${money(R.STATE_PENSION_FULL / 52)} a week). Type either: your letter or forecast at gov.uk/check-state-pension gives it a week.`),
           field('State Pension age', numInput(...bind(p, 'statePensionAge'), { min: 60, max: 75 }), `Born ${plan().startYear - p.age}: ${R.statePensionAge(plan().startYear - p.age)} under current law.`),
           field('Put off the State Pension', numInput(...bind(p, 'spDefer'), { min: 0, max: 10, suffix: 'years', label: 'Years to put off the State Pension', rerender: 'household' }), spDeferText(p)),
           field('Can access pension from', numInput(...bind(p, 'pensionAccessAge'), { min: 50, max: 75 }), 'Minimum pension age is 57 from April 2028.'),
@@ -4408,8 +4420,8 @@
     }
   }
 
-  const KIND_LABELS = [['salary', 'Salary'], ['self', 'Self-employed'], ['rental', 'Rent'], ['other', 'Other income'], ['dbpension', 'Defined benefit pension (e.g. USS)'], ['annuity', 'Annuity']];
-  const kindLabel = k => (KIND_LABELS.find(x => x[0] === k) || [k, k])[1];
+  const KIND_LABELS = [['salary', 'Salary'], ['self', 'Self-employed'], ['rental', 'Rent'], ['other', 'Other income'], ['dbpension', 'Defined benefit pension (USS, NHS, council, survivor’s…)'], ['annuity', 'Annuity']];
+  const kindLabel = k => (KIND_LABELS.find(x => x[0] === k) || [k, k])[1].replace(/ \(.*\)$/, '');
 
   function setKind(item, v) {
     item.kind = v;
@@ -4459,6 +4471,16 @@
         h('span', { class: 'tag', 'data-net': item.id }, incomeTag(item, p)),
         deleteButton(`Remove ${item.name}`, () => removeFrom(p.income, item, 'income'))),
       h('div', { class: 'fields' },
+        h('div', { class: 'field' }, h('span', {}, 'Being paid now?'),
+          switchInput('Already being paid', () => item.startAge <= person.age, v => {
+            if (v) { item.startAge = person.age; item.dbAccrual = 0; item.lumpMultiple = 0; } else item.startAge = Math.max(person.age + 1, npa);
+          }, { rerender: 'income' }),
+          h('span', { class: 'hint' }, 'A pension you already receive, such as a council (LGPS) pension or a widow’s or survivor’s pension: just what it pays a year now.'))),
+      item.startAge <= person.age ? h('div', { class: 'fields' },
+        field('Whose', selectInput(ownerOptions(false), ...bind(item, 'owner'), { rerender: 'income' })),
+        field('Paid now (£ a year)', moneyInput(...bind(item, 'amount'), { label: 'Pension paid now a year' }), 'Before tax, from the pension payslip or the yearly statement. It rises with prices each year, as most do.'),
+        field('Tax', selectInput(taxOptions(item.kind), ...bind(item, 'tax'), { rerender: 'income' })),
+        noteField(item)) : h('div', { class: 'fields' },
         field('Whose', selectInput(ownerOptions(false), ...bind(item, 'owner'), { rerender: 'income' })),
         field('Scheme', selectInput(Object.entries(R.DB_SCHEMES).map(([k, v]) => [k, v.label]), ...bind(item, 'dbScheme'), { label: 'Scheme', rerender: 'income' }), 'Sets how much each year adds, the pension age and the cut for taking it early.'),
         field('Built up so far (£ a year)', moneyInput(...bind(item, 'amount'), { label: 'Pension built up so far' }), 'From the latest benefit statement.'),
@@ -4467,7 +4489,7 @@
         field('Tax-free lump sum', numInput(...bind(item, 'lumpMultiple'), { min: 0, max: 10, step: 0.5, suffix: '× pension', label: 'Lump sum multiple' }), scheme.lump ? `${scheme.label} pays ${scheme.lump}× the pension as cash; 0 if none.` : 'Most schemes let you swap some pension for a tax-free lump sum; 0 if you will not.'),
         field('Tax', selectInput(taxOptions(item.kind), ...bind(item, 'tax'), { rerender: 'income' })),
         noteField(item)),
-      h('p', { class: 'hint calc', 'data-calc': item.id }, dbWorking(item, p)),
+      item.startAge <= person.age ? null : h('p', { class: 'hint calc', 'data-calc': item.id }, dbWorking(item, p)),
       pay && pay.pensionTo !== 'db' && (pay.employeePension > 0 || pay.employerPension > 0)
         ? h('div', { class: 'callout warn-hint db-pay' }, h('p', {}, `${poss(person.name)} pay has workplace pension contributions that build a pension pot. If they go into this scheme instead, they would be counted twice.`),
           h('button', { type: 'button', class: 'btn small', onclick: () => { for (const it of p.income.filter(i => i.kind === 'salary' && i.owner === item.owner)) it.pensionTo = 'db'; renderSection('income'); refresh(); } }, `${poss(person.name)} pension contributions go into this scheme`))
@@ -5398,6 +5420,10 @@
         lwNum('careAge', 'Possible care costs from age', { min: 0, max: 110, hint: plan().household.region === 'scotland' ? '0 = leave out. Scotland pays part of personal and nursing care.' : '0 = leave out. In England the council helps only once savings (and usually the home) are below £23,250.' }),
         lwNum('careCost', 'Care costs (a year, at today’s prices)', { money: true, hint: plan().household.region === 'scotland' ? 'A care home in Scotland is often £50,000–£80,000 a year before support.' : 'A care home in England is often £55,000–£90,000 a year, more with nursing.' }),
         lwNum('careYears', 'For how many years', { min: 0, max: 20 }),
+        h('details', { class: 'care-help' }, h('summary', {}, 'Would I have to sell the house to pay for care?'),
+          plan().household.region === 'scotland'
+            ? h('p', { class: 'hint' }, 'In Scotland personal care (and nursing care in a nursing home) is paid by the council whatever you have: about £250 and £110 a week, which comes off the bill. For the rest (board and lodging), a means test counts savings over a limit (around £35,000; it changes each April) and, in a care home, usually the house, unless a partner or a relative over 60 still lives in it. The house isn’t counted for the first 12 weeks, and a deferred payment agreement can let the bill be paid from the house after death instead of selling it. Care at home doesn’t count the house. To see what selling it would do, try a scenario: sell the home in the year care starts.')
+            : h('p', { class: 'hint' }, 'In England the council helps only once savings are under £23,250. In a care home the house is usually counted, unless a partner or a relative over 60 still lives in it. The house isn’t counted for the first 12 weeks, and a deferred payment agreement can let the bill be paid from the house after death instead of selling it. Care at home doesn’t count the house. To see what selling it would do, try a scenario: sell the home in the year care starts.')),
         lwNum('careRealGrowth', 'Care rises faster than prices by', { min: 0, max: 5, step: 0.5, suffix: '% a year', hint: 'Care is mostly wages, which tend to grow faster than prices: 1% a year is a common assumption.' }),
         lwNum('familyAmount', 'Helping parents or family (a year)', { money: true }),
         lwNum('familyFrom', `From ${p1.name}'s age`, { min: 18, max: 110 }),
@@ -6492,6 +6518,16 @@
   const openMoreOptions = sel => { for (const d of $$(`${sel} details.more`)) if (!d.open) d.querySelector('summary').click(); };
   // Answers kept with the guide: where you are in life, and how you live (own, rent, with family).
   const sAnswer = key => ((ws.guides.setup && ws.guides.setup.answers) || {})[key] || '';
+  // Already retired: nobody has pay to stop, so retirement is now; savings held for drawing on
+  // start at 60% in shares (unless the mix was already changed from the default).
+  function setRetiredNow() {
+    const p = plan();
+    for (const x of p.household.people) x.retireAge = x.age;
+    for (const g of p.goals.filter(g => g.type === 'retire')) g.age = E.retiree(p, g).age;
+    if (p.assumptions.stockPctNow === 90 && p.assumptions.stockPctRetire === 60) { p.assumptions.stockPctNow = 60; p.assumptions.stockPctRetire = 60; }
+    renderPlan();
+    refresh();
+  }
   const setAnswer = (key, v) => { const g = ws.guides.setup || { date: today(), answers: {} }; g.answers = { ...g.answers, [key]: v }; ws.guides.setup = g; save(); };
   const stage = () => sAnswer('stage');
   // A tip for where you are in life, shown in a soft box.
@@ -6538,8 +6574,9 @@
         add: [['Self-employed profit', () => { goIncome(); addIncomeOf('self', { owner: people()[0].id, name: 'Self-employed profit', tax: 'uk', freq: 'year', endRef: 'retire' }); }]] },
       { title: 'Income that is not taxed, or taxed in another way', how: 'Every income has its own tax: UK income tax, no tax (already taxed, a gift, a tax-free allowance like Rent a Room up to £7,500), or a flat rate you choose (e.g. tax taken abroad). Amounts in another currency can carry an exchange rate.',
         add: [['Income with no tax', () => { goIncome(); addIncomeOf('other', { owner: 'joint', name: 'Income (no tax)', tax: 'none', endRef: 'end' }); }], ['Income from abroad', () => { goIncome(); addIncomeOf('other', { owner: 'joint', name: 'Income from abroad', tax: 'flat', taxRate: 20, fx: 1, endRef: 'end' }); }]] },
-      { title: 'Benefits', how: 'Child Benefit: other income with no tax, until the year your youngest is 16 (or 20 in education); above £60,000 of pay it is clawed back. Carer’s Allowance and most others: other income with UK income tax.',
-        add: [['Child Benefit', () => { goIncome(); addIncomeOf('other', { owner: 'joint', name: 'Child Benefit', tax: 'none', amount: Math.round(R.CHILD_BENEFIT.eldest), freq: 'year', endRef: 'year', toYear: yearsFrom(16) }); }], ['Carer’s Allowance', () => { goIncome(); addIncomeOf('other', { owner: people()[0].id, name: 'Carer’s Allowance', tax: 'uk', freq: 'year', endRef: 'year', toYear: yearsFrom(5) }); }]] },
+      { title: 'Benefits', how: 'Child Benefit: other income with no tax, until the year your youngest is 16 (or 20 in education); above £60,000 of pay it is clawed back. Carer’s Allowance and most others: other income with UK income tax. Over State Pension age, Attendance Allowance (Pension Age Disability Payment in Scotland) helps with the extra costs of an illness or disability: not means-tested and not taxed, at a lower or higher weekly rate; add it from the age you expect to claim.',
+        add: [['Child Benefit', () => { goIncome(); addIncomeOf('other', { owner: 'joint', name: 'Child Benefit', tax: 'none', amount: Math.round(R.CHILD_BENEFIT.eldest), freq: 'year', endRef: 'year', toYear: yearsFrom(16) }); }], ['Carer’s Allowance', () => { goIncome(); addIncomeOf('other', { owner: people()[0].id, name: 'Carer’s Allowance', tax: 'uk', freq: 'year', endRef: 'year', toYear: yearsFrom(5) }); }],
+          ['Attendance Allowance', () => { goIncome(); const x = people().reduce((a, b) => (b.age > a.age ? b : a)); addIncomeOf('other', { owner: x.id, name: plan().household.region === 'scotland' ? 'Pension Age Disability Payment' : 'Attendance Allowance', tax: 'none', amount: Math.round(R.ATTENDANCE_ALLOWANCE.lower * 52), freq: 'year', inflationLinked: true, startRef: 'age', startAge: Math.max(x.age, x.statePensionAge, 80), endRef: 'end' }); }]] },
       { title: 'A lodger', how: 'Rent from a lodger is tax-free up to £7,500 a year under Rent a Room: add it as Rent with no tax. Above that, choose UK income tax.',
         add: [['Lodger', () => { goIncome(); addIncomeOf('rental', { owner: 'joint', name: 'Lodger', tax: 'none', endRef: 'year', toYear: yearsFrom(3) }); }]] },
       { title: 'Living abroad, or UK tax does not apply', how: 'On Finances → Assumptions, under Household, turn off “Work out UK tax”: every amount is then taken as already taxed. Incomes can still carry their own flat tax rate.',
@@ -6585,7 +6622,7 @@
             ['Just starting out', 'First jobs, renting or living with family', () => setAnswer('stage', 'starting'), stage() === 'starting'],
             ['Building up', 'Working, maybe a mortgage or children', () => setAnswer('stage', 'building'), stage() === 'building'],
             ['Retirement in sight', 'About 15 years or less to go', () => setAnswer('stage', 'nearing'), stage() === 'nearing'],
-            ['Already retired', 'Living on pensions and savings', () => setAnswer('stage', 'retired'), stage() === 'retired'],
+            ['Already retired', 'Living on pensions and savings', () => { setAnswer('stage', 'retired'); setRetiredNow(); }, stage() === 'retired'],
           ]),
           sAsk('Where do you live?', 'Scotland has its own income tax bands (19% to 48%); England, Wales and Northern Ireland share the UK bands (20% to 45%). National Insurance, capital gains tax and pensions are the same everywhere.', [
             ['Scotland', null, () => { plan().household.region = 'scotland'; plan().household.ignoreTax = false; renderPlan(); refresh(); }, p.household.region === 'scotland'],
@@ -6609,18 +6646,19 @@
           sFields(
             sField('Name', 'Just to label things: “Sam’s pension”, “Alex retires at 60”.', 'The name at the top of each person’s card, with a pencil: click it and type.'),
             sField('Age now', 'Age today, in whole years. Everything is worked out year by year from here.'),
-            sField('Retirement age', 'When pay stops. It does not need to be right: Horizon shows how likely it is to work, and you can try other ages later.'),
+            stage() === 'retired' ? sField('Retirement age', 'Already set to your age now, as you are retired: Horizon plans from pensions and savings straight away. Change your age and it follows.', 'Set to your age now, as you are retired.')
+              : sField('Retirement age', 'When pay stops. It does not need to be right: Horizon shows how likely it is to work, and you can try other ages later.'),
           ),
           sText('Then open ', h('strong', {}, 'More options'), ' under each person:'),
           sFields(
             sField('Plan until age', 'How long the money needs to last. 95 is a cautious choice: about 1 in 4 people now in their 60s reach it.'),
-            sField('State Pension (£/year, today)', `What the State Pension will pay you a year, in today’s money. Get your forecast at gov.uk/check-state-pension: it depends on your years of National Insurance (35 years for the full ${money(R.STATE_PENSION_FULL)} a year). Enter the yearly figure.`),
+            sField('State Pension (today)', `What the State Pension will pay you, in today’s money: a year or a week, whichever your letter gives. Get your forecast at gov.uk/check-state-pension: it depends on your years of National Insurance (35 years for the full ${money(R.STATE_PENSION_FULL)} a year). Enter the yearly figure.`),
             sField('State Pension age', 'When it starts. Set by your date of birth: 66 now, rising to 67 and 68. Your forecast says yours.'),
             sField('Can access pension from', 'The earliest age you can take money from a workplace or personal pension. 57 for most people from April 2028; some older schemes allow 55.'),
           ),
           sField('Student loan', 'Also under More options. Repaid through your payslip: 9% of pay above a threshold (6% for a postgraduate loan), until it is paid off or written off. Choose your plan, what you owe and the year it is written off: Horizon works out the repayments, and when it ends your take-home pay rises.', stage() === 'starting' || stage() === 'building' ? 'Your plan, balance and write-off year are in your Student Loans Company account.' : null),
           stage() === 'nearing' || stage() === 'retired' ? sField('Put off the State Pension', `Also under More options. If you do not need it yet, putting it off adds about ${(R.SP_DEFER_PER_YEAR * 100).toFixed(1)}% a year for life. It takes about 17 years of the higher amount to catch up, so it pays if you are healthy and have other income meanwhile.`) : null,
-          stage() === 'retired' ? sTip('Already retired? Set the retirement age to your age now: Horizon then plans from pensions and savings straight away.') : null,
+          stage() === 'retired' ? sTip('Pensions you already receive go under Income, as an amount a year now. The State Pension can be typed a week, as on your letter.') : null,
           stage() === 'nearing' ? sTip('With retirement in sight, the State Pension forecast matters most: get yours (and your partner’s) at gov.uk/check-state-pension. If there are gaps in your National Insurance record, the forecast says whether buying extra years is worth it.') : null,
           stage() === 'starting' ? sTip('Starting out: put the age you would like to stop work (it can be far off; 67 or 68 is the State Pension age for you). The point is to see what today’s choices do.') : null,
           h('div', { class: 'st-adds' }, h('button', { type: 'button', class: 'btn small', onclick: () => openMoreOptions('#sec-household') }, 'Open “More options”')),

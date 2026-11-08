@@ -60,6 +60,8 @@
   };
   const TAX_FREE_CHILDCARE = { topUp: 0.2, capPerChild: 2000, incomeLimit: 100000, maxAge: 11 };
   const JUNIOR_ISA_ALLOWANCE = 9000;
+  // Attendance Allowance / Pension Age Disability Payment (Scotland), a week, 2025/26 rates.
+  const ATTENDANCE_ALLOWANCE = { lower: 73.90, higher: 110.40 };
   // Inheritance tax, per person: nil-rate band and residence nil-rate band (frozen to April 2030),
   // the residence band withdrawn £1 for every £2 of estate over £2m; 40% above. Gifts of up to
   // £3,000 a year are exempt.
@@ -193,7 +195,7 @@
     TAX_YEAR, PERSONAL_ALLOWANCE, PA_TAPER_START, INCOME_TAX, NI, CGT, IHT,
     ISA_ALLOWANCE, STATE_PENSION_FULL, LUMP_SUM_ALLOWANCE, PENSION_TAX_FREE_SHARE,
     MIN_PENSION_AGE, PENSION_ANNUAL_ALLOWANCE, FREEZE_UNTIL, SACRIFICE_NI_CAP, SACRIFICE_NI_CAP_FROM,
-    CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, DB_SCHEMES, USS_EARLY, LISA, CLASS4, STUDENT_LOANS, selfEmployedNI, SP_DEFER_PER_YEAR,
+    CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, ATTENDANCE_ALLOWANCE, DB_SCHEMES, USS_EARLY, LISA, CLASS4, STUDENT_LOANS, selfEmployedNI, SP_DEFER_PER_YEAR,
     statePensionAge, grossFromTakeHome, personalAllowance, incomeTax, marginalRate, nationalInsurance,
     capitalGainsTax, bandTable,
   };

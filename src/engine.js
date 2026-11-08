@@ -829,7 +829,7 @@
   // publishes its factors; other schemes are not reduced here). Years early, and the share kept.
   function dbEarly(item, person) {
     const s = R.DB_SCHEMES[item.dbScheme];
-    if (!s || !s.early) return { npa: null, years: 0, factor: 1 };
+    if (!s || !s.early || item.startAge <= person.age) return { npa: null, years: 0, factor: 1 };
     const npa = s.age === 'spa' ? person.statePensionAge : s.age;
     const years = Math.max(0, npa - item.startAge);
     const i = Math.min(s.early.length - 1, Math.floor(years));

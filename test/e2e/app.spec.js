@@ -1901,6 +1901,36 @@ test.describe('round 2 fixes', () => {
     expect(problems).toEqual([]);
   });
 
+  test('already retired: retirement is now, a pension being paid is one amount, the State Pension a week', async ({ page }) => {
+    const { problems } = await openApp(page, '', { setup: true });
+    const panel = page.locator('#setupPanel');
+    await panel.locator('.st-choice', { hasText: 'Yes, start my own plan' }).click();
+    await panel.locator('.st-choice', { hasText: 'Already retired' }).click();
+    const plan = () => page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    let q = await plan();
+    expect(q.household.people[0].retireAge).toBe(q.household.people[0].age);
+    expect(q.assumptions.stockPctNow).toBe(60);
+    await page.click('#setupNext');
+    await expect(panel).toContainText('Set to your age now, as you are retired.');
+    await page.keyboard.press('Escape');
+    // The State Pension typed a week fills in the year.
+    await go(page, 'finances/assumptions');
+    await page.locator('#sec-household summary', { hasText: 'More options' }).first().click();
+    const week = page.locator('#sec-household input[aria-label="State Pension a week"]').first();
+    await week.fill('230');
+    await week.blur();
+    q = await plan();
+    expect(q.household.people[0].statePension).toBe(11960);
+    // A council pension already being paid: one amount a year now.
+    await go(page, 'finances/income');
+    await page.locator('#sec-income .add-row button', { hasText: '+ Defined benefit pension' }).click();
+    const db = page.locator('#sec-income [data-editing]').last();
+    await db.locator('label.switch', { hasText: 'Already being paid' }).click();
+    await expect(page.locator('#sec-income [data-editing]').last()).toContainText('Paid now (£ a year)');
+    await expect(page.locator('#sec-income [data-editing]').last()).not.toContainText('Added each year you keep working');
+    expect(problems).toEqual([]);
+  });
+
   test('a goal that leaves out pensions says what it counts, next to what Home shows', async ({ page }) => {
     const { problems } = await openApp(page);
     await page.evaluate(() => {

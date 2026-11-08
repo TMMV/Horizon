@@ -132,7 +132,9 @@
       const fromNet = P.netPay[0] > 0 ? R.grossFromTakeHome(P.netPay[0], plan.household.region) : 0;
       return { name: plan.household.people[i].name, ani: P.taxable[0] + fromNet, estimated: P.netPay[0] > 0 };
     });
-    return { takeHome, spending: r.spending, debtPay: r.debtPay || 0, saved: r.saved || 0, people };
+    // Someone earning pay this year (not only pensions and other income).
+    const working = pre.people.some(P => P.gross[0] + P.netPay[0] + (P.selfProfit ? P.selfProfit[0] : 0) > 0);
+    return { takeHome, spending: r.spending, debtPay: r.debtPay || 0, saved: r.saved || 0, people, working };
   }
 
   // What the plan leaves at the end, in today's money, and a rough inheritance tax bill: the
@@ -208,8 +210,8 @@
         text: `No saving or investment reliably earns that, so the plan pays it off first with anything left over, before building cash or investing; keep only a small cash cushion meanwhile. A 0% balance transfer card, or paying from savings that earn less, clears it faster.` });
     }
 
-    // 2. Saving rate
-    if (m.takeHome > 0) {
+    // 2. Saving rate (while someone is earning; in retirement the income is pensions)
+    if (m.takeHome > 0 && m.working) {
       const keep = (m.takeHome - r0.spending - m.debtPay) / m.takeHome;
       const tone = keep >= 0.2 ? 'good' : keep >= 0.1 ? 'tip' : 'warn';
       out.push({ id: 'saving-rate', tone, title: `You keep ${Math.round(keep * 100)}% of take-home pay`, text: `After spending and mortgage payments, from ${money(m.takeHome / 12)} a month coming in. A popular guide is 50% needs, 30% wants, 20% saving.`, value: keep });
@@ -271,7 +273,7 @@
     const allowance = s.isaAllowance * plan.household.people.length;
     const firstGia = proj.rows.findIndex((r, t) => t < proj.pre.N && r.toGia > 100);
     const topRate = Math.max(0, ...m.people.map(x => (x.ani > 0 ? R.incomeTax(x.ani + 100, plan.household.region) - R.incomeTax(x.ani, plan.household.region) : 0)));
-    const toPensions = taxOn && topRate >= 40 && !s.pensionFirst;
+    const toPensions = taxOn && topRate >= 40 && !s.pensionFirst && m.working;
     if (firstGia >= 0) {
       const r = proj.rows[firstGia];
       const years = proj.rows.filter(x => x.toGia > 100).length;
@@ -377,8 +379,10 @@
     const ih = inheritance(plan, proj);
     // Only worth raising once it is near enough to plan for, or the estate already passes the allowances.
     const oldest = Math.max(...plan.household.people.map(x => x.age));
-    if (taxOn && ih && kids.length && (oldest >= 50 || r0.netWorth / proj.rows[0].deflator > ih.free / 2)) {
+    if (taxOn && ih && (kids.length || oldest >= 60) && (oldest >= 50 || r0.netWorth / proj.rows[0].deflator > ih.free / 2)) {
       const { estate, free, tax, n } = ih;
+      if (tax <= 10000 && estate > 1000) out.push({ id: 'iht', tone: 'info', title: `You would leave about ${money(estate)}`, action: 'guide:estate',
+        text: `What the plan leaves at the end, in today’s money: homes and pensions included (unused pensions count for inheritance tax from April 2027).${tax > 0.5 ? ` About ${money(tax)} of inheritance tax` : ' No inheritance tax'}: up to ${money(free)} of allowances${n > 1 ? ' for a couple' : ''} pass free${ih.home > 0 ? ', the home allowance included when it goes to children or grandchildren' : ''}.` });
       if (tax > 10000) out.push({ id: 'iht', tone: tax > 250000 ? 'tip' : 'info', title: `Inheritance tax could take about ${money(tax)}`, action: 'guide:estate',
         text: `The plan leaves about ${money(estate)} in today’s money at the end, homes and pensions included (unused pensions count from April 2027). Above ${money(free)} of allowances${n > 1 ? ' for a couple' : ''}${estate > R.IHT.taperFrom ? ' (the home allowance shrinks above £2 million)' : ''}, 40% is due. To pass on more: regular gifts from surplus income are free of tax if they don’t lower your standard of living; ${money(R.IHT.annualGift)} a year each can be given anyway; larger gifts are free after 7 years; Junior ISAs and pensions for children; or spend more yourselves. Wills and pension nominations matter too (Guides, Protection & paperwork).` });
     }
