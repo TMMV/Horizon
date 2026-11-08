@@ -1609,7 +1609,12 @@
   // What stopping work at their planned age means for one person, in plan `p`.
   function retireConsequences(p, x) {
     const out = [];
-    if (x.retireAge < E.spStart(x)) out.push(`No State Pension for ${E.spStart(x) - x.retireAge} years after stopping work (it starts at ${E.spStart(x)}). A full State Pension needs 35 qualifying years of National Insurance: check the record at gov.uk/check-state-pension; voluntary contributions can fill gaps.`);
+    if (x.retireAge < E.spStart(x)) {
+      const y = E.spYears(x);
+      out.push(`No State Pension for ${E.spStart(x) - x.retireAge} years after stopping work (it starts at ${E.spStart(x)}). ${!y.known ? 'A full State Pension needs 35 qualifying years of National Insurance, and a forecast assumes you keep paying until State Pension age: add your qualifying years so far (under More options for each person) to see what stopping early costs.'
+        : y.missing > 0 ? `Stopping at ${x.retireAge} leaves ${y.projected} of the ${y.forecast} NI years the forecast assumes, so about ${money(x.statePension * y.share)} a year instead of ${money(x.statePension)}. Voluntary NI (about ${money(R.NI_YEARS.class3Week * 52)} a year for ${y.missing} year${y.missing === 1 ? '' : 's'}) would buy it back.`
+        : y.voluntary ? `Voluntary NI for ${y.voluntary} year${y.voluntary === 1 ? '' : 's'} after stopping keeps the full forecast.` : 'The NI record is full by then, so the State Pension is not affected.'}`);
+    }
     if (p.accounts.some(a => a.type === 'pension' && a.owner === x.id && !a.excluded)) {
       out.push(x.retireAge < x.pensionAccessAge
         ? `Personal and workplace pensions can’t be drawn until ${x.pensionAccessAge}: ${x.pensionAccessAge - x.retireAge} years living on ISAs, savings and other income first.`
@@ -2368,8 +2373,8 @@
     const xs = rows.map(r => r.year);
     const col = (fn, sign = 1) => rows.map((r, t) => sign * D(fn(r), t));
     const bars = [
-      { label: 'Earnings', color: '--s1', values: col(r => r.earnings) },
-      { label: 'Other income', color: '--s2', values: col(r => r.otherIncome) },
+      // Pay and other income together (the table keeps them apart): fewer bands to read.
+      { label: 'Pay & other income', color: '--s1', values: col(r => r.earnings + r.otherIncome) },
       { label: 'State Pension', color: '--s3', values: col(r => r.statePension) },
       { label: 'From savings', color: '--s4', values: col(r => r.withdrawals) },
       { label: 'Not covered', color: '--muted', values: col(r => r.unfunded) },
@@ -3621,7 +3626,7 @@
     });
     // Redraw the section once the number is finished (leaving the field or Enter), not on every
     // key: redrawing while typing would take the cursor away after the first digit.
-    if (opts.rerender) input.addEventListener('change', () => { renderSection(opts.rerender); schedule(); });
+    if (opts.rerender) input.addEventListener('change', () => { redrawKeepFocus(opts.rerender); schedule(); });
     if (!opts.suffix) return input;
     return h('div', { class: 'adorn has-suf' }, input, h('span', { class: 'suf' }, opts.suffix));
   }
@@ -3629,7 +3634,7 @@
   function selectInput(options, get, set, opts = {}) {
     return h('select', {
       'aria-label': opts.label, disabled: opts.disabled,
-      onchange: e => { set(e.target.value); if (opts.rerender) renderSection(opts.rerender); schedule(); },
+      onchange: e => { set(e.target.value); if (opts.rerender) redrawKeepFocus(opts.rerender); schedule(); },
     }, options.map(([v, l]) => h('option', { value: v, selected: String(get()) === String(v) }, l)));
   }
 
@@ -3648,6 +3653,17 @@
     if (was && now && a.name.startsWith(`${was.name} `)) a.name = `${now.name}${a.name.slice(was.name.length)}`;
     a.owner = v;
   }];
+
+  // What the NI record gives: the years by State Pension age, and the share of the forecast.
+  function niText(x) {
+    const y = E.spYears(x);
+    if (!y.known) return 'From “Check your National Insurance record” on gov.uk. With it, Horizon works out what stopping work early does to the State Pension (the forecast assumes you keep paying NI until State Pension age).';
+    const sp = money(x.statePension * y.share);
+    if (y.projected < R.NI_YEARS.min) return `${y.projected} years by State Pension age: under the ${R.NI_YEARS.min} needed for any State Pension.`;
+    return y.missing > 0
+      ? `Stopping work at ${x.retireAge} gives ${y.projected} of ${y.forecast} years, so about ${sp} a year (today’s money) instead of the forecast ${money(x.statePension)}. Voluntary NI after stopping can fill the ${y.missing} missing year${y.missing === 1 ? '' : 's'}.`
+      : `${y.projected} years by State Pension age${y.voluntary ? `, ${y.voluntary} of them voluntary (paid in the plan from ${x.retireAge})` : ''}: the full forecast, ${sp} a year.`;
+  }
 
   // The State Pension a year or a week (as letters give it); each fills in the other.
   function statePensionInput(x) {
@@ -4002,7 +4018,7 @@
     if (editing.has(id)) {
       const body = editor();
       // Remove comes last, after Done, so tabbing through the fields never lands on it first.
-      const remove = body.querySelector && body.querySelector('.item-head > .icon-btn[aria-label^="Remove"]');
+      const remove = body.querySelector && body.querySelector('.item-head > .icon-btn[aria-label^="Remove"], .row-main > .icon-btn[aria-label^="Remove"]');
       if (remove) { remove.textContent = 'Remove'; remove.className = 'btn small ghost danger-text'; }
       return h('div', { class: 'edit-wrap', 'data-editing': id, style: `--item-color:${cssVar(color)}` }, body,
         h('div', { class: 'edit-done' }, h('button', { type: 'button', class: 'btn small primary', onclick: () => closeEdit(id, sectionId) }, 'Done'), remove));
@@ -4242,6 +4258,27 @@
     renderMoneyNav();
   }
 
+  // Redraw a section after a finished edit without losing the field the person moved to: a
+  // number is "changed" when its field is left, often by clicking the next one, and a plain
+  // redraw would replace that field under the click. Wait for the click, then put the cursor
+  // back in the same field (found again by its label and position).
+  function redrawKeepFocus(id) {
+    setTimeout(() => {
+      // Visible form fields only: hidden ones and buttons change in number between redraws.
+      const fields = box => [...box.querySelectorAll('input, select, textarea')].filter(x => x.getClientRects().length);
+      const box = document.getElementById(`sec-${id}`);
+      const el = document.activeElement;
+      const k = box && el && box.contains(el) ? fields(box).indexOf(el) : -1;
+      const sel = el && typeof el.selectionStart === 'number' ? [el.selectionStart, el.selectionEnd] : null;
+      renderSection(id);
+      if (k < 0) return;
+      const again = fields(document.getElementById(`sec-${id}`))[k];
+      if (!again || again.tagName !== el.tagName) return;
+      again.focus({ preventScroll: true });
+      if (sel) try { again.setSelectionRange(sel[0], sel[1]); } catch { /* number inputs have no selection */ }
+    }, 0);
+  }
+
   function renderSection(id) {
     const s = SECTIONS.find(x => x.id === id);
     const el = $(`#sec-${id}`);
@@ -4291,6 +4328,7 @@
       set(input.value.trim() === '' || !Number.isFinite(v) ? null : v);
       schedule();
     });
+    if (opts.rerender) input.addEventListener('change', () => { redrawKeepFocus(opts.rerender); schedule(); });
     return h('div', { class: 'adorn has-suf' }, input, h('span', { class: 'suf' }, opts.suffix || '%'));
   }
 
@@ -4311,7 +4349,7 @@
             // Retired (retirement age = age): stays retired as the age is corrected.
             if (p.retireAge === was) p.retireAge = p.age;
             was = p.age;
-            renderSection('household');
+            redrawKeepFocus('household');
             schedule();
           });
           return input;
@@ -4320,6 +4358,11 @@
       more(`person-${i}`, 'More options',
         h('div', { class: 'fields' },
           field('Plan until age', numInput(...bind(p, 'endAge'), { min: 50, max: 120 })),
+          field('NI qualifying years so far', optNumInput(...bind(p, 'niYears'), { placeholder: 'Not sure', step: 1, suffix: 'years', label: 'NI qualifying years so far', rerender: 'household' }),
+            h('span', { 'data-ni': p.id }, niText(p))),
+          p.niYears !== null ? h('div', { class: 'field' }, h('span', {}, 'After stopping work'),
+            switchInput('Pay voluntary NI to fill the missing years', ...bind(p, 'niVoluntary'), { rerender: 'household' }),
+            h('span', { class: 'hint' }, `Class 3, about ${money(R.NI_YEARS.class3Week * 52)} a year; each year adds about ${money(R.STATE_PENSION_FULL / R.NI_YEARS.full)} a year of State Pension, for life.`)) : null,
           field('State Pension (today)', statePensionInput(p), `Full new State Pension is ${money(R.STATE_PENSION_FULL)} a year (${money(R.STATE_PENSION_FULL / 52)} a week). Type either: your letter or forecast at gov.uk/check-state-pension gives it a week.`),
           field('State Pension age', numInput(...bind(p, 'statePensionAge'), { min: 60, max: 75 }), `Born ${plan().startYear - p.age}: ${R.statePensionAge(plan().startYear - p.age)} under current law.`),
           field('Put off the State Pension', numInput(...bind(p, 'spDefer'), { min: 0, max: 10, suffix: 'years', label: 'Years to put off the State Pension', rerender: 'household' }), spDeferText(p)),
@@ -4720,7 +4763,8 @@
   // Why an income has nothing this year: no amount yet, or when it starts.
   function notYetText(item, p) {
     if (!(item.amount > 0)) return 'Amount still to fill in';
-    for (let t = 1; t < 80; t++) if (E.incomeAfterCosts(item, p, t) > 0) return `From ${p.startYear + t}`;
+    const at = t => (item.kind ? E.incomeAfterCosts(item, p, t) : E.streamAt(item, p, t));   // income, or an expense
+    for (let t = 1; t < 80; t++) if (at(t) > 0) return `From ${p.startYear + t}`;
     return 'Not this year';
   }
 
@@ -4760,20 +4804,21 @@
     const now = p.expenses.reduce((acc, e) => acc + E.streamAt(e, p, 0), 0);
     const rowOf = item => {
       const amt = E.streamAt(item, p, 0);
-      const more = h('details', {},
+      const moreKey = `expense-${item.id}`;
+      const more = h('details', { open: openMore.has(moreKey) },
         h('summary', { class: 'btn small ghost', 'aria-label': `More options for ${item.name}` }, 'More'));
-      const panel = h('div', { class: 'row-more', hidden: true },
+      const panel = h('div', { class: 'row-more', hidden: !openMore.has(moreKey) },
         h('div', { class: 'fields' },
           growthControl(item, 'expenses'),
           field('Starts', timingControl(item, 'start', 'expenses')),
           people().length > 1 ? field('Ages refer to', selectInput(ownerOptions(false), () => (item.owner === 'joint' ? 'p1' : item.owner), v => { item.owner = v; }, { label: 'Ages refer to' })) : null,
           noteField(item)));
-      more.addEventListener('toggle', () => { panel.hidden = !more.open; });
+      more.addEventListener('toggle', () => { panel.hidden = !more.open; if (more.open) openMore.add(moreKey); else openMore.delete(moreKey); });
       return h('div', { class: 'row-item', style: `--item-color:${cssVar('--s5')}` },
         h('div', { class: 'row-main' },
           h('div', { class: 'name-cell' },
             h('input', { type: 'text', class: 'name', value: item.name, 'aria-label': 'Expense name', oninput: e => { item.name = e.target.value; schedule(); } }),
-            amt <= 0 ? h('span', { class: 'tag' }, 'Not this year') : item.category ? h('span', { class: 'tag' }, item.category) : null),
+            amt <= 0 ? h('span', { class: 'tag' }, notYetText(item, p)) : item.category ? h('span', { class: 'tag' }, item.category) : null),
           moneyInput(...bind(item, 'amount'), { label: `${item.name} amount` }),
           selectInput([['month', 'a month'], ['year', 'a year']], ...bind(item, 'freq'), { label: 'Frequency', rerender: 'expenses' }),
           timingControl(item, 'end', 'expenses'),
@@ -4795,7 +4840,7 @@
     if (s.spendNowPct !== 100) adjust.push(`scaled to ${s.spendNowPct}% before retirement`);
     if (s.retireSpending > 0) adjust.push(`replaced by ${money(s.retireSpending)} a year after retirement`);
     return [
-      sectionHead('expenses', 'Spending', null,
+      sectionHead('expenses', 'Spending', 'Bills paid over 10 months, like council tax: enter the year’s total as “a year”.',
         h('button', { type: 'button', class: 'btn small primary', onclick: openWizard }, 'Spending check-up'),
         h('button', { type: 'button', class: 'btn small', id: 'lifeBtn', onclick: openLifeWizard, title: 'Children, cars, home repairs, retirement travel and care: big costs that come later, added as dated spending items' }, 'Future costs'),
         h('button', { type: 'button', class: 'btn small', onclick: () => { const e = E.normalizePlan({ ...p, expenses: [{ name: 'New expense', amount: 0, freq: 'month', inflationLinked: true }] }).expenses[0]; p.expenses.push(e); editing.add(e.id); renderSection('expenses'); refresh(); showNew(e.id); } }, '+ Add expense')),
@@ -6537,7 +6582,8 @@
       h('p', { class: 'st-q' }, h('strong', {}, question), sInfo(question, why)),
       h('div', { class: 'st-choices' }, choices.map(([label, sub, pick, on]) => h('button', {
         type: 'button', class: 'st-choice', 'aria-pressed': String(!!on),
-        onclick: () => { pick(); renderSetup(); },
+        // Redraw where it was: a choice must not jump the panel back to the top.
+        onclick: () => { const b = $('#setupBody'), top = b ? b.scrollTop : 0; pick(); renderSetup(); const nb = $('#setupBody'); if (nb) nb.scrollTop = top; },
       }, h('strong', {}, label), sub ? h('small', {}, sub) : null))));
   }
   // Buttons that add an item and open it on the page.
@@ -6976,6 +7022,8 @@
 
   function closeSetup() {
     setupStep = null;
+    // Closed on purpose: it doesn't come back on the next visit.
+    if (ws.guides.setup && ws.guides.setup.answers) { const { open, ...rest } = ws.guides.setup.answers; ws.guides.setup = { ...ws.guides.setup, answers: rest }; save(); }
     document.body.classList.remove('setup-open');
     for (const el of $$('.setup-focus')) el.classList.remove('setup-focus');
     setupPanel().hidden = true;
@@ -6986,7 +7034,7 @@
     setupStep = i;
     const st = SETUP_STEPS[i];
     const was = (ws.guides.setup && ws.guides.setup.answers) || {};
-    ws.guides.setup = { date: today(), answers: { ...was, step: String(i), ...(i === SETUP_STEPS.length - 1 || was.done ? { done: 'yes' } : {}) } };
+    ws.guides.setup = { date: today(), answers: { ...was, step: String(i), open: 'yes', ...(i === SETUP_STEPS.length - 1 || was.done ? { done: 'yes' } : {}) } };
     save();
     if (st.route && route.tab + (route.sub && route.tab === 'finances' ? `/${route.sub}` : '') !== st.route) navigate(st.route);
     renderSetup();
@@ -7136,7 +7184,9 @@
   if (infoObserver) infoObserver.observe(document.body, { childList: true, subtree: true });
   decorate(document.body);
   // The first time Horizon opens in this browser: offer the guide to set up your own plan.
-  if (firstVisit && !/[?&]nosetup\b/.test(location.search)) openSetup(0);
+  // First visit, or the guide was open when the page was left (a reload carries on where it was).
+  const guideWasOpen = ws.guides.setup && ws.guides.setup.answers && ws.guides.setup.answers.open === 'yes';
+  if ((firstVisit || guideWasOpen) && !/[?&]nosetup\b/.test(location.search)) openSetup(firstVisit ? 0 : undefined);
 
   // Exposed for automated tests only.
   window.__horizon = { get ws() { return ws; }, get model() { return model; }, get route() { return route; }, refresh, showTab, navigate, openReview, openUpdate, openSetup };

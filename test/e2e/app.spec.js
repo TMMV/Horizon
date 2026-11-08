@@ -1951,6 +1951,27 @@ test.describe('round 2 fixes', () => {
     expect(problems).toEqual([]);
   });
 
+  test('typing in one field and clicking the next keeps both; an expense’s More stays open', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/assumptions');
+    const card = page.locator('#sec-household .people .item').first();
+    const age = card.locator('input[aria-label="Age now"], .fields input[type="number"]').first();
+    await age.click();
+    await age.fill('41');
+    await card.locator('.fields input[type="number"]').nth(1).click();
+    await page.keyboard.press('Control+a');
+    await page.keyboard.type('62');
+    await page.keyboard.press('Tab');
+    await expect.poll(() => page.evaluate(() => window.__horizon.ws.scenarios[0].plan.household.people[0].retireAge)).toBe(62);
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.household.people[0].age)).toBe(41);
+    // Spending: Starts → In year… keeps the More panel open with its year box.
+    await go(page, 'finances/spending');
+    await page.locator('#sec-expenses .sum-row').first().click();
+    await page.locator('#sec-expenses [data-editing] details summary').first().click();
+    await page.locator('#sec-expenses [data-editing] select[aria-label="Starts"]').selectOption('year');
+    await expect(page.locator('#sec-expenses [data-editing] input[aria-label="First year"]')).toBeVisible();
+    expect(problems).toEqual([]);
+  });
+
   test('a goal that leaves out pensions says what it counts, next to what Home shows', async ({ page }) => {
     const { problems } = await openApp(page);
     await page.evaluate(() => {

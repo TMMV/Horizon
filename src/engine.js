@@ -247,6 +247,10 @@
       loanRate: optNum(p.loanRate),
       // Years the State Pension is put off after State Pension age (it then pays more, for life).
       spDefer: Math.min(10, Math.max(0, Math.round(num(p.spDefer, 0)))),
+      // Qualifying years on the National Insurance record so far (null = not given: the State
+      // Pension is taken as entered), and whether to pay voluntary NI after stopping work.
+      niYears: p.niYears === null || p.niYears === undefined || p.niYears === '' || !Number.isFinite(+p.niYears) ? null : Math.max(0, Math.min(50, Math.round(+p.niYears))),
+      niVoluntary: !!p.niVoluntary,
     };
   }
 
@@ -254,6 +258,21 @@
   // 5.8% a year), for life, on the new State Pension.
   const spStart = p => p.statePensionAge + (p.spDefer || 0);
   const spDeferUplift = p => 1 + R.SP_DEFER_PER_YEAR * (p.spDefer || 0);
+
+  // National Insurance years and the share of the State Pension forecast they give. A forecast
+  // assumes NI is paid every year until State Pension age; stopping work earlier leaves those
+  // years out, unless voluntary contributions fill them (each year from retirement, until 35).
+  function spYears(p) {
+    const none = { known: false, share: 1, voluntary: 0, forecast: null, projected: null };
+    if (p.niYears === null || p.niYears === undefined) return none;
+    const N = R.NI_YEARS, spa = p.statePensionAge;
+    const forecast = Math.min(N.full, p.niYears + Math.max(0, spa - p.age));
+    const worked = Math.min(N.full, p.niYears + Math.max(0, Math.min(p.retireAge, spa) - p.age));
+    const voluntary = p.niVoluntary ? Math.max(0, forecast - worked) : 0;
+    const projected = worked + voluntary;
+    const share = projected < N.min ? 0 : forecast > 0 ? projected / Math.max(N.min, forecast) : 0;
+    return { known: true, share: Math.min(1, share), voluntary, forecast, projected, worked, missing: forecast - projected };
+  }
 
   function normalizeTiming(item, defStart, defEnd) {
     return {
@@ -1104,7 +1123,11 @@
         const P = pre.people[i];
         const age = p.age + t;
         if (age >= spStart(p)) {
-          P.statePension[t] = p.statePension * spDeferUplift(p) * price * Math.pow(1 + a.statePensionRealGrowth / 100, t);
+          P.statePension[t] = p.statePension * spYears(p).share * spDeferUplift(p) * price * Math.pow(1 + a.statePensionRealGrowth / 100, t);
+        }
+        const ny = spYears(p);
+        if (ny.voluntary > 0 && age >= p.retireAge && age < p.retireAge + ny.voluntary && age < p.statePensionAge) {
+          pre.eventsOut[t] += R.NI_YEARS.class3Week * 52 * price;
         }
         if (p.extraPension > 0 && age < p.retireAge) {
           P.extraOut[t] = p.extraPension * 12 * price;
@@ -2574,7 +2597,7 @@
 
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
-    incomeAfterCosts, taxOf, pensionSplit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
+    incomeAfterCosts, taxOf, pensionSplit, spYears, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     streamAt, streamWindow, isActive, growthFactor, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,

@@ -454,7 +454,7 @@ table.data tr.sep td { border-top: 2px solid var(--border-strong); }
 .explorer-levers { display: grid; gap: 10px; }
 .explorer-results { position: sticky; top: 60px; min-width: 0; }
 .explorer.in-wizard { grid-template-columns: minmax(260px, 340px) 1fr; }
-.explorer.in-wizard .explorer-results { position: static; }
+.explorer.in-wizard .explorer-results { position: sticky; top: 0; }   /* the trade-offs stay in view beside the sliders */
 .lever-group { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
 .lever-group > summary { cursor: pointer; list-style: none; display: grid; gap: 2px; }
 .lever-group > summary::-webkit-details-marker { display: none; }

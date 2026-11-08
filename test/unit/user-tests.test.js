@@ -390,3 +390,24 @@ test('already retired: no advice for workers, a pension in payment is not cut, t
     assert.ok(ids.includes('iht'), 'what she would leave');
   }
 });
+
+test('stopping work before State Pension age leaves NI years out, unless voluntary NI fills them', () => {
+  const plan = extra => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Morven', age: 38, retireAge: 57, statePensionAge: 68, niYears: 10, ...extra }] },
+    accounts: [{ id: 'isa', type: 'isa', owner: 'p1', balance: 100000 }], income: [],
+    expenses: [{ name: 'Living', amount: 1000, freq: 'month' }], events: [], goals: [],
+  });
+  // 10 years so far + 19 to 57 = 29 of the 35 the forecast assumes.
+  const y = E.spYears(plan({}).household.people[0]);
+  assert.equal(y.forecast, 35); assert.equal(y.projected, 29);
+  const sp = t => E.precompute(plan(t)).people[0].statePension[30];
+  const full = E.precompute(plan({ niYears: null })).people[0].statePension[30];
+  near(sp({}), full * 29 / 35, 1);
+  // Voluntary Class 3 from 57 buys the 6 years back, at about £923 a year for 6 years.
+  near(sp({ niVoluntary: true }), full, 1);
+  const pre = E.precompute(plan({ niVoluntary: true }));
+  assert.ok(pre.eventsOut[19] > 900 && pre.eventsOut[24] > 900 && pre.eventsOut[25] === 0 && pre.eventsOut[18] === 0, 'paid at 57–62 only');
+  // Fewer than 10 years: none at all.
+  assert.equal(E.spYears(plan({ niYears: 0, retireAge: 45 }).household.people[0]).share, 0);
+});
