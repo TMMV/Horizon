@@ -123,6 +123,11 @@ test('the review is due from October, for the calendar year', () => {
   assert.equal(RV.due(ws, new Date(`${y + 2}-03-01`)).reason, 'behind');
   ws.checkins.push(E.makeCheckin(ws.scenarios[0].plan, 'x', `${y}-10-04`));
   assert.deepEqual(RV.due(ws, new Date(`${y}-10-20`)), { due: false, next: y + 1 });
+  // A plan set up this autumn isn't due until next October.
+  const fresh = workspace();
+  fresh.checkins = [];
+  fresh.scenarios[0].plan.asOf = `${y}-10-15`;
+  assert.deepEqual(RV.due(fresh, new Date(`${y}-10-20`)), { due: false, next: y + 1 });
   assert.equal(RV.suggestedYear(ws.scenarios[0].plan, new Date(`${y}-11-01`)), y);
   assert.equal(RV.suggestedYear(ws.scenarios[0].plan, new Date(`${y + 1}-10-01`)), y + 1);
 });

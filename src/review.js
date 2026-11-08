@@ -487,7 +487,8 @@
     const y = today.getFullYear();
     const year = suggestedYear(scen.plan, today);
     if (scen.plan.startYear < y - 1) return { due: true, year, reason: 'behind' };
-    const reviewed = (ws.checkins || []).some(c => c.date >= `${y}-09-01`);
+    // Figures from this autumn (a plan just set up, or updated since September) count as reviewed.
+    const reviewed = (ws.checkins || []).some(c => c.date >= `${y}-09-01`) || ((scen.plan.asOf || '') >= `${y}-09-01` && scen.plan.asOf <= E.todayISO(today));
     if (today.getMonth() >= 9 && !reviewed) return { due: true, year, reason: 'october' };
     return { due: false, next: reviewed || today.getMonth() >= 9 ? y + 1 : y };
   }

@@ -261,7 +261,11 @@ test.describe('Horizon app', () => {
     const n = await items.count();
     await page.click('#sec-accounts button:has-text("+ ISA")');
     await expect(items).toHaveCount(n + 1);
-    await items.last().locator('button[aria-label^="Remove"]').click();
+    // The new account opens scrolled into view with its name ready to type; Remove sits after Done.
+    const added = page.locator('#sec-accounts [data-editing]').last();
+    await expect(added.locator('input.name')).toBeFocused();
+    await expect(added.locator('.edit-done button').last()).toHaveText('Remove');
+    await added.locator('button[aria-label^="Remove"]').click();
     await expect(items).toHaveCount(n);
   });
 
@@ -818,7 +822,7 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#ovInsights .sg-card')).toHaveCount(n - 1);
     await expect(page.locator('#ovInsights .car-track')).not.toContainText(title);
     // Arrows step through the cards.
-    const next = page.locator('#ovInsights .car-btn[aria-label="Next"]');
+    const next = page.locator('#ovInsights .car-btn[aria-label="Next suggestion"]');
     await next.click();
     await expect.poll(() => page.locator('#ovInsights .car-track').evaluate(t => t.scrollLeft)).toBeGreaterThan(0);
     await page.click('#ovInsights button:has-text("hidden")');
@@ -1005,7 +1009,7 @@ test.describe('Horizon app', () => {
     await page.locator('#sec-income [data-editing] input[aria-label="Amount"]').fill('70000');
     await settle(page);
     await expect(page.locator('#sum-income')).toContainText('a month');
-    await page.click('#sec-income .edit-done button');
+    await page.click('#sec-income .edit-done button.primary');
     await expect(page.locator('#sec-income .sum-row').first()).toContainText('£5,833 a month');
     await go(page, 'finances/spending');
     await expect(page.locator('#sum-expenses')).toContainText('Spending this year');
@@ -1066,10 +1070,20 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#ovLegend')).toContainText('Available now');
     await expect(page.locator('#ovLegend')).toContainText('Pensions & Lifetime ISAs');
     await expect(page.locator('#ovChartSub')).toContainText('add up to your net worth');
-    // Charts stop at 85 by default; the table still has every year.
+    // Charts run to the end of the plan by default; stopping them at 85 is a choice. The table
+    // still has every year.
     const sel = page.locator('#view-home .show-to select').first();
-    await expect(sel).toHaveValue('85');
+    await expect(sel).toHaveValue('0');
+    expect(await page.evaluate(() => window.Chart.until)).toBeNull();
+    await sel.selectOption('85');
     expect(await page.evaluate(() => { const p = window.__horizon.ws.scenarios[0].plan; return window.Chart.until - (p.startYear + 85 - p.household.people[0].age); })).toBe(0);
+    // Never before a goal: a goal at 90 keeps its year in view.
+    expect(await page.evaluate(() => {
+      const H = window.__horizon, p = H.ws.scenarios[0].plan;
+      p.goals.push({ id: 'late', type: 'netWorth', amount: 1, year: p.startYear + 90 - p.household.people[0].age, measure: 'all', basis: 'nominal', confidence: 50 });
+      H.refresh();
+      return window.Chart.until - (p.startYear + 90 - p.household.people[0].age);
+    })).toBe(0);
     await sel.selectOption('0');
     expect(await page.evaluate(() => window.Chart.until)).toBeNull();
     expect(await page.evaluate(() => window.__horizon.ws.settings.showTo)).toBe(0);
@@ -1539,20 +1553,26 @@ test.describe('getting started', () => {
     // Pay: one click adds it and opens it to fill in.
     await page.click('#setupNext');
     await panel.locator('.st-adds button', { hasText: 'Robin’s pay' }).click();
-    await page.locator('[data-editing] input[aria-label="Amount"]').fill('3100');
-    await page.locator('[data-editing] .edit-done button').click();
-    await expect(panel.locator('.st-have')).toContainText('Robin: £3,100 a month');
+    // Pay starts as a year's amount before tax; a year's pay typed "a month" is caught.
+    const pay = page.locator('[data-editing]').last();
+    await expect(pay.locator('select[aria-label="Frequency"]')).toHaveValue('year');
+    await pay.locator('select[aria-label="Frequency"]').selectOption('month');
+    await pay.locator('input[aria-label="Amount"]').fill('52000');
+    await expect(pay.locator('.warn-hint')).toContainText('£52,000 a month is £624,000 a year');
+    await pay.locator('.warn-hint button', { hasText: 'Did you mean a year?' }).click();
+    await page.locator('[data-editing] .edit-done button.primary').click();
+    await expect(panel.locator('.st-have')).toContainText('Robin: £52,000 a year');
     // Accounts: a bank account and an ISA for Kim.
     await panel.locator('.st-jump').selectOption({ label: '5. Bank and savings' });
     await expect(page).toHaveURL(/finances\/portfolio/);
     await panel.locator('.st-adds button', { hasText: 'Cash & savings' }).click();
     await page.locator('[data-editing] label.field:has-text("Balance") input').fill('8000');
-    await page.locator('[data-editing] .edit-done button').click();
+    await page.locator('[data-editing] .edit-done button.primary').click();
     await page.click('#setupNext');
     await panel.locator('.st-adds button', { hasText: /^\+ ISA$/ }).click();
     await page.locator('[data-editing] select').first().selectOption('p2');
     await page.locator('[data-editing] label.field:has-text("Balance") input').fill('12000');
-    await page.locator('[data-editing] .edit-done button').click();
+    await page.locator('[data-editing] .edit-done button.primary').click();
     const p = await plan();
     expect(p.accounts.map(a => [a.type, a.owner, a.balance, a.basis])).toEqual([['cash', 'joint', 8000, 8000], ['isa', 'p2', 12000, 12000]]);
     // Closing keeps the place; Home offers to carry on.
@@ -1600,7 +1620,7 @@ test.describe('getting started', () => {
     await ed().locator('input[aria-label="Amount"]').fill('35000');
     await ed().locator('select[aria-label="Frequency"]').selectOption('year');
     await ed().locator('label.field:has-text("Tax") select').first().selectOption('uk');
-    await ed().locator('.edit-done button').click();
+    await ed().locator('.edit-done button.primary').click();
     const p1 = await plan();
     expect(p1.household.people[0]).toMatchObject({ loanPlan: 'plan2', loanBalance: 40000 });
     expect(p1.household.people[0].loanEndYear).toBeGreaterThan(2040);
@@ -1614,7 +1634,7 @@ test.describe('getting started', () => {
     await expect(ed().locator('[data-buy]')).toContainText('In 2030 it costs about');
     await expect(ed().locator('[data-buy]')).toContainText('lenders usually stop at about 4.5 times');
     await expect(ed().locator('.tag.est')).toHaveText('buying in 2030');
-    await ed().locator('.edit-done button').click();
+    await ed().locator('.edit-done button.primary').click();
     await expect(panel.locator('.st-have')).toContainText('buying in 2030');
     // Rent, until the year of the purchase.
     await panel.locator('.st-adds button', { hasText: 'Rent (in spending)' }).click();
@@ -1622,7 +1642,7 @@ test.describe('getting started', () => {
     await ed().locator('input[aria-label="Rent amount"]').fill('850');
     await ed().locator('select[aria-label="Ends"]').selectOption('year');
     await ed().locator('input[aria-label="Year it stops"]').fill('2030');
-    await ed().locator('.edit-done button').click();
+    await ed().locator('.edit-done button.primary').click();
     await expect(page.locator('#sec-expenses .sum-row', { hasText: 'Rent' })).toContainText('last paid in 2029');
     // Your own situation: a gift from family for the deposit, with a note, in the year of the purchase.
     await panel.locator('.st-jump').selectOption({ label: '11. Your own situation' });
@@ -1632,7 +1652,7 @@ test.describe('getting started', () => {
     const gift = (await plan()).events[0];
     expect(gift).toMatchObject({ kind: 'income', year: 2030, note: 'From family; a gift, not a loan' });
     await expect(page.locator('#sec-events [data-editing] textarea[aria-label="Note"]')).toHaveValue('From family; a gift, not a loan');
-    await page.locator('#sec-events [data-editing] .edit-done button').click();
+    await page.locator('#sec-events [data-editing] .edit-done button.primary').click();
     await expect(page.locator('#sec-events .sum-row')).toContainText('“From family; a gift, not a loan”');
     // The plan: the flat is bought in 2030 with a mortgage, rent stops and the loan is repaid from pay.
     const rows = await page.evaluate(() => window.__horizon.model.proj.rows.map(r => ({ year: r.year, property: r.property, debt: r.debt, homeBuy: r.homeBuy, loan: r.studentLoan })));
@@ -1671,7 +1691,7 @@ test.describe('closer to retirement', () => {
     await ed.locator('input[aria-label="Pot spent on the annuity"]').fill('100000');
     await ed.locator('input[aria-label="Annuity income a year"]').fill('6500');
     await expect(ed.locator('[data-annuity]')).toContainText('a rate of 6.5%');
-    await ed.locator('.edit-done button').click();
+    await ed.locator('.edit-done button.primary').click();
     const a = (await plan()).income.find(i => i.kind === 'annuity');
     expect(a).toMatchObject({ cost: 100000, amount: 6500, tax: 'uk', inflationLinked: false });
     const bought = await page.evaluate(() => window.__horizon.model.proj.rows.reduce((s, r) => s + (r.annuityBought || 0), 0));
@@ -1814,6 +1834,38 @@ test.describe('fixes from the pretend-user tests', () => {
     });
     await go(page, 'goal/samret');
     await expect(page.locator('main')).toContainText(/Sam retires at 58 \(\d{4}\), with 85% confidence wanted/);
+    expect(problems).toEqual([]);
+  });
+});
+
+test.describe('round 2 fixes', () => {
+  test('names follow the owner; the main plan can’t be deleted; the guide’s button says Next step', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/portfolio');
+    await page.click('#sec-accounts summary:has-text("Add an account")');
+    await page.click('#sec-accounts button:has-text("+ ISA")');
+    const added = page.locator('#sec-accounts [data-editing]').last();
+    await added.locator('input.name').fill('Alex ISA 2');
+    await added.locator('select').filter({ has: page.locator('option[value="p2"]') }).first().selectOption('p2');
+    await expect(page.locator('#sec-accounts [data-editing]').last().locator('input.name')).toHaveValue('Sam ISA 2');
+    await go(page, 'scenarios');
+    await expect(page.locator('button', { hasText: 'Delete this scenario' })).toBeDisabled();
+    await page.click('#dupScenario');
+    await expect(page.locator('button', { hasText: 'Delete this scenario' })).toBeEnabled();
+    await page.evaluate(() => window.__horizon.openSetup());
+    await expect(page.locator('#setupNext')).toHaveText('Next step');
+    await expect(page.locator('#ovGoalStrip .car-btn').last()).toHaveAttribute('aria-label', 'Next goal');
+    expect(problems).toEqual([]);
+  });
+
+  test('a goal that leaves out pensions says what it counts, next to what Home shows', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const H = window.__horizon, p = H.ws.scenarios[0].plan;
+      p.goals.push({ id: 'nwx', type: 'netWorth', amount: 500000, year: p.startYear + 5, measure: 'noPension', basis: 'nominal', confidence: 80 });
+      H.refresh();
+    });
+    await go(page, 'goal/nwx');
+    await expect(page.locator('main')).toContainText(/net worth excluding pensions is about £[\d,]+ in \d{4}, against £500,000; with pensions it is £[\d,]+, the figure Home shows/);
     expect(problems).toEqual([]);
   });
 });

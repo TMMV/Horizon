@@ -165,7 +165,7 @@ test('charts over years stop at the chosen year; tables keep every year', () => 
   Chart.until = null;
   assert.deepEqual(Chart.trim(cfg).xs, xs);
   const ws = E.normalizeWorkspace(E.defaultWorkspace());
-  assert.equal(ws.settings.showTo, 85);
+  assert.equal(ws.settings.showTo, 0);   // charts run to the end of the plan unless you choose
   assert.equal(E.normalizeWorkspace({ ...ws, settings: { ...ws.settings, showTo: 0 } }).settings.showTo, 0);
 });
 

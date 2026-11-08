@@ -335,6 +335,17 @@
         vals.bands.forEach((b, j) => { if (showBand(j)) for (let i = 0; i < n; i++) { hi = Math.max(hi, b[1][i]); lo = Math.min(lo, b[0][i]); } });
         vals.lines.forEach((l, j) => { if (showLine(j)) for (const v of l) if (isNum(v)) { hi = Math.max(hi, v); lo = Math.min(lo, v); } });
         for (const r of cfg.refLines || []) { hi = Math.max(hi, r.y * 1.04); lo = Math.min(lo, r.y); }
+        // Nothing but zeros (a new plan, or every series switched off): say so instead of an axis
+        // of "£1 £1 £0".
+        if (Math.max(Math.abs(hi), Math.abs(lo)) < 0.5 && !this.spark) {
+          ctx.font = FONT;
+          ctx.fillStyle = ink.muted;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('Nothing to show yet', W / 2, H / 2);
+          this.geo = null;
+          return;
+        }
         if (hi === lo) hi = lo + 1;
       }
       const yt = niceTicks(lo, hi, H < 160 ? 3 : H < 260 ? 4 : 5);

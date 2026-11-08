@@ -92,7 +92,10 @@
     exp('travel', 'Active retirement: travel & hobbies', a.travelExtra, p1.retireAge, p1.retireAge + a.travelYears, { startRef: 'retire' });
     // Today's cost, grown by how much faster than prices care is expected to rise until it starts.
     const careAt = a.careCost * Math.pow(1 + (a.careRealGrowth || 0) / 100, Math.max(0, a.careAge - p1.age));
-    if (a.careAge > 0) exp('care', 'Care in later life', Math.round(careAt), a.careAge, a.careAge + a.careYears);
+    const careNote = a.careRealGrowth > 0 && careAt > a.careCost + 1
+      ? `£${Math.round(a.careCost).toLocaleString('en-GB')} a year in today’s prices. Care costs are expected to rise ${a.careRealGrowth}% a year faster than prices, so about £${Math.round(careAt).toLocaleString('en-GB')} by age ${a.careAge} (still in today’s money).`
+      : '';
+    if (a.careAge > 0) exp('care', 'Care in later life', Math.round(careAt), a.careAge, a.careAge + a.careYears, careNote ? { note: careNote } : {});
     exp('family', 'Helping family', a.familyAmount, a.familyFrom, a.familyTo);
 
     return {

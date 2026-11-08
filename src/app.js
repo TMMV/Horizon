@@ -704,7 +704,7 @@
         const extra = pre.people[i].extraPot[0];
         if (ee + er + extra > 0.5) {
           add(`${person.name}’s pension`, `${money((ee + er + extra) / 12)} a month`,
-            [`you ${money(ee / 12)}`, `employer ${money(er / 12)}`, extra > 0.5 ? `extra ${money(extra / 12)} with tax relief` : ''].filter(Boolean).join(' + ') + '. Check your payslip matches.');
+            [ee > 0.5 ? `you ${money(ee / 12)}` : '', er > 0.5 ? `employer ${money(er / 12)}` : '', extra > 0.5 ? `${ee + er > 0.5 ? 'extra ' : ''}${money(extra / 12)} paid in yourself, with tax relief` : ''].filter(Boolean).join(' + ') + (ee + er > 0.5 ? '. Check your payslip matches.' : '. Check the pension provider’s statement matches.'));
         }
         for (const db of p.income.filter(it => it.kind === 'dbpension' && it.owner === person.id && person.retireAge > person.age)) {
           add(db.name, `+${money(db.dbAccrual)} a year of pension`, `Each year ${person.name} works adds this (today’s money), paid from ${db.startAge}. Nothing to do but check the annual statement.`);
@@ -3605,6 +3605,13 @@
   }
 
   const bind = (obj, key) => [() => obj[key], v => { obj[key] = v; }];
+  // An account's owner; a name that starts with the old owner's name ("Sam ISA") follows the new
+  // owner ("Alex ISA"), so a copied or suggested name is not left pointing at the wrong person.
+  const ownerBind = a => [() => a.owner, v => {
+    const was = people().find(x => x.id === a.owner), now = people().find(x => x.id === v);
+    if (was && now && a.name.startsWith(`${was.name} `)) a.name = `${now.name}${a.name.slice(was.name.length)}`;
+    a.owner = v;
+  }];
 
   function ownerOptions(includeJoint) {
     const o = people().map(p => [p.id, p.name]);
@@ -3918,14 +3925,29 @@
   // ---- Finances: each item as a plain line; edit one at a time
 
   const editing = new Set();
+  // A newly added item: scroll it into view and put the cursor in its name.
+  function showNew(id) {
+    requestAnimationFrame(() => {
+      const box = document.querySelector(`[data-editing="${id}"]`);
+      if (!box) return;
+      box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const el = box.querySelector('input[type="text"], input');
+      if (el) el.focus({ preventScroll: true });
+    });
+  }
+
   function openEdit(id, sectionId) { editing.add(id); renderSection(sectionId); requestAnimationFrame(() => { const el = document.querySelector(`[data-editing="${id}"] input, [data-editing="${id}"] select`); if (el) el.focus(); }); }
   function closeEdit(id, sectionId) { editing.delete(id); renderSection(sectionId); }
 
   // The line shown for an item, or its editor while it is being edited.
   function viewOrEdit(id, sectionId, color, line, editor) {
     if (editing.has(id)) {
-      return h('div', { class: 'edit-wrap', 'data-editing': id, style: `--item-color:${cssVar(color)}` }, editor(),
-        h('div', { class: 'edit-done' }, h('button', { type: 'button', class: 'btn small primary', onclick: () => closeEdit(id, sectionId) }, 'Done')));
+      const body = editor();
+      // Remove comes last, after Done, so tabbing through the fields never lands on it first.
+      const remove = body.querySelector && body.querySelector('.item-head > .icon-btn[aria-label^="Remove"]');
+      if (remove) { remove.textContent = 'Remove'; remove.className = 'btn small ghost danger-text'; }
+      return h('div', { class: 'edit-wrap', 'data-editing': id, style: `--item-color:${cssVar(color)}` }, body,
+        h('div', { class: 'edit-done' }, h('button', { type: 'button', class: 'btn small primary', onclick: () => closeEdit(id, sectionId) }, 'Done'), remove));
     }
     return h('button', { type: 'button', class: 'sum-row', 'data-item': id, style: `--item-color:${cssVar(color)}`, 'aria-label': `Edit ${line.name}`, onclick: () => openEdit(id, sectionId) },
       h('i', { class: 'key square', style: `--key:${cssVar(color)}` }),
@@ -4314,8 +4336,17 @@
   }
 
   function amountWithFreq(item, sectionId) {
-    return h('div', { class: 'pair' }, moneyInput(...bind(item, 'amount'), { label: 'Amount', prefix: item.fx !== undefined && item.fx !== 1 ? '' : '£' }),
+    const pair = h('div', { class: 'pair' }, moneyInput(...bind(item, 'amount'), { label: 'Amount', prefix: item.fx !== undefined && item.fx !== 1 ? '' : '£' }),
       selectInput([['month', 'a month'], ['year', 'a year']], ...bind(item, 'freq'), { label: 'Frequency', rerender: sectionId }));
+    // £20,000 or more "a month" is nearly always a year's amount typed with the wrong unit.
+    const yearly = () => item.freq === 'month' && item.amount >= 20000 && sectionId === 'income';
+    const ask = h('span', { class: 'hint warn-hint', hidden: !yearly() }, `${money(item.amount)} a month is ${money(item.amount * 12)} a year. `,
+      h('button', { type: 'button', class: 'linkish', onclick: () => { item.freq = 'year'; renderSection(sectionId); refresh(); } }, 'Did you mean a year?'));
+    pair.querySelector('input').addEventListener('input', () => {
+      ask.hidden = !yearly();
+      if (!ask.hidden) ask.firstChild.textContent = `${money(item.amount)} a month is ${money(item.amount * 12)} a year. `;
+    });
+    return h('div', { class: 'amount-freq' }, pair, ask);
   }
 
   // Inline "typical trend" charts in income cards.
@@ -4581,8 +4612,8 @@
       return {
         name: item.name,
         sub: [kindLabel(item.kind), ownerName(p, item.owner), item.kind === 'dbpension' || item.kind === 'annuity' ? null : untilText(item, p), grow, noteText(item)].filter(Boolean).join(' · '),
-        value: item.kind === 'dbpension' ? `${money(db)} a year` : item.kind === 'annuity' ? `${money(item.amount)} a year` : incomeTag(item, p).replace('/month now', ' a month'),
-        valueSub: item.kind === 'dbpension' || item.kind === 'annuity' ? `from ${item.startAge}, today’s money` : item.tax === 'none' ? (item.kind === 'salary' ? 'take-home' : 'no tax') : item.tax === 'uk' ? 'before tax' : `after ${item.taxRate}% tax`,
+        value: item.kind === 'dbpension' ? `${money(db)} a year` : item.kind === 'annuity' ? `${money(item.amount)} a year` : incomeValue(item, p).main,
+        valueSub: item.kind === 'dbpension' || item.kind === 'annuity' ? `from ${item.startAge}, today’s money` : [item.tax === 'none' ? (item.kind === 'salary' ? 'take-home' : 'no tax') : item.tax === 'uk' ? 'before tax' : `after ${item.taxRate}% tax`, incomeValue(item, p).other].filter(Boolean).join(' · '),
       };
     };
     const items = p.income.map(item => viewOrEdit(item.id, 'income', item.kind === 'dbpension' || item.kind === 'annuity' ? '--s4' : '--s1', line(item), () => editorOf(item)));
@@ -4591,10 +4622,11 @@
       sectionSummary('income', () => [['Coming in this year', `${money(inOutSeries()[0].inn / 12)} a month`, 'after tax and pension contributions'], ['From work', `${money(p.income.filter(i => i.kind === 'salary' || i.kind === 'self').reduce((acc, i) => acc + E.incomeAfterCosts(i, p, 0), 0) / 12)} a month`, 'pay and self-employed profit, as entered'], ['Other income', `${money(p.income.filter(i => i.kind !== 'salary' && i.kind !== 'self').reduce((acc, i) => acc + E.incomeAfterCosts(i, p, 0), 0) / 12)} a month`, 'rent, gifts, pensions now']]),
       h('div', { class: 'sum-list' }, items.length ? items : h('p', { class: 'sub' }, 'No income yet.')),
       h('div', { class: 'add-row' }, KIND_LABELS.map(([kind, label]) => h('button', { type: 'button', class: 'btn small', onclick: () => {
-        const item = E.normalizePlan({ ...p, income: [{ name: kind === 'dbpension' ? 'Defined benefit pension' : kind === 'salary' ? 'Salary' : label, owner: 'p1', kind, tax: 'none', amount: 0, freq: kind === 'dbpension' ? 'year' : 'month', growth: kind === 'salary' ? 3 : 0, inflationLinked: kind !== 'salary' }] }).income[0];
+        const item = E.normalizePlan({ ...p, income: [{ name: kind === 'dbpension' ? 'Defined benefit pension' : kind === 'salary' ? 'Salary' : label, owner: 'p1', kind, tax: kind === 'salary' ? 'uk' : 'none', amount: 0, freq: kind === 'dbpension' || kind === 'salary' ? 'year' : 'month', growth: kind === 'salary' ? 3 : 0, inflationLinked: kind !== 'salary' }] }).income[0];
         setKind(item, kind);
         p.income.push(item);
         editing.add(item.id);
+        showNew(item.id);
         renderSection('income');
         refresh();
       } }, `+ ${kind === 'dbpension' ? 'Defined benefit pension' : label}`))),
@@ -4604,7 +4636,22 @@
   function incomeTag(item, p) {
     const afterCosts = E.incomeAfterCosts(item, p, 0);
     const net = E.taxOf(item, p) === 'flat' ? afterCosts * (1 - item.taxRate / 100) : afterCosts;
-    return net > 0 ? `${money(net / 12)}/month now` : 'Not this year';
+    return net > 0 ? `${money(net / 12)}/month now` : notYetText(item, p);
+  }
+
+  // Why an income has nothing this year: no amount yet, or when it starts.
+  function notYetText(item, p) {
+    if (!(item.amount > 0)) return 'Amount still to fill in';
+    for (let t = 1; t < 80; t++) if (E.incomeAfterCosts(item, p, t) > 0) return `From ${p.startYear + t}`;
+    return 'Not this year';
+  }
+
+  // This year's amount in the unit it was typed in ("£135,000 a year"), and the other unit.
+  function incomeValue(item, p) {
+    const afterCosts = E.incomeAfterCosts(item, p, 0);
+    const net = E.taxOf(item, p) === 'flat' ? afterCosts * (1 - item.taxRate / 100) : afterCosts;
+    if (!(net > 0)) return { main: notYetText(item, p), other: '' };
+    return item.freq === 'year' ? { main: `${money(net)} a year`, other: `${money(net / 12)} a month` } : { main: `${money(net / 12)} a month`, other: `${money(net)} a year` };
   }
 
   // Keep the per-income figures in step with edits without re-rendering the inputs.
@@ -4673,7 +4720,7 @@
       sectionHead('expenses', 'Spending', null,
         h('button', { type: 'button', class: 'btn small primary', onclick: openWizard }, 'Spending check-up'),
         h('button', { type: 'button', class: 'btn small', id: 'lifeBtn', onclick: openLifeWizard, title: 'Children, cars, home repairs, retirement travel and care: big costs that come later, added as dated spending items' }, 'Future costs'),
-        h('button', { type: 'button', class: 'btn small', onclick: () => { const e = E.normalizePlan({ ...p, expenses: [{ name: 'New expense', amount: 0, freq: 'month', inflationLinked: true }] }).expenses[0]; p.expenses.push(e); editing.add(e.id); renderSection('expenses'); refresh(); } }, '+ Add expense')),
+        h('button', { type: 'button', class: 'btn small', onclick: () => { const e = E.normalizePlan({ ...p, expenses: [{ name: 'New expense', amount: 0, freq: 'month', inflationLinked: true }] }).expenses[0]; p.expenses.push(e); editing.add(e.id); renderSection('expenses'); refresh(); showNew(e.id); } }, '+ Add expense')),
       sectionSummary('expenses', () => {
         const q = plan();
         const now2 = q.expenses.reduce((acc, e) => acc + E.streamAt(e, q, 0), 0);
@@ -4704,7 +4751,7 @@
       h('div', { class: 'row-note' }, noteField(ev))))));
     return [
       sectionHead('events', 'One-off events', "A new car, a wedding, an inheritance, a lump-sum mortgage overpayment. Amounts are in today's money and rise with inflation to the year they happen.",
-        h('button', { type: 'button', class: 'btn small', onclick: () => { const ev = E.normalizePlan({ ...p, events: [{ name: 'New event', kind: 'expense', year: p.startYear + 1, amount: 0 }] }).events[0]; p.events.push(ev); editing.add(ev.id); renderSection('events'); refresh(); } }, '+ Add event')),
+        h('button', { type: 'button', class: 'btn small', onclick: () => { const ev = E.normalizePlan({ ...p, events: [{ name: 'New event', kind: 'expense', year: p.startYear + 1, amount: 0 }] }).events[0]; p.events.push(ev); editing.add(ev.id); renderSection('events'); refresh(); showNew(ev.id); } }, '+ Add event')),
       rows.length
         ? h('div', { class: 'sum-list' }, rows)
         : h('p', { class: 'sub' }, 'No events.'),
@@ -4781,8 +4828,8 @@
         v => { a.buyYear = v === 'later' ? plan().startYear + 3 : 0; }, { rerender: 'accounts', label: 'Own it now or buying later' })));
       main.push(field(buying ? 'Price today' : a.type === 'property' || a.type === 'asset' ? 'Value' : a.type === 'debt' ? 'Amount owed' : 'Balance', moneyInput(() => a.balance, v => { a.balance = v; if (a.type !== 'gia') a.basis = v; }),
         buying ? 'What a home like it costs now; it rises with house prices until you buy.' : null));
-      if (E.OWNED_TYPES.includes(a.type)) main.push(field('Whose', selectInput(ownerOptions(false), ...bind(a, 'owner'))));
-      else if (people().length > 1) extra.push(field('Whose', selectInput(ownerOptions(true), ...bind(a, 'owner'), { label: 'Whose' }), 'Joint, or one person’s.'));
+      if (E.OWNED_TYPES.includes(a.type)) main.push(field('Whose', selectInput(ownerOptions(false), ...ownerBind(a), { rerender: 'accounts' })));
+      else if (people().length > 1) extra.push(field('Whose', selectInput(ownerOptions(true), ...ownerBind(a), { label: 'Whose', rerender: 'accounts' }), 'Joint, or one person’s.'));
       if (a.type === 'lisa') {
         main.push(field('Pay in each year', moneyInput(...bind(a, 'contribution')), `Up to ${money(R.LISA.maxContribution)}; the government adds 25%. Paid from your surplus before other ISAs, until 50.`));
         // Only someone who has never owned a home can use it for one.
@@ -5068,7 +5115,7 @@
       h('div', { class: 'fields' },
         field('Name of this scenario', h('input', { type: 'text', value: s.name, 'aria-label': 'Scenario name', oninput: e => { s.name = e.target.value || 'Untitled'; renderScenarioPicker(); save(); compareDirty = true; } })),
         h('div', { class: 'field' }, h('span', {}, ' '),
-          h('button', { type: 'button', class: 'btn small danger', disabled: ws.scenarios.length < 2, onclick: () => {
+          h('button', { type: 'button', class: 'btn small danger', disabled: ws.scenarios.length < 2 || s.id === ws.scenarios[0].id, title: s.id === ws.scenarios[0].id ? 'Your main plan can’t be deleted; delete the scenarios made from it instead.' : null, onclick: () => {
             if (!confirm(`Delete scenario “${s.name}”?`)) return;
             ws.scenarios = ws.scenarios.filter(x => x.id !== s.id);
             ws.activeId = ws.scenarios[0].id;
@@ -5315,7 +5362,7 @@
 
   function updateLifeTotal() {
     const s = LW.summary(plan(), lw.a);
-    setKids($('#lifeWiz .wiz-total'), 'Adds ', h('strong', {}, money(s.total)), ' over your lifetime (today’s money)');
+    setKids($('#lifeWiz .wiz-total'), 'Everything in this check-up so far adds ', h('strong', {}, money(s.total)), ' over your lifetime (today’s money): cars, the home, retirement and family, not just this step.');
   }
 
   function lifeNext() {
@@ -5334,8 +5381,8 @@
     const track = h('div', { class: 'car-track', tabindex: '0', 'aria-label': label }, slides.map((s, i) => h('div', { class: 'car-slide', role: 'group', 'aria-roledescription': 'slide', 'aria-label': `${i + 1} of ${n}` }, s)));
     const goTo = i => { const el = track.children[Math.max(0, Math.min(n - 1, i))]; if (el) track.scrollTo({ left: el.offsetLeft - track.offsetLeft, behavior: 'smooth' }); };
     const at = () => { let best = 0, d = Infinity; [...track.children].forEach((el, i) => { const x = Math.abs(el.offsetLeft - track.offsetLeft - track.scrollLeft); if (x < d) { d = x; best = i; } }); return best; };
-    const prev = h('button', { type: 'button', class: 'car-btn', 'aria-label': 'Previous', onclick: () => goTo(at() - 1) }, '‹');
-    const next = h('button', { type: 'button', class: 'car-btn', 'aria-label': 'Next', onclick: () => goTo(at() + 1) }, '›');
+    const prev = h('button', { type: 'button', class: 'car-btn', 'aria-label': `Previous ${(label || 'item').toLowerCase().replace(/s$/, '')}`, onclick: () => goTo(at() - 1) }, '‹');
+    const next = h('button', { type: 'button', class: 'car-btn', 'aria-label': `Next ${(label || 'item').toLowerCase().replace(/s$/, '')}`, onclick: () => goTo(at() + 1) }, '›');
     // Dots for a few cards; past eight, a "3 of 15" count instead.
     const many = n > 8;
     const dots = many ? h('div', { class: 'car-count', 'aria-live': 'polite' }, `1 of ${n}`)
@@ -6232,10 +6279,16 @@
     $('#savedNote').textContent = `${d ? `Last saved to a file on ${fmtDate(d)}.` : 'Not saved to a file yet.'} A saved file keeps a copy and lets you carry on on another computer.`;
   }
 
-  // Charts over time stop when the first person reaches the "Show up to" age.
+  // Charts over time stop when the first person reaches the "Show up to" age, but never before
+  // a goal's year or a one-off event (care, a sale), so what the plan is about stays in view.
   function applyShowTo() {
-    const to = ws.settings.showTo, p1 = people()[0];
-    Chart.until = to && to < p1.endAge ? plan().startYear + (to - p1.age) : null;
+    const to = ws.settings.showTo, p = plan(), p1 = people()[0];
+    if (!to || to >= p1.endAge) { Chart.until = null; return; }
+    const goalYear = g => (g.type === 'retire' ? p.startYear + g.age - (people().find(x => x.id === g.owner) || p1).age : g.year || 0);
+    const latest = Math.max(0, ...p.goals.map(goalYear), ...p.events.map(e => e.year || 0));
+    const end = p.startYear + (p1.endAge - p1.age);
+    const until = Math.max(p.startYear + (to - p1.age), latest);
+    Chart.until = until >= end ? null : until;
   }
 
   function renderResults() {
@@ -6309,6 +6362,7 @@
     const acc = E.normalizePlan({ ...p, accounts: [{ name: ACCOUNT_LABELS[type], type, owner: E.OWNED_TYPES.includes(type) ? 'p1' : 'joint', balance: 0, ...extra }] }).accounts[0];
     p.accounts.push(acc);
     editing.add(acc.id);
+    showNew(acc.id);
     explorerValues = null;
     renderSection('accounts');
     refresh();
@@ -6316,11 +6370,12 @@
   }
   function addIncomeOf(kind, extra = {}) {
     const p = plan();
-    const item = E.normalizePlan({ ...p, income: [{ name: kind === 'dbpension' ? 'Defined benefit pension' : kind === 'salary' ? 'Salary' : kindLabel(kind), owner: 'p1', kind, tax: 'none', amount: 0, freq: kind === 'dbpension' ? 'year' : 'month', growth: kind === 'salary' ? 3 : 0, inflationLinked: kind !== 'salary', ...extra }] }).income[0];
+    const item = E.normalizePlan({ ...p, income: [{ name: kind === 'dbpension' ? 'Defined benefit pension' : kind === 'salary' ? 'Salary' : kindLabel(kind), owner: 'p1', kind, tax: kind === 'salary' ? 'uk' : 'none', amount: 0, freq: kind === 'dbpension' || kind === 'salary' ? 'year' : 'month', growth: kind === 'salary' ? 3 : 0, inflationLinked: kind !== 'salary', ...extra }] }).income[0];
     setKind(item, kind);
     if (extra.owner) item.owner = extra.owner;
     p.income.push(item);
     editing.add(item.id);
+    showNew(item.id);
     renderSection('income');
     refresh();
     return item;
@@ -6330,6 +6385,7 @@
     const e = E.normalizePlan({ ...p, expenses: [{ name: 'New expense', amount: 0, freq: 'month', inflationLinked: true, ...extra }] }).expenses[0];
     p.expenses.push(e);
     editing.add(e.id);
+    showNew(e.id);
     renderSection('expenses');
     refresh();
     return e;
@@ -6339,6 +6395,7 @@
     const ev = E.normalizePlan({ ...p, events: [{ name: 'New event', kind: 'expense', year: p.startYear + 1, amount: 0 }] }).events[0];
     p.events.push(ev);
     editing.add(ev.id);
+    showNew(ev.id);
     renderSection('events');
     refresh();
     return ev;
@@ -6450,7 +6507,7 @@
         const p = plan();
         const isExample = p.household.people.some(x => x.name === 'Alex') && p.accounts.some(a => /^Alex /.test(a.name));
         return [
-          sText('Horizon shows where your money is heading: what you will have, whether your goals are on track and what to do each month. This guide goes through your plan one part at a time, about 30 to 45 minutes. You can close it whenever you like and carry on later (Data → Set up my plan).'),
+          sText('Horizon shows where your money is heading: what you will have, whether your goals are on track and what to do each month. This guide goes through your plan one part at a time: about 10 minutes for the basics, and the rest is optional. You can close it whenever you like and carry on later (Data → Set up my plan).'),
           h('div', { class: 'st-have' }, h('span', { class: 'eyebrow' }, 'Have these to hand'), h('ul', {}, [
             'Bank and savings balances', 'ISA, investment and pension balances (apps or statements)', 'Payslips, or what lands in your account each month',
             'Mortgage statement: balance, rate, monthly payment, when the fixed rate ends', 'Your State Pension forecast (gov.uk/check-state-pension)', 'A rough idea of what you spend',
@@ -6458,7 +6515,7 @@
           isExample ? sAsk('Start from a blank plan?', 'Horizon opens with an example household (Alex and Sam) so you can look around. Starting blank clears it, so everything you see afterwards is yours. Nothing leaves this computer: the plan is kept in this browser, and you can save it to a file at the end.', [
             ['Yes, start my own plan', 'Clears the example', () => startBlankPlan(), false],
             ['Not yet, keep the example', 'You can start blank later', () => {}, true],
-          ]) : sText('Your plan is already here: the steps below go through each part, so you can check or fill in what is missing.'),
+          ]) : sText(p.accounts.length || p.income.length ? 'Your plan is already here: the steps below go through each part, so you can check or fill in what is missing.' : 'A blank plan, ready for your own figures: the steps below go through each part in turn.'),
           h('div', { class: 'st-ask' },
             h('p', { class: 'st-q' }, h('strong', {}, 'Your figures are as at'), sInfo('Your figures are as at', 'The date the balances you are about to type in are from: usually today. Everything Horizon predicts moves on from this date, and each yearly review moves it on again. If you copy figures from a statement or a spreadsheet made on another day, use that day.')),
             h('input', { type: 'date', value: p.asOf || today(), 'aria-label': 'Figures as at', onchange: e => { if (E.isDate(e.target.value)) { plan().asOf = e.target.value; renderPlan(); refresh(); } } })),
@@ -6488,7 +6545,7 @@
           ]),
           sText('On the page, for each person:'),
           sFields(
-            sField('Name', 'Just to label things: “Sam’s pension”, “Alex retires at 60”.'),
+            sField('Name', 'Just to label things: “Sam’s pension”, “Alex retires at 60”.', 'The name at the top of each person’s card, with a pencil: click it and type.'),
             sField('Age now', 'Age today, in whole years. Everything is worked out year by year from here.'),
             sField('Retirement age', 'When pay stops. It does not need to be right: Horizon shows how likely it is to work, and you can try other ages later.'),
           ),
@@ -6820,7 +6877,7 @@
         h('select', { class: 'st-jump', 'aria-label': 'Go to a step', onchange: e => goSetupStep(Number(e.target.value)) },
           SETUP_STEPS.map((s, k) => h('option', { value: String(k), selected: k === setupStep }, `${k + 1}. ${s.title}`))),
         setupStep < n - 1
-          ? h('button', { type: 'button', class: 'btn small primary', id: 'setupNext', onclick: () => goSetupStep(setupStep + 1) }, 'Next')
+          ? h('button', { type: 'button', class: 'btn small primary', id: 'setupNext', onclick: () => goSetupStep(setupStep + 1) }, 'Next step')
           : h('button', { type: 'button', class: 'btn small primary', id: 'setupNext', onclick: () => { closeSetup(); toast('Your plan is set up. Home shows where you are heading and what to do.'); } }, 'Finish')));
   }
 

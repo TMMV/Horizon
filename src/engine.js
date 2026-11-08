@@ -197,7 +197,7 @@
       dismissed: [],
       guides: {},
       // Actual pounds of each year by default (as in a spreadsheet: spending visibly rises with prices).
-      settings: { realDollars: false, runs: 1000, seed: 42, theme: 'light', confidence: 90, lastSaved: null, showTo: 85, inOutReal: false, inOutView: 'spend' },
+      settings: { realDollars: false, runs: 1000, seed: 42, theme: 'light', confidence: 90, lastSaved: null, showTo: 0, inOutReal: false, inOutView: 'spend' },
     };
   }
 
@@ -2088,6 +2088,17 @@
         res.probability = mc.goalHits[goal.id] ? mc.goalHits[goal.id][t] : 0;
         res.byYear = mc.goalHits[goal.id];
         res.summary = res.expectedYear ? `Expected in ${res.expectedYear} on average returns.` : 'Not reached within the plan on average returns.';
+        if (goal.type === 'netWorth') {
+          // What the goal itself counts in its year, next to everything: a goal that leaves out
+          // pensions (or homes) can be short while net worth on Home is past the target.
+          const row = proj.rows[t], f = goal.basis === 'real' ? row.deflator : 1;
+          const gbp = v => `£${Math.round(v / f).toLocaleString('en-GB')}`;
+          res.valueAt = goalValue(row, goal.measure) / f;
+          const what = GOAL_MEASURES[goal.measure].toLowerCase();
+          const all = goal.measure !== 'all' ? `; ${goal.measure === 'noPension' ? 'with pensions' : 'all of net worth, with your home,'} it is ${gbp(goalValue(row, 'all'))}, the figure Home shows` : '';
+          const when = res.expectedYear ? `Reached in ${res.expectedYear}.` : 'Not reached within the plan.';
+          res.summary = `On average returns, ${what} is about ${gbp(goalValue(row, goal.measure))} in ${goal.year}, against ${gbp(goalTarget(goal, row.deflator))}${all}. ${when}`;
+        }
       } else if (goal.type === 'emergency') {
         res.expectedYear = emergencyYear(goal, proj);
         res.probability = mc.goalHits[goal.id] ? mc.goalHits[goal.id][t] : 0;
