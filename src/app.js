@@ -702,9 +702,10 @@
           ee += a; er += b;
         }
         const extra = pre.people[i].extraPot[0];
-        if (ee + er + extra > 0.5) {
-          add(`${person.name}’s pension`, `${money((ee + er + extra) / 12)} a month`,
-            [ee > 0.5 ? `you ${money(ee / 12)}` : '', er > 0.5 ? `employer ${money(er / 12)}` : '', extra > 0.5 ? `${ee + er > 0.5 ? 'extra ' : ''}${money(extra / 12)} paid in yourself, with tax relief` : ''].filter(Boolean).join(' + ') + (ee + er > 0.5 ? '. Check your payslip matches.' : '. Check the pension provider’s statement matches.'));
+        const under = pre.people[i].sacrificed[0] || 0;   // "Keep income under £100,000"
+        if (ee + er + extra + under > 0.5) {
+          add(`${person.name}’s pension`, `${money((ee + er + extra + under) / 12)} a month`,
+            [ee > 0.5 ? `you ${money(ee / 12)}` : '', er > 0.5 ? `employer ${money(er / 12)}` : '', under > 0.5 ? `${money(under / 12)} more by salary sacrifice, to keep income under £100,000` : '', extra > 0.5 ? `${ee + er > 0.5 ? 'extra ' : ''}${money(extra / 12)} paid in yourself, with tax relief` : ''].filter(Boolean).join(' + ') + (ee + er > 0.5 ? '. Check your payslip matches.' : '. Check the pension provider’s statement matches.'));
         }
         for (const db of p.income.filter(it => it.kind === 'dbpension' && it.owner === person.id && person.retireAge > person.age)) {
           add(db.name, `+${money(db.dbAccrual)} a year of pension`, `Each year ${person.name} works adds this (today’s money), paid from ${db.startAge}. Nothing to do but check the annual statement.`);
@@ -1859,6 +1860,7 @@
       const id = E.uid();
       ws.scenarios.push({ id, name, plan: E.normalizePlan(next) });
       ws.activeId = id;
+      setTimeout(() => toast(`“${name}” is a new scenario, now open. Go back to ${ws.scenarios[0].name} from the banner at the top.`), 0);
     } else {
       scenario().plan = E.normalizePlan(next);
     }
@@ -2159,6 +2161,19 @@
     const tb = before.expenses.find(e => e.key === 'life:travel'), ta = after.expenses.find(e => e.key === 'life:travel');
     if ((tb && tb.amount) !== (ta && ta.amount) || (tb && tb.endAge) !== (ta && ta.endAge)) out.push(ta ? `Extra ${money(ta.amount)} a year for travel and hobbies in the first ${ta.endAge - after.household.people[0].retireAge} years of retirement` : 'No extra travel budget in retirement');
     if (sb.cashReserve !== sa.cashReserve) out.push(`Cash buffer ${money(sa.cashReserve)} (was ${money(sb.cashReserve)})`);
+    // The answers to "A few questions": the share mix and saving choices.
+    const ab = before.assumptions, aa = after.assumptions;
+    if (ab.stockPctNow !== aa.stockPctNow || ab.stockPctRetire !== aa.stockPctRetire) out.push(`${aa.stockPctNow}% in shares now, ${aa.stockPctRetire}% at retirement (was ${ab.stockPctNow}% and ${ab.stockPctRetire}%)`);
+    const onOff = (key, label) => { if (!!sb[key] !== !!sa[key]) out.push(`${label}: ${sa[key] ? 'on' : 'off'}`); };
+    onOff('pensionFirst', 'Pensions before the general account');
+    onOff('stayUnder100k', 'Keep income under £100,000');
+    onOff('claimRelief', 'Claim higher-rate relief');
+    onOff('sweepCash', 'Invest cash above the buffer');
+    if (sb.overpayPct !== sa.overpayPct) out.push(`Overpay the mortgage with ${sa.overpayPct}% of what is left (was ${sb.overpayPct}%)`);
+    const sac = p => p.income.filter(i => i.kind === 'salary' && i.sacrifice).map(i => i.id).sort().join();
+    if (sac(before) !== sac(after)) out.push('How pension contributions are paid (salary sacrifice)');
+    const lisas = p => p.accounts.filter(a => a.type === 'lisa').length;
+    if (lisas(before) !== lisas(after)) out.push(`Lifetime ISAs: ${lisas(after)} (was ${lisas(before)})`);
     return out;
   }
 
@@ -2322,8 +2337,11 @@
       const next = L.apply(p, gw.values);
       next.goals = E.assignGoalColours(next.goals.filter(x => x.id !== g.id).concat([g]));
       const id = E.uid();
-      ws.scenarios.push({ id, name: `${scenario().name} – ${E.goalTitle(g, next)}`, plan: E.normalizePlan(next) });
+      const name = `${scenario().name} – ${E.goalTitle(g, next)}`;
+      for (const s of ws.scenarios) if (!s.plan.goals.some(x => x.id === g.id)) s.plan.goals = E.assignGoalColours(s.plan.goals.concat([{ ...g }]));
+      ws.scenarios.push({ id, name, plan: E.normalizePlan(next) });
       ws.activeId = id;
+      setTimeout(() => toast(`Saved as the scenario “${name}”, now open. The goal is in your other scenarios too; go back to ${ws.scenarios[0].name} from the banner at the top.`), 0);
     } else {
       if (mode === 'apply') scenario().plan = E.normalizePlan(L.apply(p, gw.values));
       else if (planChanges(plan(), p).length) scenario().plan = E.normalizePlan(p);
@@ -2811,20 +2829,21 @@
     setTimeout(() => {
       if (route.tab !== 'scenarios') return;
       const items = compareScenarios();
-      const base = items.find(x => x.s.id === ws.activeId);
-      // One column per goal: the open scenario's goals first, then any only others have.
+      const base = items.find(x => x.s.id === ws.scenarios[0].id) || items[0];
+      const open = items.find(x => x.s.id === ws.activeId);
+      // One column per goal: the main plan's goals first, then any only others have.
       const cols = [];
       const same = (a, b) => a.goal.id === b.goal.id || a.title === b.title;
       for (const it of [base, ...items.filter(x => x !== base)]) for (const g of it.goals) if (!cols.some(c => same(c, g))) cols.push(g);
       const find = (it, c) => it.goals.find(g => same(g, c));
       const cell = (it, c) => scoreCell(find(it, c), it === base ? null : find(base, c), c);
-      const rows = items.map(it => h('tr', { class: it === base ? 'open' : '', 'data-scenario': it.s.id },
-        h('th', { scope: 'row' }, h('strong', {}, it.s.name), it === base ? h('span', { class: 'sc-open' }, 'Open now') : null),
+      const rows = items.map(it => h('tr', { class: it === open ? 'open' : '', 'data-scenario': it.s.id },
+        h('th', { scope: 'row' }, h('strong', {}, it.s.name), it === base ? h('span', { class: 'sc-main' }, 'Main plan') : null, it === open ? h('span', { class: 'sc-open' }, 'Open now') : null),
         cols.map(c => cell(it, c)),
         h('td', { class: 'sc-invest' }, invest(it), h('small', {}, 'a month now')),
-        h('td', { class: 'sc-actions' }, it === base ? null : [
+        h('td', { class: 'sc-actions' }, it === open ? null : [
           h('button', { type: 'button', class: 'btn small', onclick: () => { ws.activeId = it.s.id; afterScenarioChange(); } }, 'Open'),
-          h('button', { type: 'button', class: 'btn small ghost danger', 'aria-label': `Delete scenario ${it.s.name}`, onclick: () => {
+          it === base ? null : h('button', { type: 'button', class: 'btn small ghost danger', 'aria-label': `Delete scenario ${it.s.name}`, onclick: () => {
             if (!confirm(`Delete scenario “${it.s.name}”?`)) return;
             ws.scenarios = ws.scenarios.filter(x => x.id !== it.s.id);
             save();
@@ -2836,7 +2855,7 @@
           cols.map(c => h('th', { scope: 'col', style: `--gc:${cssVar(goalColor(c.goal))}` }, h('span', { class: 'heat-goal' }, goalBadge(c.goal, 'small'), h('span', {}, c.title)))),
           h('th', { scope: 'col' }, 'Invest'), h('th', { scope: 'col' }, h('span', { class: 'sr-only' }, 'Actions')))),
         h('tbody', {}, rows))),
-      ws.scenarios.length < 2 ? h('p', { class: 'hint' }, 'Only one scenario so far: add a what-if below, or duplicate this one and change anything in it.') : h('p', { class: 'hint' }, 'Chance of each goal across simulated futures, and when it is reached on average returns. ▲▼ compare with the scenario you have open.'));
+      ws.scenarios.length < 2 ? h('p', { class: 'hint' }, 'Only one scenario so far: add a what-if below, or duplicate this one and change anything in it.') : h('p', { class: 'hint' }, `Chance of each goal across simulated futures, and when it is reached on average returns. ▲▼ compare with your main plan, ${ws.scenarios[0].name}.`));
     }, 30);
   }
 
@@ -5184,7 +5203,7 @@
     const s = scenario();
     return [
       h('div', { class: 'fields' },
-        field('Name of this scenario', h('input', { type: 'text', value: s.name, 'aria-label': 'Scenario name', oninput: e => { s.name = e.target.value || 'Untitled'; renderScenarioPicker(); save(); compareDirty = true; } })),
+        field('Name of this scenario', h('input', { type: 'text', value: s.name, 'aria-label': 'Scenario name', oninput: e => { s.name = e.target.value || 'Untitled'; renderScenarioPicker(); save(); compareDirty = true; for (const el of $$(`[data-scenario="${s.id}"] th strong`)) el.textContent = s.name; } })),
         h('div', { class: 'field' }, h('span', {}, ' '),
           h('button', { type: 'button', class: 'btn small danger', disabled: ws.scenarios.length < 2 || s.id === ws.scenarios[0].id, title: s.id === ws.scenarios[0].id ? 'Your main plan can’t be deleted; delete the scenarios made from it instead.' : null, onclick: () => {
             if (!confirm(`Delete scenario “${s.name}”?`)) return;
@@ -5941,7 +5960,8 @@
         scenario().plan = E.normalizePlan(q);
         const changes = planChanges(before, scenario().plan);
         markGuide('questions', s.a);
-        return n ? `Saved ${n} answer${n === 1 ? '' : 's'}${changes.length ? `: ${changes.slice(0, 3).join('; ')}${changes.length > 3 ? '…' : ''}` : '; the plan already matched'}.` : null;
+        const where = ws.activeId === ws.scenarios[0].id ? '' : ` in the scenario “${scenario().name}” (open now)`;
+        return n ? `Saved ${n} answer${n === 1 ? '' : 's'}${where}${changes.length ? `: ${changes.slice(0, 3).join('; ')}${changes.length > 3 ? '…' : ''}` : '; the plan already matched'}.` : null;
       },
     },
 
@@ -6336,6 +6356,13 @@
     pill.hidden = ws.scenarios.length < 2;
     setKids(pill, h('span', { class: 'rv-k' }, 'Scenario'), h('strong', {}, scenario().name));
     pill.title = 'Showing this scenario. Switch or compare in Scenarios.';
+    // Not the main plan: a banner across the page says so, with the way back.
+    const banner = $('#scenBanner'), main = ws.scenarios[0];
+    banner.hidden = ws.activeId === main.id;
+    setKids(banner, banner.hidden ? [] : [
+      h('span', {}, 'You’re looking at the scenario ', h('strong', {}, `“${scenario().name}”`), '. Changes you make here stay in it.'),
+      h('button', { type: 'button', class: 'btn small', id: 'backToMain', onclick: () => { ws.activeId = main.id; afterScenarioChange(); } }, `Back to ${main.name}`),
+      h('button', { type: 'button', class: 'linkish', onclick: () => navigate('scenarios') }, 'Compare scenarios')]);
   }
 
   function afterScenarioChange() {

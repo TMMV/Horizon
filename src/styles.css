@@ -1612,3 +1612,6 @@ body.setup-open main, body.setup-open .tabs { margin-right: 404px; }
 .sp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .sp-pair > span { display: grid; gap: 2px; }
 .sp-pair small { color: var(--muted); font-size: 0.74rem; }
+.scen-banner { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center; padding: 8px 16px; background: color-mix(in srgb, #e0a100 22%, var(--surface)); color: var(--text); border-bottom: 1px solid var(--border-strong); font-size: 0.9rem; }
+.scen-banner[hidden] { display: none; }
+.sc-main { display: inline-block; margin-left: 6px; font-size: 0.72rem; color: var(--muted); }

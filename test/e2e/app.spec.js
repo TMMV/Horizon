@@ -1931,6 +1931,26 @@ test.describe('round 2 fixes', () => {
     expect(problems).toEqual([]);
   });
 
+  test('a banner says which scenario is open; the table compares with the main plan and renames live', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await expect(page.locator('#scenBanner')).toBeHidden();
+    await go(page, 'scenarios');
+    await page.click('#dupScenario');
+    await expect(page.locator('#scenBanner')).toBeVisible();
+    await expect(page.locator('#scenBanner')).toContainText('You’re looking at the scenario “Base plan (copy)”');
+    const name = page.locator('#sec-scenario input[aria-label="Scenario name"]');
+    await name.fill('Retire later');
+    await expect(page.locator('#compareResults')).toContainText('compare with your main plan, Base plan');
+    await expect(page.locator('#compareResults tr[data-scenario] th strong', { hasText: 'Retire later' })).toHaveCount(1);
+    await expect(page.locator('#compareResults tr', { hasText: 'Main plan' })).toContainText('Base plan');
+    // The main plan's row has no Delete.
+    await expect(page.locator('#compareResults tr', { hasText: 'Main plan' }).locator('button', { hasText: 'Delete' })).toHaveCount(0);
+    await page.click('#backToMain');
+    await expect(page.locator('#scenBanner')).toBeHidden();
+    expect(await page.evaluate(() => window.__horizon.ws.activeId === window.__horizon.ws.scenarios[0].id)).toBe(true);
+    expect(problems).toEqual([]);
+  });
+
   test('a goal that leaves out pensions says what it counts, next to what Home shows', async ({ page }) => {
     const { problems } = await openApp(page);
     await page.evaluate(() => {
