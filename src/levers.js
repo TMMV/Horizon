@@ -89,6 +89,7 @@
     const props = plan.accounts.filter(a => a.type === 'property');
 
     people.forEach((p, i) => {
+      if (p.retireAge <= p.age) return;   // already retired
       out.push({
         key: `retireAge${i}`, group: 'retirement', unit: 'age',
         label: `${p.name} retires at`, min: Math.max(p.age, 40), max: 75, step: 1,
@@ -110,7 +111,7 @@
       hint: 'Leave at “As listed” to keep your spending items; set an amount to replace them after you retire.',
     });
 
-    out.push({
+    if (people[0].retireAge > people[0].age) out.push({
       key: 'spendNowPct', group: 'saving', unit: 'pct',
       label: 'Spending before retirement', min: 50, max: 150, step: 1,
       get: pl => pl.strategy.spendNowPct,
@@ -129,6 +130,7 @@
       hint: 'Easy-access cash for emergencies. It is topped up from surplus before anything is invested.',
     });
     people.forEach((p, i) => {
+      if (p.retireAge <= p.age) return;
       out.push({
         key: `extraPension${i}`, group: 'saving', unit: 'money',
         label: `Extra into ${p.name}’s pension (a month)`, min: 0, max: 2000, step: 25,
@@ -179,11 +181,13 @@
         key: 'mortgageRate', group: 'stress', unit: 'pts',
         label: 'Mortgage rates higher or lower', min: -3, max: 5, step: 0.25,
         get: () => 0,
-        set: (pl, v) => { for (const a of pl.accounts) if (a.type === 'debt') a.rate += v; },
+        // The rate now and any rate set for after a fix, never below zero.
+        set: (pl, v) => { for (const a of pl.accounts) if (a.type === 'debt') { a.rate = Math.max(0, a.rate + v); if (a.rateAfterFix !== null && a.rateAfterFix !== undefined) a.rateAfterFix = Math.max(0, a.rateAfterFix + v); } },
       });
     }
 
-    out.push({
+    const retired1 = people[0].retireAge <= people[0].age;
+    if (!retired1) out.push({
       key: 'stockPctNow', group: 'investing', unit: 'pct',
       label: 'Stocks now', min: 0, max: 100, step: 5,
       get: pl => pl.assumptions.stockPctNow,
@@ -191,10 +195,10 @@
     });
     out.push({
       key: 'stockPctRetire', group: 'investing', unit: 'pct',
-      label: 'Stocks at retirement', min: 0, max: 100, step: 5,
+      label: retired1 ? 'Stocks' : 'Stocks at retirement', min: 0, max: 100, step: 5,
       get: pl => pl.assumptions.stockPctRetire,
       set: (pl, v) => { pl.assumptions.stockPctRetire = v; },
-      hint: 'Moves gradually from “now” to this by the time you retire.',
+      hint: retired1 ? 'The share of ISAs, investments and pensions held in stocks; the rest is in bonds.' : 'Moves gradually from “now” to this by the time you retire.',
     });
 
     for (const prop of props) {

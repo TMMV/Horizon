@@ -135,6 +135,12 @@
       if (!a || !(a.amount > 0)) continue;
       const existing = plan.expenses.find(e => e.key === q.key) || plan.expenses.find(e => a.from && e.id === a.from);
       const isKids = q.step === 'children';
+      // An item already in the plan keeps its own name, timing, owner and note: only the amount changes.
+      if (existing) {
+        fresh.push({ ...existing, key: q.key, category: existing.category || q.category, amount: a.amount, freq: a.freq,
+          ...(isKids && existing.endRef === 'age' ? { endAge: Math.round(answers._childrenEndAge || existing.endAge) } : {}) });
+        continue;
+      }
       fresh.push({
         id: existing ? existing.id : `wiz-${q.key}`,
         key: q.key,

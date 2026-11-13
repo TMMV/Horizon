@@ -2119,3 +2119,79 @@ test.describe('mobile layout', () => {
     expect(tracker.problems).toEqual([]);
   });
 });
+
+test.describe('review of 13 November', () => {
+  test('a household that has stopped work sees no working-years settings or advice', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios[0].plan;
+      p.household.people.forEach((x, i) => { x.age = 72 - i; x.retireAge = x.age; x.statePensionAge = 66; });
+      p.income = p.income.filter(i => i.kind !== 'salary');
+      p.income.push({ id: 'db', name: 'Council pension', kind: 'dbpension', owner: 'p1', tax: 'uk', amount: 9000, freq: 'year', startRef: 'now', startAge: 60, endRef: 'end', inflationLinked: true, growth: 0, raises: [] });
+      p.accounts = p.accounts.filter(a => a.type !== 'debt');
+      // Saved as a file would be: the plan is tidied when it is opened again.
+      localStorage.setItem('horizon-uk-v3', JSON.stringify(window.__horizon.ws));
+    });
+    await page.reload();
+    await page.waitForFunction(() => window.__horizon && window.__horizon.model);
+    // Pensions can be drawn, so they are not "locked away".
+    await expect(page.locator('#homePortfolio')).not.toContainText('Locked away');
+    await expect(page.locator('#homePortfolio')).toContainText('Can be drawn now');
+    await expect(page.locator('#view-home')).not.toContainText('Can you retire earlier?');
+    await expect(page.locator('#view-home')).not.toContainText('What will retirement cost?');
+    // The steps say what to take from savings now, though nobody is about to retire.
+    await expect(page.locator('#ovTodo')).toContainText(/Take about .* a month from savings|Savings no longer needed/);
+    // The retirement goal: no "what retiring then means", the pension is being paid.
+    await openGoal(page, 'money lasts to');
+    await expect(page.locator('#view-goal')).toContainText('has retired; the money is to last to');
+    await expect(page.locator('#gpTradeoffs')).toHaveCount(0);
+    await expect(page.locator('.rq-facts')).toContainText('being paid now');
+    await expect(page.locator('.rq-facts')).toContainText('Retired');
+    await expect(page.locator('#view-goal')).not.toContainText('Retire 2 years later');
+    // Saving: nothing about pay.
+    await go(page, 'finances/saving');
+    await expect(page.locator('#sec-saving')).not.toContainText('Extra into');
+    await expect(page.locator('#sec-saving')).not.toContainText('Above £100,000');
+    await expect(page.locator('#sec-strategy')).not.toContainText('Spending before retirement');
+    await go(page, 'finances/income');
+    await expect(page.locator('#sec-income')).toContainText('being paid now');
+    expect(problems).toEqual([]);
+  });
+
+  test('pension advice stays within the annual allowance', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios[0].plan;
+      const pay = p.income.find(i => i.kind === 'salary' && i.owner === 'p1');
+      pay.amount = 260000; pay.shares = 30000;
+      window.__horizon.refresh();
+    });
+    await page.reload();
+    await page.waitForFunction(() => window.__horizon && window.__horizon.model);
+    await go(page, 'finances/saving');
+    const order = page.locator('#view-finances', { hasText: 'Suggested order' });
+    await expect(order).toContainText('annual allowance has room for');
+    // 5% + 5% of £260,000 already goes in: room for £34,000 a year, £2,833 a month.
+    await expect(order).toContainText('up to £2,833 a month');
+    await go(page, 'finances/income');
+    await expect(page.locator('#sec-income')).toContainText('+ £30,000 share awards a year');
+    // Keeping income under £60,000: the £100,000 question is not asked (a "no" would undo it).
+    const asked = await page.evaluate(() => {
+      const ws = window.__horizon.ws;
+      ws.scenarios[0].plan.strategy.stayUnderLine = 60000;
+      localStorage.setItem('horizon-uk-v3', JSON.stringify(ws));
+      return true;
+    });
+    expect(asked).toBe(true);
+    await page.reload();
+    await page.waitForFunction(() => window.__horizon && window.__horizon.model);
+    await page.evaluate(() => window.__horizon.navigate('home'));
+    await page.locator('[data-insight="guide-questions"] button.primary').click();
+    for (let k = 0; k < 25; k++) {
+      await expect(page.locator('#gdTitle')).not.toContainText('above £100,000');
+      if ((await page.locator('#gdNext').innerText()) !== 'Next') break;
+      await page.locator('#gdNext').click();
+    }
+    expect(problems).toEqual([]);
+  });
+});

@@ -44,8 +44,8 @@
   const ISA_ALLOWANCE = 20000;
   const STATE_PENSION_FULL = 241.30 * 52;   // new State Pension, £/year
   // National Insurance years: 35 for the full new State Pension, 10 for any. Voluntary Class 3
-  // contributions buy a missing year (2025/26 rate, £ a week).
-  const NI_YEARS = { full: 35, min: 10, class3Week: 17.75 };
+  // contributions buy a missing year (2026/27 rate, £ a week).
+  const NI_YEARS = { full: 35, min: 10, class3Week: 18.40 };
   const LUMP_SUM_ALLOWANCE = 268275;        // cap on tax-free pension cash, per person
   const PENSION_TAX_FREE_SHARE = 0.25;
   const MIN_PENSION_AGE = 57;               // from April 2028

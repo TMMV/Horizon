@@ -214,7 +214,7 @@
     if (m.takeHome > 0 && m.working) {
       const keep = (m.takeHome - r0.spending - m.debtPay) / m.takeHome;
       const tone = keep >= 0.2 ? 'good' : keep >= 0.1 ? 'tip' : 'warn';
-      out.push({ id: 'saving-rate', tone, title: `You keep ${Math.round(keep * 100)}% of take-home pay`, text: `After spending and mortgage payments, from ${money(m.takeHome / 12)} a month coming in. A popular guide is 50% needs, 30% wants, 20% saving.`, value: keep });
+      out.push({ id: 'saving-rate', tone, title: `You keep ${Math.round(keep * 100)}% of take-home pay`, text: `After spending and mortgage payments, from ${money(m.takeHome / 12)} a month coming in. A popular guide is 50% needs, 30% wants, 20% saving.${r0.sharesKept > 0.5 ? ` That counts ${money(r0.sharesKept / 12)} a month of share awards kept as shares: they are saving, but not cash to spend${m.takeHome - r0.sharesKept < r0.spending + m.debtPay ? `, so without them spending is ${money((r0.spending + m.debtPay - m.takeHome + r0.sharesKept) / 12)} a month more than comes in` : ''}.` : ''}`, value: keep });
     }
 
     // 3. Children: Child Benefit and Tax-Free Childcare
@@ -225,8 +225,10 @@
       const cb = R.CHILD_BENEFIT.eldest + R.CHILD_BENEFIT.additional * (n - 1);
       const share = Math.min(1, Math.max(0, (top.ani - R.CHILD_BENEFIT.chargeFrom) / (R.CHILD_BENEFIT.chargeTo - R.CHILD_BENEFIT.chargeFrom)));
       const est = top.estimated ? ' (estimated from take-home pay)' : '';
+      const inPlan = plan.income.some(i => i.kind === 'other' && /child benefit/i.test(i.name || ''));
+      const counted = inPlan ? ` The plan takes the charge (${money(proj.rows[0].hicbc || 0)} this year) off ${top.name}’s income.` : ' Add it under Income as “Child Benefit” (no tax) and the plan counts both it and the charge.';
       if (share <= 0) out.push({ id: 'child-benefit', tone: 'good', title: `Child Benefit: ${money(cb)} a year`, text: `Both incomes are under ${money(R.CHILD_BENEFIT.chargeFrom)}, so none of it is clawed back. Claim it if you don't already.` });
-      else if (share < 1) out.push({ id: 'child-benefit', tone: 'tip', title: `${Math.round(share * 100)}% of Child Benefit is clawed back`, text: `${top.name}'s income is about ${money(top.ani)}${est}. Each £1,000 paid into a pension (or by salary sacrifice) returns ${money(cb / 20)} of Child Benefit on top of the tax relief.`, action: 'compare:pension-isa' });
+      else if (share < 1) out.push({ id: 'child-benefit', tone: 'tip', title: `${Math.round(share * 100)}% of Child Benefit is clawed back`, text: `${top.name}'s income is about ${money(top.ani)}${est}. Each £1,000 paid into a pension (or by salary sacrifice) returns ${money(cb / 20)} of Child Benefit on top of the tax relief.${counted}`, action: 'compare:pension-isa' });
       else out.push({ id: 'child-benefit', tone: 'tip', title: 'Child Benefit is fully clawed back', text: `${top.name}'s income is about ${money(top.ani)}${est}, over ${money(R.CHILD_BENEFIT.chargeTo)}. Still register: it protects State Pension credits for a parent with low earnings and gives the child a National Insurance number.` });
     }
     const tfcKids = kids.filter(a => a <= R.TAX_FREE_CHILDCARE.maxAge).length;
@@ -236,7 +238,7 @@
       const eligible = m.people.every(p => p.ani < R.TAX_FREE_CHILDCARE.incomeLimit);
       const gain = Math.min(childcare * R.TAX_FREE_CHILDCARE.topUp, R.TAX_FREE_CHILDCARE.capPerChild * tfcKids);
       if (eligible) out.push({ id: 'tfc', tone: 'tip', title: `Tax-Free Childcare could save about ${money(gain)} a year`, text: `On ${money(childcare)} a year of childcare and clubs, if the providers are registered: the government pays 20%, up to ${money(R.TAX_FREE_CHILDCARE.capPerChild)} per child under 12. Each parent must earn under ${money(R.TAX_FREE_CHILDCARE.incomeLimit)}.` });
-      else out.push({ id: 'tfc', tone: 'warn', title: 'Over £100k loses Tax-Free Childcare', text: `One income is over ${money(R.TAX_FREE_CHILDCARE.incomeLimit)}, which rules out up to ${money(gain)} a year of Tax-Free Childcare. Pension contributions that bring it back under £100k restore it.`, action: 'compare:pension-isa' });
+      else out.push({ id: 'tfc', tone: 'warn', title: 'Over £100k loses Tax-Free Childcare', text: `One income is over ${money(R.TAX_FREE_CHILDCARE.incomeLimit)}, which rules out up to ${money(gain)} a year of Tax-Free Childcare. ${top.ani - R.TAX_FREE_CHILDCARE.incomeLimit > R.PENSION_ANNUAL_ALLOWANCE ? `Getting back under £100k would take about ${money(top.ani - R.TAX_FREE_CHILDCARE.incomeLimit)} a year into pensions, more than the ${money(R.PENSION_ANNUAL_ALLOWANCE)} annual allowance lets in.` : 'Pension contributions that bring it back under £100k restore it.'}`, action: 'compare:pension-isa' });
     } else if (!kids.length && plan.expenses.some(e => { const q = questionFor(e); return q && q.step === 'children'; }) && !(plan.life && plan.life.children)) {
       out.push({ id: 'kids-unknown', tone: 'tip', title: 'Tell Horizon about your children', text: 'With their ages, Future costs (in Spending) plans school, university and help with a first home, and the plan check can test Child Benefit and Tax-Free Childcare.', action: 'life' });
     }
@@ -332,7 +334,7 @@
     if (retireSpend) {
       const level = retireSpend >= std.comfortable ? 'above “comfortable”' : retireSpend >= std.moderate ? 'between “moderate” and “comfortable”' : retireSpend >= std.minimum ? 'between “minimum” and “moderate”' : 'below the “minimum”';
       out.push({ id: 'plsa', tone: 'info', title: `Retirement spending ${money(retireSpend)} a year is ${level}`, text: `PLSA Retirement Living Standards for a ${couple ? 'couple' : 'single person'}: minimum ${money(std.minimum)}, moderate ${money(std.moderate)}, comfortable ${money(std.comfortable)} a year (no mortgage or rent).` });
-    } else {
+    } else if (plan.household.people.some(x => x.retireAge > x.age)) {
       out.push({ id: 'plsa', tone: 'info', title: 'What will retirement cost?', text: `Your spending list carries on into retirement. For comparison, the PLSA “comfortable” standard is ${money(std.comfortable)} a year for a ${couple ? 'couple' : 'single person'} (moderate ${money(std.moderate)}). Set a retirement amount in Saving strategy.`, action: 'strategy' });
     }
 
@@ -408,7 +410,7 @@
     if (taxOn && ih && (kids.length || oldest >= 60) && (oldest >= 50 || r0.netWorth / proj.rows[0].deflator > ih.free / 2)) {
       const { estate, free, tax, n } = ih;
       if (tax <= 10000 && estate > 1000) out.push({ id: 'iht', tone: 'info', title: `You would leave about ${money(estate)}`, action: 'guide:estate',
-        text: `What the plan leaves at the end, in today’s money: homes and pensions included (unused pensions count for inheritance tax from April 2027).${tax > 0.5 ? ` About ${money(tax)} of inheritance tax` : ' No inheritance tax'}: up to ${money(free)} of allowances${n > 1 ? ' for a couple' : ''} pass free${ih.home > 0 ? ', the home allowance included when it goes to children or grandchildren' : ''}.` });
+        text: `What the plan leaves at the end, in today’s money: homes and pensions included (unused pensions count for inheritance tax from April 2027).${tax > 0.5 ? ` About ${money(tax)} of inheritance tax` : ' No inheritance tax'}: up to ${money(free)} of allowances${n > 1 ? ' for a couple' : ''} pass free${ih.home > 0 ? ', the home allowance included when it goes to children or grandchildren' : ''}.${n === 1 ? ' A widow or widower can also use what their late husband, wife or civil partner left unused.' : ''}` });
       if (tax > 10000) out.push({ id: 'iht', tone: tax > 250000 ? 'tip' : 'info', title: `Inheritance tax could take about ${money(tax)}`, action: 'guide:estate',
         text: `The plan leaves about ${money(estate)} in today’s money at the end, homes and pensions included (unused pensions count from April 2027). Above ${money(free)} of allowances${n > 1 ? ' for a couple' : ''}${estate > R.IHT.taperFrom ? ' (the home allowance shrinks above £2 million)' : ''}, 40% is due. To pass on more: regular gifts from surplus income are free of tax if they don’t lower your standard of living; ${money(R.IHT.annualGift)} a year each can be given anyway; larger gifts are free after 7 years; Junior ISAs and pensions for children; or spend more yourselves. Wills and pension nominations matter too (Guides, Protection & paperwork).` });
     }

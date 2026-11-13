@@ -161,6 +161,8 @@
       const prev = this.disp;
       this.full = cfg;
       this.cfg = cfg = Chart.trim(cfg);
+      // New data can be shorter than the year being hovered.
+      if (this.hover >= cfg.xs.length) { this.hover = -1; this.tip.hidden = true; }
       if (prev && this.revealed && !reducedMotion() && this.compatible(prev, cfg)) {
         this.anim = { kind: 'tween', start: now(), dur: 420, from: prev };
       }
@@ -458,6 +460,7 @@
             for (let i = 0; i < n; i++) { const x = v[i] || 0; if (sign > 0 ? x > 0 : x < 0) cum[i] += x; }
             const c = color(d.color);
             const top = Math.min(...cum.map(Y)), bot = sign > 0 ? zero : Math.max(...cum.map(Y));
+            if (!Number.isFinite(top) || !Number.isFinite(bot) || !Number.isFinite(zero)) return;   // nothing drawable
             const grad = ctx.createLinearGradient(0, sign > 0 ? top : zero, 0, sign > 0 ? zero : bot);
             grad.addColorStop(0, withAlpha(c, this.hover >= 0 ? 0.38 : 0.46));
             grad.addColorStop(1, withAlpha(c, 0.16));
@@ -484,6 +487,7 @@
         if (!d.area || !showLine(j)) return;
         const c = color(d.color);
         const top = Math.min(...v.filter(isNum).map(Y));
+        if (!Number.isFinite(top) || !Number.isFinite(base)) return;   // a line with no values yet
         const grad = ctx.createLinearGradient(0, top, 0, base);
         grad.addColorStop(0, withAlpha(c, 0.24));
         grad.addColorStop(1, withAlpha(c, 0.02));

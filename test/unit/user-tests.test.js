@@ -507,3 +507,167 @@ test('keep income under £60,000: the pay above it is sacrificed as pay rises', 
   // The older switch still means £100,000.
   assert.equal(E.stayUnderLine({ stayUnder100k: true, stayUnderLine: 0 }), 100000);
 });
+
+// ---- Review of 2026-11-13: bugs found by loading the round-2 households again
+
+test('spending that starts or stops part-way through a year counts only the months paid', () => {
+  const plan = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ name: 'Ada', age: 40, retireAge: 60 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 20000 }], income: [], events: [], goals: [],
+    assumptions: { inflation: 0 },
+    expenses: [
+      { name: 'Nursery', amount: 1500, freq: 'month', endRef: 'year', toYear: 2027, toMonth: 8 },
+      { name: 'Club', amount: 400, freq: 'month', startRef: 'year', fromYear: 2027, fromMonth: 9, endRef: 'year', toYear: 2030 },
+    ],
+  });
+  const pre = E.precompute(plan);
+  near(pre.expenses[0], 18000);                 // nursery all year
+  near(pre.expenses[1], 8 * 1500 + 4 * 400);    // to the end of August, then the club from September
+  near(pre.expenses[2], 4800);
+  near(E.streamBands(plan, plan.expenses[0], 20).expected[1], 12000);
+});
+
+test('the yearly review keeps the National Insurance record, bonus, share awards and pot payments up to date', () => {
+  const RV = require('../../src/review');
+  const plan = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Una', age: 40, retireAge: 55, niYears: 15, niVoluntary: true }, { name: 'Rab', age: 60, retireAge: 60, niYears: 30 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 20000 }, { id: 'pen', type: 'pension', owner: 'p1', balance: 1000 }],
+    income: [{ id: 'pay', name: 'Pay', kind: 'salary', owner: 'p1', tax: 'uk', amount: 50000, freq: 'year', growth: 4, growthUntilAge: 41, growthAfter: 2, raises: [{ age: 42, pct: 10 }],
+      bonus: 5000, shares: 8000, pensionTo: 'db', pensionMode: 'pct', employeePension: 6, employerPension: 14, potMode: 'fixed', potEmployee: 100, potEmployer: 40 }],
+    expenses: [{ name: 'Living', amount: 2000, freq: 'month' }], events: [], goals: [],
+  });
+  const before = E.spYears(plan.household.people[0]);
+  const rolled = RV.rollPlan(plan, 2);
+  const [una, rab] = rolled.household.people;
+  assert.equal(una.niYears, 17);                 // two more years worked
+  assert.equal(rab.niYears, 30);                 // retired, no voluntary NI: none added
+  assert.equal(E.spYears(una).share, before.share);
+  // Pay as the projection has it two years on: 4% for a year, 2% after 41, a 10% promotion at 42.
+  const g = 1.04 * 1.02 * 1.1, pay = rolled.income[0];
+  near(pay.amount, 50000 * g);
+  near(pay.amount, E.incomeAfterCosts(plan.income[0], plan, 2));
+  near(pay.bonus, 5000 * g);
+  near(pay.shares, 8000 * g);
+  near(pay.potEmployee, 100 * g, 0.01);
+  near(pay.potEmployer, 40 * g, 0.01);
+});
+
+test('voluntary NI is still paid for someone who has already retired', () => {
+  const plan = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Una', age: 60, retireAge: 57, statePensionAge: 67, niYears: 28, niVoluntary: true }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 200000 }], income: [], goals: [], events: [],
+    expenses: [{ name: 'Living', amount: 1000, freq: 'month' }], assumptions: { inflation: 0 },
+  });
+  const pre = E.precompute(plan);
+  const paid = Array.from(pre.eventsOut).filter(v => v > 0);
+  assert.equal(paid.length, 7);                  // 28 + 7 = 35 years, paid from now until 67
+  near(paid[0], R.NI_YEARS.class3Week * 52, 0.01);
+});
+
+test('share awards swing in simulations even when nothing else varies', () => {
+  const plan = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ name: 'Ada', age: 40, retireAge: 60 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 20000 }], goals: [], events: [],
+    income: [{ id: 'pay', name: 'Pay', kind: 'salary', owner: 'p1', tax: 'uk', amount: 80000, freq: 'year', growth: 0, shares: 20000 }],
+    expenses: [{ name: 'Living', amount: 2000, freq: 'month' }],
+    assumptions: { varySalaries: false, varyInflation: false },
+  });
+  const draw = E.makeRandomEcon(plan, E.horizon(plan), E.makeNormal(E.mulberry32(3)));
+  const vests = new Set();
+  for (let k = 0; k < 5; k++) vests.add(Math.round(E.precompute(plan, draw()).people[0].vest[3]));
+  assert.ok(vests.size > 1, 'the award differs between simulated futures');
+});
+
+test('a household that has stopped work is not offered ideas about working or retiring later', () => {
+  const SI = require('../../src/scenario-ideas');
+  const LV = require('../../src/levers');
+  const plan = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Elsie', age: 72, retireAge: 72, statePensionAge: 66 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 30000 }, { id: 'home', type: 'property', balance: 200000 }],
+    income: [{ name: 'Council pension', kind: 'dbpension', owner: 'p1', tax: 'uk', amount: 9000, startAge: 60 }],
+    expenses: [{ name: 'Living', amount: 1500, freq: 'month' }], events: [],
+    goals: [{ type: 'retire', owner: 'p1', age: 72 }],
+  });
+  const drivers = SI.driversFor(plan).map(d => d.key);
+  for (const k of ['retireLater', 'retireEarlier', 'spendLess', 'pension']) assert.ok(!drivers.includes(k), k);
+  assert.ok(drivers.includes('spendLessRetired'));
+  const ideas = SI.ideasFor(plan).map(i => i.id);
+  for (const k of ['work-longer', 'retire-early', 'spend-less', 'part-time']) assert.ok(!ideas.includes(k), k);
+  assert.ok(!SI.comparisonsFor(plan).some(c => c.id === 'retire-when'));
+  const keys = LV.defs(plan).map(l => l.key);
+  for (const k of ['retireAge0', 'spendNowPct', 'extraPension0']) assert.ok(!keys.includes(k), k);
+  // And the plan check does not ask what retirement will cost.
+  assert.ok(!B.insights(plan, E.project(plan)).some(i => i.id === 'plsa'));
+});
+
+test('the Child Benefit charge comes off the higher earner; a retired person’s goal is that the money lasts', () => {
+  const plan = pay => E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'ruk', people: [{ name: 'Ada', age: 40, retireAge: 60 }, { name: 'Ben', age: 40, retireAge: 60 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 20000 }], events: [], goals: [],
+    income: [
+      { name: 'Pay', kind: 'salary', owner: 'p1', tax: 'uk', amount: pay, freq: 'year', growth: 0 },
+      { name: 'Child Benefit', kind: 'other', owner: 'p2', tax: 'none', amount: 2000, freq: 'year', inflationLinked: false, growth: 0, endRef: 'end' },
+    ],
+    expenses: [{ name: 'Living', amount: 2000, freq: 'month' }],
+  });
+  const charge = pay => E.project(plan(pay)).rows[0].hicbc;
+  near(charge(55000), 0);
+  near(charge(70000), 1000);      // half way from £60,000 to £80,000
+  near(charge(120000), 2000);     // all of it
+  const pr = E.project(plan(70000));
+  near(pr.rows[0].persons[0].incomeTax, R.incomeTax(70000, 'ruk') + 1000);
+  near(pr.rows[0].persons[1].incomeTax, 0);
+  // Already retired: the goal reads as the money lasting, not as retiring.
+  const old = E.normalizePlan({ startYear: 2026, household: { people: [{ name: 'Elsie', age: 72, retireAge: 72, endAge: 95 }] }, accounts: [], income: [], expenses: [], events: [], goals: [{ type: 'retire', owner: 'p1', age: 72 }] });
+  assert.equal(E.goalTitle(old.goals[0], old), 'Money lasts to 95');
+  near(R.NI_YEARS.class3Week, 18.40, 0.001);
+});
+
+test('the spending check-up keeps an item’s own timing; the mortgage-rate lever moves the rate after a fix too', () => {
+  const SW = require('../../src/spending-wizard');
+  const LV = require('../../src/levers');
+  const plan = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Elsie', age: 72, retireAge: 72 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 30000 }, { id: 'loan', type: 'debt', balance: 50000, rate: 2, payment: 500, fixedUntil: 2028, rateAfterFix: 5 }],
+    income: [], events: [], goals: [],
+    expenses: [{ id: 'hol', name: 'Holidays', owner: 'p1', amount: 3000, freq: 'year', endRef: 'age', endAge: 80, note: 'While I can still travel' }],
+  });
+  const answers = SW.answersFromPlan(plan);
+  answers.holidays.amount = 4000;
+  const hol = SW.applyAnswers(plan, answers).find(e => e.id === 'hol');
+  assert.equal(hol.amount, 4000);
+  assert.equal(hol.endRef, 'age');
+  assert.equal(hol.endAge, 80);                 // still stops at 80
+  assert.equal(hol.note, 'While I can still travel');
+  const lower = LV.apply(plan, { mortgageRate: -3 }).accounts.find(a => a.id === 'loan');
+  assert.equal(lower.rate, 0);                  // not below zero
+  assert.equal(lower.rateAfterFix, 2);
+  // Retired: one share mix, not "now" and "at retirement".
+  const keys = LV.defs(plan).map(d => d.key);
+  assert.ok(!keys.includes('stockPctNow') && keys.includes('stockPctRetire'));
+});
+
+test('equity release shows in the yearly flows, so each account’s table adds up', () => {
+  const pr = E.project(E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Elsie', age: 72, retireAge: 72, statePensionAge: 66 }] },
+    accounts: [{ id: 'bank', type: 'cash', balance: 10000 }, { id: 'home', type: 'property', balance: 240000, rate: 3, releaseYear: 2028, releaseAmount: 60000, sellYear: 2040 }],
+    income: [], goals: [], events: [], expenses: [{ name: 'Living', amount: 1500, freq: 'month' }],
+  }));
+  const rows = pr.rows;
+  assert.ok(rows[2].releaseIn > 60000);
+  assert.ok(rows[14].releaseRepaid > 60000);
+  for (let t = 0; t < rows.length - 1; t++) {
+    const r = rows[t], n = rows[t + 1];
+    near(r.cash + r.gCash + r.toCash + r.bondsMatured + r.releaseIn - r.wCash - r.sweepIsa - r.sweepGia, n.cash);
+    near(r.property + r.gProperty + r.propBought - r.propSold - r.releaseRepaid, n.property);
+    near(r.debt + r.debtInterest + r.debtNew - r.debtRegular - r.overpay - r.lumpOverpay - r.hiDebtPay - r.debtForgiven - r.releaseRepaid, n.debt);
+  }
+});

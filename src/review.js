@@ -33,10 +33,16 @@
     if (years <= 0) return p;
     const a = p.assumptions;
     const infl = grow(a.inflation, years);
-    const itemGrowth = it => (it.inflationLinked ? infl : grow(it.growth, years));
+    // As the projection grows each item: its own rise (changing at an age, with any promotions
+    // on the way), or prices. Whole years use the engine's own figure.
+    const whole = Number.isInteger(years);
+    const itemGrowth = (it, src, list) => {
+      const o = whole && src ? list.find(x => x.id === it.id) : null;
+      return o ? E.expectedGrowth(o, plan, years) : it.inflationLinked ? infl : grow(it.growth, years);
+    };
     const before = plan.household.people;
     for (const it of p.income) {
-      const g = itemGrowth(it);
+      const g = itemGrowth(it, true, plan.income);
       if (it.kind === 'annuity') {
         // Not bought yet: still in today's money. Bought: fixed in pounds unless it rises with prices.
         const person = before[E.personIndex(plan, it.owner)];
@@ -50,10 +56,14 @@
       } else {
         it.amount *= g;
         if (it.pensionMode === 'fixed') { it.employeePension *= g; it.employerPension *= g; }
+        // A bonus, share awards and amounts paid into a pot alongside a scheme rise with the pay.
+        if (it.bonus > 0) it.bonus *= g;
+        if (it.shares > 0) it.shares *= g;
+        if (it.potMode === 'fixed') { it.potEmployee = (it.potEmployee || 0) * g; it.potEmployer = (it.potEmployer || 0) * g; }
       }
       it.fixedCosts *= infl;
     }
-    for (const e of p.expenses) e.amount *= itemGrowth(e);
+    for (const e of p.expenses) e.amount *= itemGrowth(e, true, plan.expenses);
     for (const ev of p.events) ev.amount *= infl;
     // Student loans: what the plan expects to be left after the repayments and interest.
     const loans = plan.household.people.some(x => x.loanPlan) ? E.precompute(plan).people : null;
@@ -79,7 +89,7 @@
   // Keep pounds tidy after growing (whole pounds for big amounts, pence for small).
   function round(p) {
     const r = v => (Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 100) / 100);
-    for (const it of p.income) { it.amount = r(it.amount); it.cost = r(it.cost); it.dbAccrual = r(it.dbAccrual); it.fixedCosts = r(it.fixedCosts); it.employeePension = r(it.employeePension); it.employerPension = r(it.employerPension); }
+    for (const it of p.income) { it.amount = r(it.amount); it.cost = r(it.cost); it.dbAccrual = r(it.dbAccrual); it.fixedCosts = r(it.fixedCosts); it.employeePension = r(it.employeePension); it.employerPension = r(it.employerPension); if (it.bonus) it.bonus = r(it.bonus); if (it.shares) it.shares = r(it.shares); if (it.potEmployee) it.potEmployee = Math.round(it.potEmployee * 100) / 100; if (it.potEmployer) it.potEmployer = Math.round(it.potEmployer * 100) / 100; }
     for (const e of p.expenses) e.amount = r(e.amount);
     for (const ev of p.events) ev.amount = r(ev.amount);
     for (const person of p.household.people) { person.statePension = r(person.statePension); person.extraPension = r(person.extraPension); }

@@ -35,7 +35,7 @@
     'cgt', 'gCash', 'gIsa', 'gGia', 'gPension', 'gBonds', 'gProperty',
     'debtInterest', 'debtRegular', 'lumpOverpay', 'bondsMatured', 'bondsToIsa', 'propSold', 'extraPension', 'flatTax',
     'sweepIsa', 'sweepGia', 'nonWork', 'homeBuy', 'studentLoan', 'annuityBought', 'propBought', 'debtNew', 'debtForgiven', 'withdrawTax', 'hiDebtPay',
-    'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension', 'sacrificed', 'sharesKept',
+    'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension', 'sacrificed', 'sharesKept', 'hicbc', 'releaseIn', 'releaseRepaid',
   ];
 
   const GOAL_MEASURES = {
@@ -913,6 +913,9 @@
     return item.bonus * g * (item.fx || 1) * swing;
   }
 
+  // Child Benefit, entered as an income with that name (it is not taxed, but see the charge).
+  const isChildBenefit = item => item.kind === 'other' && /child benefit/i.test(item.name || '');
+
   // The income line pay is kept under by salary sacrifice (0 = none).
   const stayUnderLine = s => (s.stayUnderLine > 0 ? s.stayUnderLine : s.stayUnder100k ? R.PA_TAPER_START : 0);
 
@@ -1010,7 +1013,7 @@
     for (let t = 0; t < N; t++) e.mean[t] = (e.stockW[t] * a.stockReturn + (1 - e.stockW[t]) * a.bondReturn) / 100;
     // Incomes that swing from year to year (e.g. self-employed profit) get their own draws, only when
     // there are any, so other plans keep the same simulated futures.
-    const varies = plan.income.some(i => i.vary > 0 || (i.bonus > 0 && i.bonusVary > 0));
+    const varies = plan.income.some(i => i.vary > 0 || (i.bonus > 0 && i.bonusVary > 0) || i.shares > 0);
     if (varies) e.noise = new Float64Array(N * NOISE_SLOTS);
     return function draw() {
       let pi = mu;
@@ -1074,6 +1077,7 @@
         payInc: zeros(),       // income tax is measured on (take-home pay grossed up), for "pensions first"
         earned: zeros(),       // pay before tax: the most that can get relief in a year
         selfProfit: zeros(),   // self-employed profit (income tax + Class 4 NI)
+        hicbc: zeros(),        // High Income Child Benefit Charge (paid by the higher earner)
         loanPaid: zeros(),     // student loan repaid
         loanBal: zeros(),      // student loan owed at the start of each year
       })),
@@ -1118,9 +1122,11 @@
       const niable = people.map(() => 0);
       // From April 2029 only £2,000 a year of each person's salary sacrifice is free of NI.
       const niCapLeft = people.map(() => R.SACRIFICE_NI_CAP);
+      let childBenefit = 0;   // income named "Child Benefit", for the charge on high incomes
       for (const item of plan.income) {
         const v = incomeAfterCosts(item, plan, t, econ);
         if (v <= 0) continue;
+        if (isChildBenefit(item)) childBenefit += v;
         const tax = taxOf(item, plan);
         const P = item.owner === 'joint' ? null : pre.people[personIndex(plan, item.owner)];
         if (item.kind === 'dbpension' && item.lumpMultiple > 0 && ownerOf(plan, item).age + t === item.startAge) {
@@ -1186,7 +1192,9 @@
           P.statePension[t] = p.statePension * spYears(p).share * spDeferUplift(p) * price * Math.pow(1 + a.statePensionRealGrowth / 100, t);
         }
         const ny = spYears(p);
-        if (ny.voluntary > 0 && age >= p.retireAge && age < p.retireAge + ny.voluntary && age < p.statePensionAge) {
+        // Paid each year from retirement (or from now, for someone already retired).
+        const volFrom = Math.max(p.retireAge, p.age);
+        if (ny.voluntary > 0 && age >= volFrom && age < volFrom + ny.voluntary && age < p.statePensionAge) {
           pre.eventsOut[t] += R.NI_YEARS.class3Week * 52 * price;
         }
         if (p.extraPension > 0 && age < p.retireAge) {
@@ -1243,15 +1251,27 @@
         }
       });
 
+      // High Income Child Benefit Charge: 1% of the Child Benefit for every £200 of income over
+      // £60,000 (all of it from £80,000), on whoever has the higher income after pension
+      // contributions. The line is taken to rise with the other thresholds after the freeze.
+      if (childBenefit > 0 && !household.ignoreTax) {
+        let top = -1, ani = 0;
+        pre.people.forEach((P, i) => { const x = P.taxable[t] + grossUp(P.netPay[t]) - P.extraPot[t]; if (x > ani) { ani = x; top = i; } });
+        const C = R.CHILD_BENEFIT;
+        const share = Math.min(1, Math.max(0, (ani - C.chargeFrom * g) / ((C.chargeTo - C.chargeFrom) * g)));
+        if (top >= 0 && share > 0) { pre.people[top].hicbc[t] = childBenefit * share; pre.people[top].baseTax[t] += childBenefit * share; }
+      }
+
       const retired = p1.age + t >= p1.retireAge;
       if (retired && s.retireSpending > 0) {
         // The retirement amount replaces the regular list; check-up items (care, travel...) still apply.
         let extra = 0;
-        for (const e of plan.expenses) if ((e.key || '').startsWith('life:') && isActive(e, plan, t)) extra += annual(e) * growthFactor(e, plan, t, econ);
+        for (const e of plan.expenses) if ((e.key || '').startsWith('life:')) extra += streamAt(e, plan, t, econ);
         pre.expenses[t] = s.retireSpending * price + extra;
       } else {
+        // streamAt counts only the months paid in a year an item starts or stops part-way through.
         let total = 0;
-        for (const e of plan.expenses) if (isActive(e, plan, t)) total += annual(e) * growthFactor(e, plan, t, econ);
+        for (const e of plan.expenses) total += streamAt(e, plan, t, econ);
         pre.expenses[t] = retired ? total : total * s.spendNowPct / 100;
       }
       if (s.slowDownAge > 0 && p1.age + t >= s.slowDownAge) pre.expenses[t] *= s.slowDownPct / 100;
@@ -1904,6 +1924,8 @@
         out.overpay[t] = overpay;
         out.saved[t] = employee + extraOut + toCash + toIsa + toGia + toLisa + toPension + vestKept;
         out.sharesKept[t] = vestKept;
+        out.releaseIn[t] = releaseIn; out.releaseRepaid[t] = releaseRepaid;
+        out.hicbc[t] = pre.people.reduce((acc, P) => acc + P.hicbc[t], 0);
         out.toPension[t] = toPension;
         out.sacrificed[t] = pre.people.reduce((acc, P) => acc + P.sacrificed[t], 0);
         out.toLisa[t] = toLisa; out.lisaBonus[t] = lisaBonus; out.wLisa[t] = wLisa; out.lisaHome[t] = lisaHome; out.lisaCharge[t] = lisaCharge;
@@ -1921,7 +1943,7 @@
           const o = out.persons[i];
           o.taxable[t] = income[i];
           o.allowance[t] = R.personalAllowance(income[i], g);
-          o.incomeTax[t] = T.incomeTax(income[i], region, g) - pre.people[i].relief[t];
+          o.incomeTax[t] = T.incomeTax(income[i], region, g) - pre.people[i].relief[t] + pre.people[i].hicbc[t];
           o.relief[t] = pre.people[i].relief[t];
           o.ni[t] = pre.people[i].ni[t];
           o.pensionDrawn[t] = drawn[i];
@@ -2203,7 +2225,12 @@
   function autoTitle(goal, plan) {
     const p1 = plan.household.people[0];
     if (goal.type === 'debtFree') return `Mortgage-free by ${goal.year}`;
-    if (goal.type === 'retire') return `${plan.household.people.length > 1 ? `${retiree(plan, goal).name} retires` : 'Retire'} at ${goal.age}`;
+    if (goal.type === 'retire') {
+      const who = retiree(plan, goal), couple = plan.household.people.length > 1;
+      // Already retired: the goal is that the money lasts.
+      if (who.retireAge <= who.age && goal.age <= who.age) return `${couple ? `${who.name}: money` : 'Money'} lasts to ${who.endAge}`;
+      return `${couple ? `${who.name} retires` : 'Retire'} at ${goal.age}`;
+    }
     if (goal.type === 'emergency') return `Emergency fund: ${goal.months} months by ${goal.year}`;
     const amt = goal.amount >= 1e6 ? `£${+(goal.amount / 1e6).toFixed(2)}M` : `£${Math.round(goal.amount / 1000)}K`;
     if (goal.type === 'passiveIncome') return `${amt} a year passive income by ${goal.year}`;
@@ -2258,7 +2285,9 @@
         const variant = delta === 0 ? null : shiftRetirement(plan, delta, who.id);
         res.probability = variant ? successRate(variant, runs, seed) : mc.successRate;
         res.expectedYear = plan.startYear + (goal.age - who.age);
-        res.summary = `Chance the money lasts to the end of the plan if ${who.name} retires at ${goal.age}${delta === 0 ? ' (as planned)' : ''}.`;
+        res.retired = who.retireAge <= who.age && goal.age <= who.age;
+        res.summary = res.retired ? 'Chance the money lasts to the end of the plan.'
+          : `Chance the money lasts to the end of the plan if ${who.name} retires at ${goal.age}${delta === 0 ? ' (as planned)' : ''}.`;
         const vp = variant || plan, pr = variant ? project(variant) : proj;
         const p1v = vp.household.people[0];
         const short = pr.rows.findIndex((r, t) => t < pr.pre.N && r.shortfall > 0.5);
@@ -2268,7 +2297,7 @@
           ? ` On average returns the money runs out at about ${p1v.age + short} (${pr.rows[short].year}), ${p1v.endAge - p1v.age - short} years before the plan ends.`
           : ` On average returns it lasts to ${p1v.endAge}, with about ${gbp(last.liquid / last.deflator)} of savings and pensions left (today’s money).`;
         const fb = !variant && mc.fundedByYear ? mc.fundedByYear.findIndex((v, t) => t > 0 && v < 0.75) : -1;
-        res.words = words + (fb > 0 && short < 0 ? ` In a bad run of markets (1 in 4 futures) it runs short from about ${p1v.age + fb}.` : '');
+        res.words = words + (fb > 0 && short < 0 ? ` In a bad run of markets (1 in 4 futures) it runs short from about ${vp.household.people.length > 1 ? `${plan.startYear + fb} (${p1v.name} ${p1v.age + fb})` : p1v.age + fb}.` : '');
         res.summary += res.words;
       }
       res.status = statusOf(res.probability);
@@ -2432,7 +2461,7 @@
     for (let i = 0; i < runs; i++) {
       const econ = draw();
       for (let t = 0; t < T; t++) {
-        const v = item.fx !== undefined ? incomeAfterCosts(item, plan, t, econ) : (isActive(item, plan, t) ? annual(item) * growthFactor(item, plan, t, econ) : 0);
+        const v = item.fx !== undefined ? incomeAfterCosts(item, plan, t, econ) : streamAt(item, plan, t, econ);
         nominal[t * runs + i] = v;
         real[t * runs + i] = v / econ.price[t];
       }
@@ -2442,7 +2471,7 @@
     const econ = expectedEcon(plan, N);
     for (let t = 0; t < T; t++) {
       years.push(plan.startYear + t);
-      expected.push(item.fx !== undefined ? incomeAfterCosts(item, plan, t, econ) : (isActive(item, plan, t) ? annual(item) * growthFactor(item, plan, t, econ) : 0));
+      expected.push(item.fx !== undefined ? incomeAfterCosts(item, plan, t, econ) : streamAt(item, plan, t, econ));
     }
     return { years, expected, price: Array.from(econ.price), nominal: bandsOf(nominal, runs, T), real: bandsOf(real, runs, T) };
   }
@@ -2679,7 +2708,15 @@
   function rollForward(plan, years = 1) {
     const p = clonePlan(plan);
     p.startYear += years;
-    for (const person of p.household.people) person.age += years;
+    for (const person of p.household.people) {
+      // National Insurance years gained meanwhile: one for each year worked (or, with voluntary
+      // contributions, each year until State Pension age), so the record keeps up with the age.
+      if (person.niYears !== null && person.niYears !== undefined && years > 0) {
+        const until = person.niVoluntary ? person.statePensionAge : Math.min(person.retireAge, person.statePensionAge);
+        person.niYears = Math.min(50, person.niYears + Math.max(0, Math.min(years, until - person.age)));
+      }
+      person.age += years;
+    }
     p.events = p.events.filter(e => e.year >= p.startYear);
     for (const a of p.accounts) {
       if (a.type === 'bonds' && a.maturityYear && a.maturityYear < p.startYear) a.balance = 0;
@@ -2694,10 +2731,10 @@
 
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
-    incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
+    incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
-    streamAt, streamWindow, isActive, growthFactor, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
+    streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,
