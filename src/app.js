@@ -5731,6 +5731,10 @@
       }
     }
     const debt = model.proj.rows[0].debtPay || 0;
+    // What is owed, in its own words: a credit card or a car loan is not "your mortgage".
+    const owed = p.accounts.filter(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
+    const mort = owed.filter(a => /mortgage/i.test(a.name)).length;
+    const debtWord = !owed.length ? 'payments on what you owe' : mort === owed.length ? (mort > 1 ? 'your mortgages' : 'your mortgage') : mort ? 'your mortgage and other loan and card payments' : 'your loan and card payments';
     needs += debt;
     const take = B.moneyThisYear(p, model.proj).takeHome;
     const saving = Math.max(0, take - needs - wants);
@@ -5745,7 +5749,7 @@
     const month = t.month + (wiz.keepOthers ? W.uncovered(p, wiz.answers).reduce((acc, e) => acc + E.streamAt(e, p, 0), 0) / 12 : 0);
     setKids(box, 
       h('h3', { class: 'chart-title' }, 'How it compares'),
-      h('p', { class: 'sub' }, `Take-home this year about ${money(take / 12)} a month. Needs include your mortgage (${money(debt / 12)} a month), bills, food, transport and childcare; wants are the rest. The 50/30/20 split is a popular rule of thumb, not a rule.`),
+      h('p', { class: 'sub' }, `Take-home this year about ${money(take / 12)} a month. Needs include ${debt > 0.5 ? `${debtWord} (${money(debt / 12)} a month), ` : ''}bills, food, transport and childcare; wants are the rest. The 50/30/20 split is a popular rule of thumb, not a rule.`),
       viewToggle(visual, tbl),
       h('p', { class: 'sub', style: 'margin-top:10px' }, `The average UK household (2.4 people) spent about ${money(B.ONS_AVERAGE_MONTH)} a month on goods and services in 2023/24 (ONS), not counting mortgage payments. Your list: ${money(month)} a month.`));
   }
@@ -8135,11 +8139,11 @@
       $('#dataMenu').open = false;
       if (!confirm('Start a blank plan? This replaces everything in Horizon. Save to a file first if you want to keep your data.')) return;
       const id = E.uid();
-      const blank = E.normalizePlan({ startYear: E.currentYear(), asOf: today(), household: { region: 'scotland', people: [{ name: 'You', age: 35, retireAge: 65 }] }, accounts: [], income: [], expenses: [], events: [], goals: [], strategy: { autoBuffer: true, cashReserve: 0 } });
+      const blank = E.normalizePlan({ startYear: E.currentYear(), asOf: today(), household: { region: plan().household.region || 'scotland', people: [{ name: 'You', age: 35, retireAge: 65 }] }, accounts: [], income: [], expenses: [], events: [], goals: [], strategy: { autoBuffer: true, cashReserve: 0 } });
       ws = E.normalizeWorkspace({ scenarios: [{ id, name: 'My plan', plan: blank }], activeId: id, checkins: [], settings: ws.settings });
       afterImport();
       navigate('finances/assumptions');
-      toast('A blank plan, with figures as at today. Start with who it is for, then add accounts, income and spending; then add goals on Home.');
+      toast(`A blank plan, with figures as at today. It starts with one person aged 35 who stops work at 65, on ${plan().household.region === 'scotland' ? 'Scottish' : 'English, Welsh and Northern Irish'} tax rules: change those first, here. Then add accounts, income and spending; then goals on Home.`);
     });
     $('#resetBtn').addEventListener('click', () => {
       $('#dataMenu').open = false;

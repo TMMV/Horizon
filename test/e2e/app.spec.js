@@ -736,6 +736,12 @@ test.describe('Horizon app', () => {
 
   test('spending check-up shows typical UK ranges and the 50/30/20 picture', async ({ page }) => {
     await go(page, 'finances/spending');
+    // What is owed is called what it is: add a credit card beside the example's mortgage.
+    await page.evaluate(() => {
+      const H = window.__horizon;
+      H.ws.scenarios.find(s => s.id === H.ws.activeId).plan.accounts.push({ id: 'card', name: 'Credit card', type: 'debt', owner: 'joint', balance: 1500, rate: 22, payment: 100 });
+      H.refresh();
+    });
     await page.click('#sec-expenses button:has-text("Spending check-up")');
     await expect(page.locator('#wizBody .wiz-guide').first()).toContainText('Typical');
     const q = page.locator('#wizBody .wiz-q').filter({ hasText: 'Gas & electricity' });
@@ -743,6 +749,7 @@ test.describe('Horizon app', () => {
     await expect(q.locator('.guide-pos')).toHaveText('Above typical');
     for (let i = 0; i < 7; i++) await page.click('#wizNext');
     await expect(page.locator('#wizCompare')).toContainText('50/30/20');
+    await expect(page.locator('#wizCompare')).toContainText(/Needs include your mortgage and other loan and card payments \(£[\d,]+ a month\), bills/);
     await expect(page.locator('#wizCompare .split-bar').first()).toBeVisible();
   });
 
@@ -2199,9 +2206,13 @@ test.describe('review of 13 November', () => {
 test.describe('round 3 user tests', () => {
   test('a blank plan: plain “you”, a buffer that follows spending, and steps that agree with the goal', async ({ page }) => {
     const { problems } = await openApp(page);
+    // A blank plan keeps the tax rules of the plan it replaces, and says what it starts with.
+    await page.evaluate(() => { const H = window.__horizon; for (const s of H.ws.scenarios) s.plan.household.region = 'ruk'; });
     await page.click('#dataMenu summary');
     await page.click('#blankBtn');
     await page.waitForFunction(() => window.__horizon.ws.scenarios[0].plan.household.people[0].name === 'You');
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.household.region)).toBe('ruk');
+    await expect(page.locator('#toast')).toContainText('one person aged 35 who stops work at 65, on English, Welsh and Northern Irish tax rules');
     await page.evaluate(() => {
       const p = window.__horizon.ws.scenarios[0].plan;
       p.household.people[0].age = 46; p.household.people[0].retireAge = 63;
