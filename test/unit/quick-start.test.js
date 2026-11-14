@@ -176,6 +176,20 @@ test('working for yourself, a property that is rented out on an interest-only mo
   assert.ok(Math.abs(d.bal[20] - 110000) < 1500, String(d.bal[20]));
   // The rent and the business are counted: something is left each month (it was minus £736 without them).
   assert.ok(Q.leftover(p) > 500, String(Q.leftover(p)));
+  // Nothing goes into a pension: a trial amount says what it would cost and build.
+  const o = E.ownPensionTrial(p, proj, 0);
+  assert.ok(o.pay >= 25 && o.pay % 25 === 0, String(o.pay));
+  assert.equal(Math.round(o.pot), Math.round(o.pay / 0.8));
+  assert.ok(o.cost <= o.pay + 0.5 && o.built > o.pay * 12 * 10, JSON.stringify(o));
+  assert.equal(E.ownPensionTrial(p, proj, 1), null);
+  // Payments typed in the quick start come out of what is taken home, and the question goes away.
+  const b = JSON.parse(JSON.stringify(a));
+  b.people[0].ownPension = 200; b.people[0].pot = 0;
+  const pb = Q.build(b, ctx), projB = E.project(pb);
+  assert.equal(pb.household.people[0].extraPension, 200);
+  assert.ok(pb.accounts.some(c => c.type === 'pension' && c.owner === 'p1'));
+  assert.equal(Math.round(projB.rows[0].extraPension), 2400);
+  assert.equal(E.ownPensionTrial(pb, projB, 0), null);
   // A repayment mortgage on it keeps the usual rate.
   a.letPay = 700;
   assert.equal(Q.build(a, ctx).accounts.find(c => c.name === 'Mortgage on the rented-out property').rate, Q.MORTGAGE_RATE);

@@ -2008,6 +2008,28 @@
     };
   }
 
+  // Someone who works for themselves and has nothing going into a pension: what a trial
+  // amount a month would cost and build. Null when that is not their situation; { pay: 0 }
+  // when nothing is left over to pay in. Amounts a month, or today's money for the totals.
+  function ownPensionTrial(plan, proj, i) {
+    const p = plan.household.people[i], P = proj.pre.people[i], rows = proj.rows, N = proj.pre.N;
+    if (!p || !P) return null;
+    const t = p.retireAge - p.age;
+    if (t < 2 || t >= N || !(P.selfProfit[0] > 0.5)) return null;
+    if (p.extraPension > 0 || P.contrib[0] > 0.5 || (rows[0].toPension || 0) > 0.5) return null;
+    const mp = monthlyPlan(proj);
+    const pay = Math.floor(Math.min(P.selfProfit[0] * 0.08 / 12, mp.surplus - mp.shortfall) / 25) * 25;
+    if (!(pay >= 25)) return { pay: 0 };
+    const trial = JSON.parse(JSON.stringify(plan));
+    trial.household.people[i].extraPension = pay;
+    const q = project(normalizePlan(trial)).rows;
+    const real = (k, f) => (f(q[k]) - f(rows[k])) / rows[k].deflator;
+    return {
+      pay, pot: pay / (1 - BASIC_RELIEF), cost: pay - (rows[0].taxes - q[0].taxes) / 12,
+      built: real(t, r => r.pension),
+    };
+  }
+
   function milestones(plan, proj) {
     const { rows, pre } = proj;
     const people = plan.household.people;
@@ -2831,7 +2853,7 @@
     incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
-    waysThere, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
+    waysThere, ownPensionTrial, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,

@@ -2573,6 +2573,7 @@ test.describe('the guide beside the page', () => {
     await next();
     await expect(body).not.toContainText('Does money come off');
     await expect(body).toContainText('nothing goes into a pension unless you pay it in');
+    await expect(body.locator('input[aria-label="Own pension payments a month"]')).toBeVisible();
     await fill('Pension pots so far', 9000);
     await next();
     // Ash is in the NHS scheme: the year joined gives an estimate on the spot.
@@ -2618,6 +2619,10 @@ test.describe('the guide beside the page', () => {
     expect(plan.household.people[1].niYears).toBe(14);
     expect(plan.income.find(i => i.kind === 'rental').amount).toBe(850);
     expect(plan.accounts.find(a => a.name === 'Mortgage on the rented-out property').rate).toBe(5.23);
+    // Nothing goes into Cal's pension: a step says what paying in would cost and build.
+    const step = page.locator('#ovTodo li', { hasText: 'Cal: decide how much to pay into a pension' });
+    await expect(step).toContainText(/For example, £[\d,]+ a month: the government adds £[\d,]+ of tax relief/);
+    await expect(step).toContainText(/builds a pension of about £[\d,]+ in today’s money/);
     expect(problems).toEqual([]);
   });
 

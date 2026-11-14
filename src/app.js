@@ -1321,6 +1321,16 @@
         if (k > 0 && k < N) add(rows[k].year, `${x.name}: claim the ${db.dbScheme === 'uss' ? 'USS' : 'workplace'} pension`, `From ${db.startAge}: about ${money(E.incomeAfterCosts(db, p, k) / 12)} a month${db.lumpMultiple > 0 ? `, plus a tax-free lump sum of about ${money(E.incomeAfterCosts(db, p, k) * db.lumpMultiple)}` : ''}. Tell the scheme a few months before.`, null);
       }
     });
+    // Working for oneself with nothing going into a pension: what paying in would cost and build.
+    ps.forEach((x, i) => {
+      const o = E.ownPensionTrial(p, proj, i);
+      if (!o) return;
+      add('now', `${x.name}: decide how much to pay into a pension`,
+        `Working for ${x.name === 'You' ? 'yourself' : 'themselves'}, nothing goes into a pension unless it is paid in, and the plan has nothing going in. ${o.pay > 0
+          ? `For example, ${money(o.pay)} a month: the government adds ${money(o.pot - o.pay)} of tax relief, so ${money(o.pot)} goes in${o.cost < o.pay - 1 ? `, and it costs about ${money(o.cost)} a month once the higher-rate relief is claimed on the tax return` : ''}. Kept up until ${x.retireAge}, that builds a pension of about ${money(o.built)} in today’s money. The plan would otherwise put that money into ISAs, with no tax relief.`
+          : 'Nothing is left over each month at the moment, so there is nothing to pay in yet.'} A pension cannot be taken out before ${x.pensionAccessAge}. With your own company, the company can pay in instead, which also saves corporation tax: ask the accountant. Type an amount under “Extra into ${x.name}’s pension” to see what it does to the plan.`,
+        go('Try an amount', 'finances/saving'));
+    });
     const firstRet = Math.min(...ps.map(x => x.retireAge - x.age).filter(t => t > 0));
     const draws = [];
     let prev = null;
@@ -7542,7 +7552,8 @@
         render: () => [
           QS.employed(x) ? qsQ(`Does money come off ${qsYour(i)} pay for a pension at work?`, qsChoices([['yes', 'Yes'], ['no', 'No'], ['unsure', 'Not sure']], x.workPension, v => { x.workPension = v; }, false),
             'Most employees are put into one automatically.') : null,
-          x.pay === 'self' ? qsNote(`Working for ${i === 0 ? 'yourself' : 'themselves'}, nothing goes into a pension unless ${qsYou(i)} ${i === 0 ? 'pay' : 'pays'} it in. Type what is in pensions so far below; regular payments can be added afterwards under Finances.`) : null,
+          x.pay === 'self' ? qsQ(`How much ${qsDo(i)} pay into a pension each month, if anything?`, qsMoney(() => x.ownPension, v => { x.ownPension = v; }, 'Own pension payments a month', { suffix: 'a month' }),
+            `Working for ${i === 0 ? 'yourself' : 'themselves'}, nothing goes into a pension unless ${qsYou(i)} ${i === 0 ? 'pay' : 'pays'} it in. What leaves the bank account in a normal month; the tax relief is added on top. Leave empty if nothing: the plan will then say what paying in would cost and build.`) : null,
           QS.employed(x) && x.workPension === 'yes' ? h('div', { class: 'qs-q' }, h('span', { class: 'qs-label' }, 'What kind of pension is it?'),
             qsChoices([['', 'An ordinary workplace pension', 'A pot of money with a company such as Nest, Aviva or Scottish Widows. Most jobs.']], x.scheme || '', v => { x.scheme = v; }),
             h('span', { class: 'qs-hint' }, 'Or one of these, which build a yearly pension for life and not a pot:'),

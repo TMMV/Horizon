@@ -28,7 +28,7 @@
   };
   const MORTGAGE_RATE = 4.5;
 
-  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, pot: 0, fixedPension: 0, fixedAge: null, niYears: 0, loan: false, loanOwed: 0 });
+  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, niYears: 0, loan: false, loanOwed: 0 });
   // What a student loan is typically worth when the person does not know theirs.
   const LOAN_TYPICAL = { plan1: 8000, plan2: 45000, plan4: 15000, plan5: 30000 };
   // The plan most likely for someone of that age living there (it can be changed afterwards).
@@ -78,6 +78,8 @@
       return {
         name: nameOf(x, i), age, retireAge: stop,
         ...(x.niYears > 0 ? { niYears: Math.min(50, Math.round(x.niYears)) } : {}),
+        // Working for oneself: what is paid into a pension comes out of what is taken home.
+        ...(x.pay === 'self' && x.ownPension > 0 ? { extraPension: Math.round(x.ownPension) } : {}),
         ...(loan ? { loanPlan: loan, loanBalance: x.loanOwed > 0 ? x.loanOwed : LOAN_TYPICAL[loan], loanEndYear: startYear + Math.max(1, R.STUDENT_LOANS[loan].writeOff - Math.max(0, age - 22)) } : {}),
       };
     });
@@ -120,7 +122,7 @@
         const from = Math.min(75, Math.max(Math.max(50, age(x) + 1), Math.round(x.fixedAge || spaOf(x, startYear))));
         income.push({ name: mine ? 'My pension with a set amount' : `${n}’s pension with a set amount`, kind: 'dbpension', dbScheme: 'other', owner: id, tax: 'uk', amount: x.fixedPension, freq: 'year', startAge: from, dbAccrual: 0, lumpMultiple: 0 });
       }
-      if (x.pot > 0 || (employed(x) && x.workPension !== 'no' && !scheme)) accounts.push({ name: mine ? 'My pension' : `${n}’s pension`, type: 'pension', owner: id, balance: x.pot || 0 });
+      if (x.pot > 0 || (x.pay === 'self' && x.ownPension > 0) || (employed(x) && x.workPension !== 'no' && !scheme)) accounts.push({ name: mine ? 'My pension' : `${n}’s pension`, type: 'pension', owner: id, balance: x.pot || 0 });
     });
     // Money that comes because of the children stops when the youngest is 18.
     if (a.childMoney > 0) income.push({ name: 'Money for the children', kind: 'other', owner: 'joint', tax: 'none', amount: a.childMoney, freq: 'month', endRef: 'year', toYear: startYear + Math.max(1, 18 - Math.min(17, Math.max(0, Math.round(a.youngest || 0)))), inflationLinked: true });
