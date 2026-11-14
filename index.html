@@ -29,7 +29,8 @@
           <button type="button" role="menuitem" id="exportBtn">Save to a file…</button>
           <button type="button" role="menuitem" id="importBtn">Open a saved file…</button>
           <p class="menu-note" id="savedNote"></p>
-          <button type="button" role="menuitem" id="setupBtn">Set up my plan (guide)</button>
+          <button type="button" role="menuitem" id="quickBtn">Start my plan: a few questions</button>
+          <button type="button" role="menuitem" id="setupBtn">Go through every detail (guide)</button>
           <button type="button" role="menuitem" id="blankBtn">Start a blank plan</button>
           <button type="button" role="menuitem" id="resetBtn">Reset to example</button>
         </div>
@@ -43,9 +44,14 @@
   </nav>
 
   <div class="scen-banner" id="scenBanner" role="status" hidden></div>
+  <div class="example-banner" id="exampleBanner" hidden>
+    <span><strong>This is an example household (Alex and Sam).</strong> These are not your figures.</span>
+    <button type="button" class="btn small primary" id="exampleStart">Start my own plan</button>
+  </div>
   <main>
     <!-- Home: what you have today and how your goals are doing -->
     <section class="view" id="view-home" role="tabpanel">
+      <section class="card short-card" id="homeShort" aria-labelledby="shortTitle"></section>
       <section class="card portfolio" id="homePortfolio" aria-labelledby="pfTitle"></section>
       <section class="card" id="ovGoalsCard" aria-labelledby="ovGoalsTitle">
         <div class="card-head">
@@ -223,6 +229,21 @@
     </form>
   </dialog>
 
+  <dialog id="quickDlg" aria-labelledby="qsTitle">
+    <form method="dialog" class="wizard quick" id="qsForm">
+      <header class="wiz-head">
+        <p class="wiz-step" id="qsStep"></p>
+        <button type="button" class="btn ghost icon-btn" id="qsClose" aria-label="Close">✕</button>
+      </header>
+      <div class="wiz-progress"><span id="qsBar"></span></div>
+      <div class="wiz-body qs-body" id="qsBody"></div>
+      <footer class="wiz-foot" id="qsFoot">
+        <button type="button" class="btn" id="qsBack">Back</button>
+        <button type="button" class="btn primary qs-next" id="qsNext">Continue</button>
+      </footer>
+    </form>
+  </dialog>
+
   <dialog id="guideDlg" class="wide" aria-labelledby="gdTitle">
     <form method="dialog" class="wizard" id="gdForm">
       <header class="wiz-head">
@@ -350,6 +371,7 @@
   <script src="src/scenario-ideas.js"></script>
   <script src="src/life-wizard.js"></script>
   <script src="src/review.js"></script>
+  <script src="src/quick-start.js"></script>
   <script src="src/app.js"></script>
 </body>
 </html>

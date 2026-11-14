@@ -103,6 +103,9 @@
   function defaultStrategy() {
     return {
       cashReserve: 15000,
+      // A plan started blank: the buffer follows three months of spending and debt payments
+      // until the person types their own (the app keeps it in step).
+      autoBuffer: false,
       overpayPct: 0,
       overpayCapPct: 10,
       isaAllowance: R.ISA_ALLOWANCE,
@@ -432,6 +435,7 @@
       lumpMultiple: Math.max(0, num(i.lumpMultiple)),  // defined benefit: automatic tax-free lump sum, × the pension
       dbScheme: str(i.dbScheme, ''),                    // defined benefit estimate: scheme, year joined, salary now
       dbJoined: Math.round(num(i.dbJoined, 0)),
+      dbNpa: num(i.dbNpa, 0) > 0 ? Math.round(num(i.dbNpa, 0)) : null,
       dbSalary: Math.max(0, num(i.dbSalary)),
       // Annuity: the part of the pension pot spent on it (today's money), taken from the pot when it starts.
       cost: Math.max(0, num(i.cost)),
@@ -694,7 +698,9 @@
     const a = p.assumptions;
     if (a.stockPctNow > 100 || a.stockPctRetire > 100) out.push('Stock allocation cannot exceed 100%.');
     for (const d of p.accounts.filter(x => x.type === 'debt' && x.balance > 0)) {
-      if (d.payment * 12 <= d.balance * d.rate / 100) out.push(`“${d.name}” payments do not cover the interest, so it never shrinks.`);
+      if (!(d.payment > 0) && d.rate >= HIGH_RATE * 100) continue;   // paid off first from what is left over
+      if (!(d.payment > 0)) out.push(`“${d.name}” has no monthly payment yet, so the plan never pays it off.`);
+      else if (d.payment * 12 <= d.balance * d.rate / 100) out.push(`“${d.name}” payments do not cover the interest, so it never shrinks.`);
     }
     const pre = precompute(p);
     p.household.people.forEach((person, i) => {
@@ -884,7 +890,10 @@
   function dbEarly(item, person) {
     const s = R.DB_SCHEMES[item.dbScheme];
     if (!s || !s.early || item.startAge <= person.age) return { npa: null, years: 0, factor: 1 };
-    const npa = s.age === 'spa' ? person.statePensionAge : s.age;
+    // "Other": the amount is what the statement says for the age typed, so nothing is cut unless
+    // the scheme's own pension age is given and it is taken before that.
+    if (item.dbScheme === 'other' && !(item.dbNpa > 0)) return { npa: null, years: 0, factor: 1 };
+    const npa = item.dbNpa > 0 ? item.dbNpa : s.age === 'spa' ? person.statePensionAge : s.age;
     const years = Math.max(0, npa - item.startAge);
     const i = Math.min(s.early.length - 1, Math.floor(years));
     const j = Math.min(s.early.length - 1, i + 1);

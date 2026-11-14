@@ -671,3 +671,68 @@ test('equity release shows in the yearly flows, so each account’s table adds u
     near(r.debt + r.debtInterest + r.debtNew - r.debtRegular - r.overpay - r.lumpOverpay - r.hiDebtPay - r.debtForgiven - r.releaseRepaid, n.debt);
   }
 });
+
+// ---- Round 3 (13 November): three people who know little about money, on a phone, a laptop and a tablet.
+
+const carer = (over = {}) => E.normalizePlan({
+  startYear: 2026, asOf: '2026-01-01',
+  household: { region: 'scotland', people: [{ name: 'You', age: 46, retireAge: 63 }] },
+  accounts: [{ id: 'bank', type: 'cash', balance: 2100 }],
+  income: [{ id: 'pay', name: 'My pay', kind: 'salary', owner: 'p1', tax: 'none', amount: 1750, freq: 'month', endRef: 'retire' }],
+  expenses: [
+    { id: 'rent', name: 'Rent', amount: 520, freq: 'month' },
+    { id: 'food', name: 'Food', amount: 380, freq: 'month' },
+    { id: 'bus', name: 'Bus pass', amount: 62, freq: 'month' },
+  ],
+  events: [], goals: [], ...over,
+});
+
+test('a pension typed from a letter (scheme “Other”) is used as typed; it is cut only when the scheme’s own age is later', () => {
+  const p = E.normalizePlan({
+    startYear: 2026, asOf: '2026-01-01',
+    household: { region: 'scotland', people: [{ name: 'Gordon', age: 52, retireAge: 62 }] },
+    accounts: [], expenses: [], events: [], goals: [],
+    income: [{ id: 'old', name: 'Old job pension', kind: 'dbpension', dbScheme: 'other', owner: 'p1', tax: 'uk', amount: 3200, freq: 'year', startAge: 65, dbAccrual: 0 }],
+  });
+  const x = p.household.people[0], db = p.income[0];
+  assert.equal(x.statePensionAge, 67);
+  assert.equal(E.dbEarly(db, x).factor, 1);
+  // £3,200 a year in today's money from 65, as the letter says.
+  const t = 65 - 52;
+  near(E.incomeAfterCosts(db, p, t) / Math.pow(1 + p.assumptions.inflation / 100, t), 3200, 0.01);
+  // The statement's amount is for 67 and it is taken at 65: two years early.
+  const early = E.dbEarly({ ...db, dbNpa: 67 }, x);
+  assert.equal(early.npa, 67);
+  near(early.factor, R.DB_SCHEMES.other.early[2] / 100, 1e-9);
+  // The scheme's own age survives a save and reload; named schemes are cut as before.
+  assert.equal(E.normalizePlan({ ...p, income: [{ ...db, dbNpa: 67 }] }).income[0].dbNpa, 67);
+  assert.ok(E.dbEarly({ ...db, dbScheme: 'lgps' }, x).factor < 1);
+});
+
+test('spending that looks incomplete is flagged; a loan with no payment says so', () => {
+  const p = carer();
+  const flag = q => B.insights(q, E.project(q)).find(i => i.id === 'spending-missing');
+  // Three items and nearly half of take-home pay left over.
+  assert.ok(flag(p) && /Is your spending list complete/.test(flag(p).title));
+  assert.equal(flag(p).tone, 'warn');
+  // Nothing entered at all.
+  assert.equal(flag(carer({ expenses: [] })).title, 'No spending entered yet');
+  // A list that uses up most of the pay is left alone.
+  assert.equal(flag(carer({ expenses: [...p.expenses, { id: 'rest', name: 'Everything else', amount: 600, freq: 'month' }] })), undefined);
+  const owing = carer({ accounts: [{ id: 'bank', type: 'cash', balance: 2100 }, { id: 'bnpl', name: 'Pay later', type: 'debt', balance: 640, rate: 0, payment: 0 }] });
+  const w = E.validatePlan(owing).join(' ');
+  assert.match(w, /has no monthly payment yet/);
+  assert.doesNotMatch(w, /do not cover the interest/);
+});
+
+test('future costs assume no car for a bus-pass household and no home repairs for a renter', () => {
+  const d = LW.defaults(carer());
+  assert.equal(d.cars, 0);
+  assert.equal(d.homeCost, 0);
+  const owner = LW.defaults(carer({
+    accounts: [{ id: 'home', type: 'property', balance: 165000 }],
+    expenses: [{ id: 'fuel', name: 'Fuel', amount: 120, freq: 'month' }, { id: 'bus', name: 'Bus pass', amount: 62, freq: 'month' }],
+  }));
+  assert.equal(owner.cars, 1);
+  assert.ok(owner.homeCost > 0);
+});

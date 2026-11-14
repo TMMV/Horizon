@@ -354,6 +354,82 @@ dialog#wizard, dialog#lifeWiz {
 }
 dialog#wizard::backdrop, dialog#lifeWiz::backdrop { background: rgba(0, 0, 0, 0.45); }
 .wizard { display: flex; flex-direction: column; max-height: calc(100vh - 32px); }
+
+/* ---------- quick start: one question at a time, large and plain */
+dialog#quickDlg {
+  border: none; border-radius: 18px; padding: 0; width: min(600px, calc(100vw - 24px)); max-height: calc(100vh - 32px);
+  background: var(--surface); color: var(--text); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+dialog#quickDlg::backdrop { background: rgba(0, 0, 0, 0.55); }
+.quick .wiz-head { align-items: center; padding-bottom: 6px; }
+.quick .wiz-step { margin: 0; }
+.qs-body { gap: 16px; padding: 18px 24px 22px; font-size: 1rem; line-height: 1.5; }
+.qs-body h2 { margin: 0; font-size: 1.5rem; line-height: 1.25; letter-spacing: -0.01em; }
+.qs-lead { margin: 0; color: var(--text-2); }
+.qs-q { display: grid; gap: 6px; }
+.qs-q > .qs-label { font-weight: 600; font-size: 1.02rem; }
+.qs-q > .qs-hint { color: var(--text-2); font-size: 0.9rem; }
+.qs-input { font: inherit; font-size: 1.1rem; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); width: 100%; max-width: 260px; box-sizing: border-box; }
+.qs-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qs-money { display: flex; align-items: center; gap: 8px; }
+.qs-money > span { color: var(--text-2); font-size: 1.1rem; }
+.qs-money > small { color: var(--text-2); font-size: 0.95rem; white-space: nowrap; }
+.qs-choices { display: grid; gap: 8px; }
+.qs-choices.two { grid-template-columns: 1fr 1fr; }
+.qs-choice { text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; display: grid; gap: 2px; }
+.qs-choice small { color: var(--text-2); font-size: 0.86rem; }
+.qs-choice:hover { background: var(--hover); }
+.qs-choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-soft); }
+.qs-note { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 0.92rem; color: var(--text-2); }
+.qs-note.good { background: var(--accent-soft); color: var(--text); }
+.qs-note.warn { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); color: var(--text); }
+.qs-err { margin: 0; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--warn) 18%, var(--surface)); font-weight: 600; }
+.qs-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.qs-list li { display: flex; gap: 10px; align-items: flex-start; }
+.qs-list .glyph { flex: none; width: 18px; height: 18px; margin-top: 3px; color: var(--accent); }
+.qs-start { display: grid; gap: 10px; justify-items: start; margin-top: 4px; }
+.qs-start .btn.primary { font-size: 1.08rem; padding: 12px 22px; border-radius: 12px; }
+.qs-link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
+.qs-person { display: grid; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); }
+.qs-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.qs-debt { display: grid; grid-template-columns: 1.3fr 1fr 1fr auto; gap: 8px; align-items: end; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); }
+.qs-debt label { display: grid; gap: 4px; font-size: 0.86rem; color: var(--text-2); }
+.qs-debt .qs-input, .qs-debt select { max-width: none; font-size: 1rem; padding: 8px 10px; }
+.qs-debt select { font: inherit; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }
+.qs-check { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-strong); cursor: pointer; }
+.qs-check input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
+.qs-check small { display: block; color: var(--text-2); font-size: 0.86rem; }
+.quick .wiz-foot .qs-next { font-size: 1.02rem; padding: 10px 22px; }
+.quick .wiz-foot[hidden] { display: none; }
+@media (max-width: 560px) {
+  dialog#quickDlg { width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; margin: 0; }
+  .quick { max-height: 100vh; height: 100%; }
+  .qs-body { flex: 1; padding: 14px 16px 18px; }
+  .qs-body h2 { font-size: 1.3rem; }
+  .qs-choices.two, .qs-row { grid-template-columns: 1fr; }
+  .qs-debt { grid-template-columns: 1fr 1fr; }
+  .qs-input { max-width: none; }
+}
+
+/* ---------- home: the answer in plain words */
+.short-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.short-goal { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
+.short-goal > div { display: grid; gap: 2px; min-width: 0; }
+.short-goal strong { font-size: 1.02rem; }
+.short-ico { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--muted); }
+.short-ico svg { width: 16px; height: 16px; }
+.short-goal.good .short-ico { background: var(--good, var(--s3)); }
+.short-goal.warn .short-ico { background: var(--warn); }
+.short-goal.bad .short-ico { background: var(--bad, var(--s2)); }
+.short-link { justify-self: start; background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 0.88rem; text-decoration: underline; }
+.short-now { margin-top: 12px; display: grid; gap: 4px; }
+.short-now ul { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
+.short-none { margin: 0; }
+.short-foot { margin: 12px 0 0; font-size: 0.88rem; color: var(--text-2); }
+
+/* ---------- the example plan says so */
+.example-banner { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 8px 16px; background: color-mix(in srgb, var(--warn) 16%, var(--surface)); border-bottom: 1px solid var(--border); font-size: 0.92rem; }
+.example-banner[hidden] { display: none; }
 .wiz-head { display: flex; justify-content: space-between; gap: 10px; padding: 18px 20px 10px; }
 .wiz-step { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
 .wiz-progress { height: 4px; background: var(--grid); margin: 0 20px; border-radius: 4px; overflow: hidden; }
@@ -1041,6 +1117,8 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 }
 .notify-count[hidden] { display: none; }
 .notify-pop { width: min(380px, calc(100vw - 24px)); padding: 10px; gap: 6px; }
+/* On a phone the box hangs from the top bar, not from the bell, so it stays on the screen. */
+@media (max-width: 560px) { .topbar { position: relative; z-index: 31; } .menu.notify { position: static; } .notify-pop { left: 12px; right: 12px; top: calc(100% - 4px); width: auto; min-width: 0; box-sizing: border-box; max-height: calc(100vh - 80px); overflow-y: auto; } }
 .notify-head { font-weight: 650; padding: 2px 4px 4px; }
 .notify-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .notify-item { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 10px; border-radius: 10px; background: var(--surface-2); }
@@ -1120,6 +1198,7 @@ dialog#updateDlg::backdrop { background: rgba(0, 0, 0, 0.45); }
 /* On a phone the answer comes first: the goals, then the portfolio. */
 @media (max-width: 640px) {
   #view-home:not([hidden]) { display: flex; flex-direction: column; }
+  #view-home > #homeShort { order: -2; }
   #view-home > #ovGoalsCard { order: -1; }
 }
 

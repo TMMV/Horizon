@@ -13,8 +13,10 @@ async function openApp(page, hash = '', opts = {}) {
   page.on('console', m => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
   page.on('request', r => { if (!/^(file|data|blob):/.test(r.url())) external.push(r.url()); });
   page.on('dialog', d => d.accept());
-  await page.goto(APP_URL + (opts.setup ? '' : '?nosetup') + (hash ? `#${hash}` : ''));
+  await page.goto(APP_URL + (opts.setup || opts.quick ? '' : '?nosetup') + (hash ? `#${hash}` : ''));
   await page.waitForFunction(() => window.__horizon && window.__horizon.model);
+  // A first visit opens the quick start; tests of the full guide go straight to that.
+  if (opts.setup) await page.evaluate(() => { const d = document.querySelector('#quickDlg'); if (d.open) d.close(); window.__horizon.openSetup(0); });
   return { problems, external };
 }
 

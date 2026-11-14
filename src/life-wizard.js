@@ -27,8 +27,11 @@
       weddingHelp: 0,
       depositHelp: 0,
       helpAge: 30,                  // age of the child for wedding / deposit help
-      cars: 1, carEvery: 8, carCost: r(20000, 1000), carNext: plan.startYear + 3,
-      homeEvery: 10, homeCost: r(15000, 1000), homeNext: plan.startYear + 5,
+      // No car when the spending list has a bus or train pass and no car costs; home repairs
+      // only for a home that is owned.
+      cars: plan.expenses.some(e => e.amount > 0 && /\b(bus|train|public transport)\b/i.test(`${e.key || ''} ${e.name || ''}`.replace(/-/g, ' '))) && !plan.expenses.some(e => e.amount > 0 && /\b(car|fuel|petrol|diesel|mot|road tax)\b/i.test(`${e.key || ''} ${e.name || ''}`.replace(/-/g, ' '))) ? 0 : 1,
+      carEvery: 8, carCost: r(20000, 1000), carNext: plan.startYear + 3,
+      homeEvery: 10, homeCost: plan.accounts.some(a => a.type === 'property' && !a.excluded && !(a.buyYear > plan.startYear)) ? r(15000, 1000) : 0, homeNext: plan.startYear + 5,
       travelExtra: 0, travelYears: 10,
       slowDownAge: 0, slowDownPct: 80,
       careAge: 0, careYears: 3, careCost: 40000,

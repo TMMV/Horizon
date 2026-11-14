@@ -2195,3 +2195,154 @@ test.describe('review of 13 November', () => {
     expect(problems).toEqual([]);
   });
 });
+
+test.describe('round 3 user tests', () => {
+  test('a blank plan: plain “you”, a buffer that follows spending, and steps that agree with the goal', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.click('#dataMenu summary');
+    await page.click('#blankBtn');
+    await page.waitForFunction(() => window.__horizon.ws.scenarios[0].plan.household.people[0].name === 'You');
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios[0].plan;
+      p.household.people[0].age = 46; p.household.people[0].retireAge = 63;
+      p.accounts.push({ id: 'bank', name: 'Bank', type: 'cash', owner: 'joint', balance: 2100 });
+      p.income.push({ id: 'pay', name: 'My pay', kind: 'salary', owner: 'p1', tax: 'none', amount: 1750, freq: 'month', endRef: 'retire' });
+      p.expenses.push({ id: 'rent', name: 'Rent', amount: 520, freq: 'month' }, { id: 'food', name: 'Food', amount: 380, freq: 'month' }, { id: 'bus', name: 'Bus pass', amount: 62, freq: 'month' });
+      p.goals.push({ id: 'ret', type: 'retire', person: 'p1', age: 63, confidence: 85 });
+      localStorage.setItem('horizon-uk-v3', JSON.stringify(window.__horizon.ws));
+    });
+    await page.reload();
+    await page.waitForFunction(() => window.__horizon && window.__horizon.model);
+    // The buffer is three months of the spending listed, not £15,000.
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.strategy.cashReserve)).toBe(2900);
+    await go(page, 'home');
+    const home = page.locator('#view-home');
+    await expect(home).toContainText('Is your spending list complete?');
+    await expect(home).not.toContainText(/You is|You’s|You retires|You has/);
+    // Home's step and the goal's "this year" say the same thing.
+    await expect(page.locator('#ovTodo')).toContainText(/into savings|into ISAs/);
+    await openGoal(page, 'Retire at 63');
+    const goal = page.locator('#view-goal');
+    await expect(goal).not.toContainText('Nothing left over to invest');
+    await expect(goal).not.toContainText(/You is|You’s|You retires|You has/);
+    await expect(goal).toContainText(/you retire at 63|You retire at 63/);
+    // Typing a buffer of your own stops it following the spending.
+    await go(page, 'finances/saving');
+    const buf = page.locator('#sec-strategy input[aria-label="Cash buffer to keep"]');
+    await buf.fill('5000');
+    await buf.blur();
+    await page.waitForTimeout(700);
+    expect(await page.evaluate(() => { const s = window.__horizon.ws.scenarios[0].plan.strategy; return [s.cashReserve, s.autoBuffer]; })).toEqual([5000, false]);
+    expect(problems).toEqual([]);
+  });
+
+  test('a pension from a letter is not cut; the guide does not add the same empty item twice', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios[0].plan;
+      p.income.push({ id: 'old', name: 'Old job pension', kind: 'dbpension', dbScheme: 'other', owner: 'p1', tax: 'uk', amount: 3200, freq: 'year', startAge: 65, dbAccrual: 0 });
+      localStorage.setItem('horizon-uk-v3', JSON.stringify(window.__horizon.ws));
+    });
+    await page.reload();
+    await page.waitForFunction(() => window.__horizon && window.__horizon.model);
+    await go(page, 'finances/income');
+    const calc = page.locator('[data-calc="old"]');
+    if (!(await calc.count())) await page.locator('#sec-income').getByText('Old job pension').first().click();
+    await expect(page.locator('[data-calc="old"]')).toContainText('= £3,200 a year');
+    await expect(page.locator('[data-calc="old"]')).not.toContainText('before the Normal Pension Age');
+    await expect(page.locator('#sec-income')).toContainText('The scheme’s full pension age');
+    // The guide: "+ Other income" twice leaves one empty item, not two.
+    const count = () => page.evaluate(() => window.__horizon.ws.scenarios[0].plan.income.filter(i => i.kind === 'other' && !(i.amount > 0)).length);
+    const before = await count();
+    await page.evaluate(() => window.__horizon.openSetup(3));
+    await page.locator('#setupPanel').getByRole('button', { name: '+ Other income' }).click();
+    await page.locator('#setupPanel').getByRole('button', { name: '+ Other income' }).click();
+    expect(await count()).toBe(before + 1);
+    expect(problems).toEqual([]);
+  });
+});
+
+test.describe('quick start', () => {
+  test('a first visit asks a few plain questions and ends on a plan with the answer in words', async ({ page }) => {
+    const { problems } = await openApp(page, '', { quick: true });
+    const body = page.locator('#qsBody');
+    const fill = (label, v) => body.locator(`input[aria-label="${label}"]`).fill(String(v));
+    const pick = t => body.locator('.qs-choice', { hasText: t }).first().click();
+    const next = () => page.click('#qsNext');
+    // The example is labelled as one, and the welcome screen has one main button.
+    await expect(page.locator('#quickDlg')).toBeVisible();
+    await expect(page.locator('#exampleBanner')).toContainText('example household');
+    await expect(body).toContainText('Will my money be OK?');
+    await page.click('#qsStart');
+    // An age is needed: said in words, and nothing moves on.
+    await next();
+    await expect(body.locator('.qs-err')).toContainText('Please type your age');
+    await fill('Your age', 27);
+    await next();
+    // Nothing chosen: asked to choose.
+    await next();
+    await expect(body.locator('.qs-err')).toContainText('Please choose');
+    await pick('What lands in the bank');
+    await expect(body).toContainText('How do you know your pay?');
+    await fill('Take-home pay a month', 1850);
+    await next();
+    await pick('Not sure');
+    await expect(body).toContainText('5% of pay from you and 3% from the employer');
+    await next();
+    await fill('Bank and savings', 1400);
+    await next();
+    await pick('Renting');
+    await fill('Rent a month', 475);
+    await next();
+    await page.click('#qsAddDebt');
+    await body.locator('.qs-debt select').selectOption('overdraft');
+    await fill('Amount owed', 300);
+    await next();
+    // Spending: a figure that leaves a lot unspent is questioned; "what is left" works it out instead.
+    await pick('I know roughly what I spend');
+    await fill('Spending a month', 500);
+    await expect(body.locator('#qsLeft')).toContainText('this figure is too low');
+    await pick('what is left at the end');
+    await fill('Left over a month', 50);
+    await expect(body.locator('#qsLeft')).toContainText('a month goes on everything else');
+    await next();
+    await expect(page.locator('#qsNext')).toHaveText('Show me my plan');
+    await next();
+    await expect(page.locator('#quickDlg')).toBeHidden();
+    // The plan: theirs, not the example; the answer in words comes first.
+    await expect(page.locator('#exampleBanner')).toBeHidden();
+    const short = page.locator('#homeShort');
+    await expect(short).toContainText('In short');
+    await expect(short).toContainText(/Retire at \d+\?/);
+    await expect(short).toContainText('of 100 futures tried');
+    await expect(short).toContainText('This month');
+    const plan = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    expect(plan.household.people.map(x => x.age)).toEqual([27]);
+    expect(plan.income[0].amount).toBe(1850);
+    expect(plan.expenses.map(e => e.name)).toEqual(['Rent', 'Everything else']);
+    expect(plan.accounts.map(a => a.name).sort()).toEqual(['Bank and savings', 'My pension', 'Overdraft']);
+    // No mortgage: nothing on Home calls the overdraft one.
+    await expect(page.locator('#view-home')).not.toContainText(/mortgage paid off/i);
+    // "Make it more exact" opens the full guide.
+    await short.getByRole('button', { name: 'Make it more exact' }).click();
+    await expect(page.locator('#setupPanel')).toBeVisible();
+    expect(problems).toEqual([]);
+  });
+
+  test('the quick start fits a phone screen and can be left for the example', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { problems } = await openApp(page, '', { quick: true });
+    const over = () => page.evaluate(() => [...document.querySelectorAll('#quickDlg *')].filter(el => { const r = el.getBoundingClientRect(); return r.width && r.right > window.innerWidth + 1; }).length);
+    expect(await over()).toBe(0);
+    await page.click('#qsStart');
+    await page.locator('#qsBody .qs-choice', { hasText: 'Me and a partner' }).click();
+    expect(await over()).toBe(0);
+    await page.click('#qsClose');
+    await expect(page.locator('#quickDlg')).toBeHidden();
+    await expect(page.locator('#exampleBanner')).toBeVisible();
+    // The banner's button brings the questions back.
+    await page.click('#exampleStart');
+    await expect(page.locator('#qsBody')).toContainText('Will my money be OK?');
+    expect(problems).toEqual([]);
+  });
+});

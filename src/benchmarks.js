@@ -217,6 +217,19 @@
       out.push({ id: 'saving-rate', tone, title: `You keep ${Math.round(keep * 100)}% of take-home pay`, text: `After spending and mortgage payments, from ${money(m.takeHome / 12)} a month coming in. A popular guide is 50% needs, 30% wants, 20% saving.${r0.sharesKept > 0.5 ? ` That counts ${money(r0.sharesKept / 12)} a month of share awards kept as shares: they are saving, but not cash to spend${m.takeHome - r0.sharesKept < r0.spending + m.debtPay ? `, so without them spending is ${money((r0.spending + m.debtPay - m.takeHome + r0.sharesKept) / 12)} a month more than comes in` : ''}.` : ''}`, value: keep });
     }
 
+    // 2b. Whatever is not in the spending list is treated as saved: say so when it is a lot.
+    if (m.takeHome > 0 && m.working) {
+      const left = m.takeHome - r0.spending - m.debtPay - (r0.sharesKept || 0);
+      const share = left / m.takeHome;
+      if (!plan.expenses.some(e => e.amount > 0)) {
+        out.push({ id: 'spending-missing', tone: 'warn', title: 'No spending entered yet', action: 'spending',
+          text: 'Until it is, the plan treats everything that comes in as saved, so the charts and the chances are far too good. The Spending check-up goes through the usual items in a few minutes.' });
+      } else if (share > 0.35 && plan.expenses.filter(e => e.amount > 0).length < 12) {
+        out.push({ id: 'spending-missing', tone: 'warn', title: `Is your spending list complete? ${money(left / 12)} a month is left over`, action: 'spending',
+          text: `The plan treats everything that is not in the spending list as saved: ${Math.round(share * 100)}% of take-home pay here, where most households manage less than 20%. If the phone, clothes, the car, holidays, presents or going out are missing, the answers are too good. If your bank balance is not growing by about that much each month, something is missing. The Spending check-up goes through the usual items.` });
+      }
+    }
+
     // 3. Children: Child Benefit and Tax-Free Childcare
     const kids = hh.children;
     const top = m.people.reduce((a, b) => (b.ani > a.ani ? b : a), m.people[0]);
