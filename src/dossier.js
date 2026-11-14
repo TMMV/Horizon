@@ -103,7 +103,7 @@
   const PLACES = [['hiDebtPay', 'extra off expensive debts'], ['toCash', 'into cash savings'], ['overpay', 'in mortgage overpayments'], ['toLisa', 'into Lifetime ISAs'],
     ['toIsa', 'into ISAs'], ['toGia', 'into the general investment account'], ['toPension', 'extra into pensions']];
   const SOURCES = [['wCash', 'from cash'], ['wGia', 'from the general investment account'], ['wIsa', 'from ISAs'], ['wLisa', 'from Lifetime ISAs'], ['wPension', 'from pension pots']];
-  function yearAmounts(r, prev, left) {
+  function yearAmounts(r, prev, left, month = 'January') {
     const m = v => gbp(v / 12);
     if (left < -0.5) {
       const parts = SOURCES.filter(([k]) => (r[k] || 0) > 0.5).map(([k, label]) => `${m(r[k])} ${label}`);
@@ -117,7 +117,7 @@
       else if (was > 0.5) parts.push(`nothing more ${label} (${m(was)} a month last year)`);
     }
     if (!parts.length) return null;
-    return { title: 'Set the monthly amounts for the year', text: `${cap(list(parts))}. Change the standing orders in January.`, auto: true };
+    return { title: 'Set the monthly amounts for the year', text: `${cap(list(parts))}. Change the standing orders in ${month}.`, auto: true };
   }
 
   function yearBlock(plan, proj, mc, t, steps) {
@@ -283,7 +283,9 @@
     // From the second year on: the amounts to set up for the year, against the year before.
     // (The first year's are the "now" steps.)
     if (prev) {
-      const amounts = yearAmounts(r, prev, left);
+      // A plan year starts on the day and month of the figures date.
+      const month = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][E.isDate(plan.asOf) ? +plan.asOf.slice(5, 7) - 1 : 0];
+      const amounts = yearAmounts(r, prev, left, month);
       if (amounts && !todo.some(s => /^Take about/.test(s.title) && amounts.draw)) todo[amounts.draw ? 'push' : 'unshift'](amounts);
     }
 

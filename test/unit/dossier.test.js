@@ -152,6 +152,9 @@ test('every later year says what to set up, against the year before; the sheet g
   assert.equal(c.title, 'Take about £2,000 a month from savings and pensions');
   assert.match(c.text, /£500 from cash and £1,500 from pension pots \(£1,000 a month last year\)/);
   assert.equal(D.yearAmounts({}, {}, 0), null);
+  // A plan year starts in the month of the figures date: that is when to change the amounts.
+  assert.match(b.text, /Change the standing orders in January\.$/);
+  assert.match(D.yearAmounts({ toIsa: 6000 }, { toIsa: 0 }, 1, 'November').text, /Change the standing orders in November\.$/);
 });
 
 test('when a mortgage ends is said one way: paid off during a year, nothing owed from the next', () => {

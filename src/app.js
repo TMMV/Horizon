@@ -394,6 +394,15 @@
 
   const fmtDate = s => { const d = new Date(`${s}T12:00:00`); return Number.isNaN(+d) ? s : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
   const asOf = () => E.asOfDate(plan());
+  // A plan year is the twelve months from the figures date: with figures as at 14 November,
+  // "2026" is 14 November 2026 to 13 November 2027. Null when it is the calendar year.
+  const planYearSpan = (date, t = 0) => {
+    if (!E.isDate(date) || date.slice(5) === '01-01') return null;
+    const y = +date.slice(0, 4) + t, md = date.slice(5) === '02-29' ? '02-28' : date.slice(5);
+    const end = new Date(`${y + 1}-${md}T12:00:00Z`);
+    end.setUTCDate(end.getUTCDate() - 1);
+    return { from: `${y}-${md}`, to: end.toISOString().slice(0, 10) };
+  };
   // Every account's estimated value today (from the figures date, or a reading since).
   const estimateToday = () => model.est;
   const sinceText = days => (days <= 0 ? 'today' : days === 1 ? 'yesterday' : days < 60 ? `${days} days ago` : `${Math.round(days / 30.4)} months ago`);
@@ -1372,6 +1381,9 @@
     {
       const td = today(), yr = +td.slice(0, 4), md = td.slice(5);
       const endY = md <= '04-05' ? yr : yr + 1, by = `By 5 April ${endY}`, r0 = rows[0];
+      // Months left until 5 April: the plan's amounts are for twelve months from the figures date.
+      const monthsLeft = Math.max(1, Math.round((Date.parse(`${endY}-04-05`) - Date.parse(td)) / 864e5 / 30.44));
+      const byThen = v => `about ${money(v / 12)} a month, so about ${money(v / 12 * monthsLeft)} more by then`;
       const join = a => (a.length <= 1 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
       const earns = k => p.income.some(it => it.kind === k && E.incomeAfterCosts(it, p, 0) > 0.5);
       const why = [earns('self') ? 'self-employed income' : '', earns('rental') ? 'rent' : '', (r0.hicbc || 0) > 0.5 ? 'the Child Benefit charge' : '', (r0.cgt || 0) > 0.5 ? 'gains on investments' : ''].filter(Boolean);
@@ -1379,7 +1391,7 @@
         `For the tax year that ended on 5 April ${endY - 1}, because of ${join(why)}. HMRC charges £100 for a late return, and interest on tax paid late. If that only started since then, the first return is due a year later.`, null, `${endY}-01-10`);
       const planned = r0.toIsa + (r0.toLisa || 0), allow = p.strategy.isaAllowance;
       if (planned > 0.5 || isas.length || r0.gia > 500) add('tax', `${by}: use this year’s ISA allowance`,
-        `Each person can pay up to ${money(allow)} into ISAs before 5 April; what is not used is lost. The plan pays in about ${money(planned)} this year.${r0.gia > 500
+        `Each person can pay up to ${money(allow)} into ISAs before 5 April; what is not used is lost. ${planned > 0.5 ? `The plan pays in ${byThen(planned)}.` : 'The plan pays nothing in for now.'}${r0.gia > 500
           ? ` Move up to ${money(Math.min(r0.gia, Math.max(0, allow * ps.length - planned)))} from the general investment account into ISAs (“Bed and ISA”: sell, and buy the same again inside the ISA), so its gains and income are tax-free from then on.`
           : p.strategy.cashReserve > 0 ? ` Spare cash beyond the buffer of ${money(p.strategy.cashReserve)} can go in too.` : ''}`, go('Set amounts', 'finances/saving'), `${endY}-03-01`);
       for (const a of p.accounts.filter(x => x.type === 'lisa' && !x.excluded && x.contribution > 0)) add('tax', `${by}: pay into ${a.name} for this year’s bonus`,
@@ -1387,13 +1399,13 @@
       if (earns('salary') || earns('self')) {
         const total = pre.people.reduce((acc, P) => acc + (P.contrib[0] || 0), 0) + (r0.toPension || 0);
         add('tax', `${by}: decide on a pension top-up`,
-          `Anything paid into a pension before 5 April gets this tax year’s relief${(r0.hicbc || 0) > 0.5 ? `, and brings down the Child Benefit charge (${money(r0.hicbc)} this year in the plan)` : ''}. The plan pays in about ${money(total)} this year${total > 0.5 ? ', employers included' : ''}; up to ${money(R.PENSION_ANNUAL_ALLOWANCE)} a year is allowed (no more than you earn). It is worth most to anyone paying higher-rate tax. Money in a pension cannot be taken out before ${Math.min(...ps.map(x => x.pensionAccessAge))}.`, go('Saving & investing', 'finances/saving'), `${endY}-03-01`);
+          `Anything paid into a pension before 5 April gets this tax year’s relief${(r0.hicbc || 0) > 0.5 ? `, and brings down the Child Benefit charge (about ${money(r0.hicbc)} a year in the plan)` : ''}. ${total > 0.5 ? `The plan pays in ${byThen(total)}, employers included` : 'The plan pays nothing in for now'}; up to ${money(R.PENSION_ANNUAL_ALLOWANCE)} a year is allowed (no more than you earn). It is worth most to anyone paying higher-rate tax. Money in a pension cannot be taken out before ${Math.min(...ps.map(x => x.pensionAccessAge))}.`, go('Saving & investing', 'finances/saving'), `${endY}-03-01`);
       }
     }
     // Next year: the amounts to set up, against this year's.
     if (N > 1) {
       const a = DS.yearBlock(p, proj, null, 1, []).todo.find(x => x.auto);
-      if (a) { add(year0 + 1, a.title, a.text, go('Set amounts', 'finances/saving'), `${year0 + 1}-01-05`); out[out.length - 1].fromDoc = true; }
+      if (a) { add(year0 + 1, a.title, a.text, go('Set amounts', 'finances/saving'), (planYearSpan(asOf(), 1) || { from: `${year0 + 1}-01-05` }).from); out[out.length - 1].fromDoc = true; }
     }
     add('yearly', 'By 5 April: use the tax-year allowances', 'ISAs, pension top-ups and moving the general account into ISAs. Unused allowances are lost.', ['Tax year-end check', () => openGuide('tax')], '03-01');
     add('yearly', 'Each autumn: the yearly review', 'Swap the estimates for real balances so the plan tracks what actually happened.', ['Start review', () => openReview()], '10-01');
@@ -7838,9 +7850,9 @@
         group.total ? h('tr', { class: 'total' }, h('td', {}, group.total.label), h('td', { class: 'num' }, g(group.total.value)), h('td', { class: 'num' }, monthly ? g(group.total.value / 12) : ''), h('td', { class: 'note' }, monthly && / a month$/.test(group.total.note) ? '' : group.total.note)) : null));
     const MONTHLY = { in: true, off: true, out: true, save: true, draw: true, pension: false, debt: false, end: false };
     const yearSection = y => h('section', { class: 'doc-year', id: `doc-${y.year}` },
-      h('h2', {}, String(y.year), h('small', {}, `${y.ages.map(a => `${a.name === 'You' ? 'You' : a.name} ${a.age}`).join(' · ')} · ${y.phase === 'working' ? 'working' : y.phase === 'part' ? 'one of you working' : 'retired'}`)),
+      h('h2', {}, String(y.year), h('small', {}, `${planYearSpan(d.meta.asOf, y.t) ? `${fmtDate(planYearSpan(d.meta.asOf, y.t).from)} to ${fmtDate(planYearSpan(d.meta.asOf, y.t).to)} · ` : ''}${y.ages.map(a => `${a.name === 'You' ? 'You' : a.name} ${a.age}`).join(' · ')} · ${y.phase === 'working' ? 'working' : y.phase === 'part' ? 'one of you working' : 'retired'}`)),
       h('p', { class: 'doc-headline' }, y.headline),
-      y.net ? h('p', { class: 'doc-sub' }, `By the end of the year, net worth is about ${g(y.net.value)} (${g(y.net.real)} in today’s money) on average returns${y.net.low !== null && y.net.high !== null ? `; in a bad run of markets about ${g(y.net.low)}, in a good run about ${g(y.net.high)}` : ''}.`) : null,
+      y.net ? h('p', { class: 'doc-sub' }, `By ${planYearSpan(d.meta.asOf, y.t) ? fmtDate(planYearSpan(d.meta.asOf, y.t).to) : 'the end of the year'}, net worth is about ${g(y.net.value)} (${g(y.net.real)} in today’s money) on average returns${y.net.low !== null && y.net.high !== null ? `; in a bad run of markets about ${g(y.net.low)}, in a good run about ${g(y.net.high)}` : ''}.`) : null,
       y.changes.length ? h('div', { class: 'doc-box new' }, h('h3', {}, y.t === 0 ? 'Worth knowing this year' : 'New this year'), h('ul', {}, y.changes.map(c => h('li', {}, c)))) : null,
       y.todo.length ? h('div', { class: 'doc-box todo' }, h('h3', {}, 'To do this year'), h('ul', {}, y.todo.map(s => h('li', {}, h('strong', {}, s.title), s.text ? ` ${s.text}` : '')))) : null,
       y.split.length ? h('div', { class: 'doc-glance' },
@@ -7864,7 +7876,7 @@
       h('p', { class: 'doc-sub' }, only ? 'The short version, to keep in sight. The full plan, with every year’s figures, is under “Years written out” at the top.' : 'The short version, to keep in sight. Each year’s page further on has the figures behind it.'),
       sh.now.length ? h('div', { class: 'doc-box todo' }, h('h3', {}, 'Now'), h('p', { class: 'doc-explain' }, 'Set these up this month; most then run by themselves.'), doList(sh.now)) : null,
       sh.tax.length ? h('div', { class: 'doc-box todo' }, h('h3', {}, 'Before the tax year ends'), doList(sh.tax)) : null,
-      sh.next ? h('div', { class: 'doc-box todo' }, h('h3', {}, `Next year (${sh.next.year})`),
+      sh.next ? h('div', { class: 'doc-box todo' }, h('h3', {}, planYearSpan(d.meta.asOf, 1) ? `Next year (${sh.next.year}: from ${fmtDate(planYearSpan(d.meta.asOf, 1).from)})` : `Next year (${sh.next.year})`),
         sh.next.todo.length ? doList(sh.next.todo) : h('p', {}, 'Nothing new to set up: carry on as this year.'),
         sh.next.changes.length ? [h('p', { class: 'doc-explain' }, 'What is different next year:'), h('ul', {}, sh.next.changes.map(c => h('li', {}, c)))] : null) : null,
       d.everyYear.length ? h('div', { class: 'doc-box new' }, h('h3', {}, 'Every year'), doList(d.everyYear)) : null);
@@ -7919,7 +7931,8 @@
           h('li', {}, h('strong', {}, 'What is left, and where to put it. '), 'How much a month goes to each account. In years when income does not cover spending, this part says what to take from where instead.'),
           h('li', {}, h('strong', {}, 'Pensions, and mortgage and loans. '), 'What goes in, what is owed, and when each debt ends.'),
           h('li', {}, h('strong', {}, 'Where you should be at the end of the year. '), 'Each kind of account and net worth. At the yearly review, compare your real balances with this.')),
-        h('p', {}, '“New this year” lists what is different from the year before, and “To do this year” lists anything that needs you to act. All amounts are in the pounds of that year, so they rise with prices; today’s money is given where it helps to compare.')),
+        h('p', {}, '“New this year” lists what is different from the year before, and “To do this year” lists anything that needs you to act. All amounts are in the pounds of that year, so they rise with prices; today’s money is given where it helps to compare.'),
+        planYearSpan(d.meta.asOf) ? h('p', { class: 'doc-yearnote' }, h('strong', {}, `Each year here starts on ${fmtDate(d.meta.asOf).replace(/ \d{4}$/, '')}. `), `Your figures are as at ${fmtDate(d.meta.asOf)}, so “${d.meta.startYear}” means ${fmtDate(planYearSpan(d.meta.asOf).from)} to ${fmtDate(planYearSpan(d.meta.asOf).to)}, and every later year runs the same way. “The end of the year” is the day before the next one starts: the day to compare your real balances with the plan.`) : null),
       h('section', { id: 'doc-assume' }, h('h2', {}, 'What the plan assumes'),
         h('p', { class: 'doc-sub' }, 'Everything that follows rests on these. Change one in Horizon and the whole document changes with it.'),
         h('table', { class: 'doc-kv' }, h('tbody', {}, d.assumptions.map(a => h('tr', {}, h('td', {}, h('strong', {}, a.label)), h('td', {}, a.value), h('td', { class: 'note' }, a.why)))))),

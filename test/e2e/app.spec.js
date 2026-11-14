@@ -2427,7 +2427,14 @@ test.describe('the dossier', () => {
     const doc = page.locator('#docBody');
     await expect(doc.locator('#doc-short .ways').first()).toContainText('What would get you there', { timeout: 20000 });
     const sheet = doc.locator('#doc-do');
-    await expect(sheet.locator('.doc-box h3')).toHaveText(['Now', 'Before the tax year ends', 'Next year (2027)', 'Every year']);
+    // The example's figures are as at 1 September, so each of its years runs from then: said once, and on each year.
+    await expect(sheet.locator('.doc-box h3')).toHaveText(['Now', 'Before the tax year ends', /^Next year \(2027: from 1 Sept? 2027\)$/, 'Every year']);
+    await expect(doc).toContainText(/Each year here starts on 1 Sept?\. Your figures are as at 1 Sept? 2026, so “2026” means 1 Sept? 2026 to 31 Aug 2027/);
+    await expect(doc.locator('#doc-2026 h2 small')).toContainText(/^1 Sept? 2026 to 31 Aug 2027 · /);
+    await expect(doc.locator('#doc-2026')).toContainText(/By 31 Aug 2027, net worth is about/);
+    await expect(doc.locator('#doc-2027 .doc-box.todo')).toContainText('Change the standing orders in September.');
+    // Amounts with a deadline are a month, and what that comes to by then: not a whole year's.
+    await expect(sheet.locator('li', { hasText: 'use this year’s ISA allowance' })).toContainText(/The plan pays in about £[\d,]+ a month, so about £[\d,]+ more by then\./);
     await expect(sheet).toContainText('Pay £');
     await expect(sheet).toContainText('use this year’s ISA allowance');
     await expect(sheet).toContainText('Set the monthly amounts for the year');
@@ -2442,6 +2449,18 @@ test.describe('the dossier', () => {
     await expect(doc.locator('#doc-dates')).toBeVisible();
     await page.selectOption('#docYears', '5');
     await expect(doc.locator('.doc-year')).toHaveCount(5);
+    // Figures as at 1 January: a year is the calendar year, and nothing more is said.
+    await page.evaluate(() => {
+      const H = window.__horizon;
+      for (const s of H.ws.scenarios) s.plan.asOf = '2026-01-01';
+      H.refresh();
+    });
+    await page.click('#docClose');
+    await page.click('#tabDossier');
+    await expect(doc.locator('#doc-do .doc-box h3')).toHaveText(['Now', 'Before the tax year ends', 'Next year (2027)', 'Every year']);
+    await expect(doc.locator('#doc-2026 h2 small')).not.toContainText(' to ');
+    await expect(doc.locator('#doc-2026')).toContainText('By the end of the year, net worth is about');
+    await expect(doc).not.toContainText('Each year here starts on');
     expect(problems).toEqual([]);
   });
 
