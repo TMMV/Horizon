@@ -2641,6 +2641,29 @@ test.describe('the guide beside the page', () => {
     expect(problems).toEqual([]);
   });
 
+  test('with two mortgages, the goal can follow one of them, which is then overpaid first', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const p = window.__horizon.ws.scenarios[0].plan;
+      p.accounts.push({ id: 'flat-loan', name: 'Flat mortgage', type: 'debt', owner: 'joint', balance: 90000, rate: 5.5, payment: 413 });
+      window.__horizon.refresh();
+    });
+    await settle(page);
+    await openGoal(page, 'Mortgage-free by');
+    await page.click('.goal-hero button:has-text("Edit goal")');
+    const which = page.locator('#gwBody select[aria-label="Which mortgage or loan"]');
+    await expect(which.locator('option')).toHaveText(['Everything owed', 'Mortgage', 'Flat mortgage']);
+    await which.selectOption({ label: 'Mortgage' });
+    await page.click('#gwNext');
+    await page.click('#gwNext');
+    await expect(page.locator('#goalPage .goal-hero')).toContainText('Mortgage paid off by');
+    await expect(page.locator('#goalPage')).toContainText('Mortgage: still owed');
+    const plan = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    const g = plan.goals.find(x => x.type === 'debtFree');
+    expect(g.debtId).toBe(plan.accounts.find(a => a.name === 'Mortgage').id);
+    expect(problems).toEqual([]);
+  });
+
   test('costs that come later: a car and home repairs are suggestions until ticked', async ({ page }) => {
     const { problems } = await openApp(page);
     await page.evaluate(() => {

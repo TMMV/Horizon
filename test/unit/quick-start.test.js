@@ -194,3 +194,36 @@ test('working for yourself, a property that is rented out on an interest-only mo
   a.letPay = 700;
   assert.equal(Q.build(a, ctx).accounts.find(c => c.name === 'Mortgage on the rented-out property').rate, Q.MORTGAGE_RATE);
 });
+
+test('a “paid off by” goal can follow one mortgage: it is overpaid first, and an interest-only one elsewhere does not hold it up', () => {
+  const a = Q.blank('ruk');
+  Object.assign(a.people[0], { name: 'Cal', age: 38, pay: 'salary', amount: 70000, retireAge: 60, workPension: 'yes' });
+  Object.assign(a, { cash: 11000, home: 'mortgage', homeValue: 340000, mortgage: 215000, mortgagePay: 1340, let: true, letValue: 180000, letMortgage: 110000, letPay: 480, letRent: 850, spending: 1500 });
+  const base = Q.build(a, ctx);
+  base.strategy.overpayPct = 50;
+  const home = base.accounts.find(c => c.name === 'Mortgage'), flat = base.accounts.find(c => c.name === 'Mortgage on the rented-out property');
+  const withGoal = debtId => E.normalizePlan({ ...JSON.parse(JSON.stringify(base)), goals: [{ id: 'g1', type: 'debtFree', year: ctx.startYear + 12, debtId }] });
+  const check = p => { const proj = E.project(p), mc = E.monteCarlo(p, 60, 3); return { proj, res: E.evaluateGoals(p, proj, mc, { runs: 60, seed: 3 })[0] }; };
+  // Everything owed: the flat (dearer) is overpaid first.
+  const all = withGoal('');
+  const A = check(all);
+  assert.equal(E.goalDebtId(all), '');
+  assert.equal(A.res.title, `Mortgage-free by ${ctx.startYear + 12}`);
+  const bal = (proj, id, t) => proj.out.debts.find(d => d.id === id).bal[t];
+  assert.ok(bal(A.proj, flat.id, 2) < 110000 - 1000, 'the flat is overpaid first');
+  // The home alone: it is overpaid first, the flat stays level, and the goal is about the home.
+  const one = withGoal(home.id);
+  const B = check(one);
+  assert.equal(E.goalDebtId(one), home.id);
+  assert.equal(B.res.title, `Mortgage paid off by ${ctx.startYear + 12}`);
+  assert.ok(Math.abs(bal(B.proj, flat.id, 2) - 110000) < 1500, String(bal(B.proj, flat.id, 2)));
+  assert.ok(bal(B.proj, home.id, 2) < bal(A.proj, home.id, 2) - 1000);
+  assert.ok(B.res.expectedYear && (!A.res.expectedYear || B.res.expectedYear < A.res.expectedYear), `${A.res.expectedYear} ${B.res.expectedYear}`);
+  assert.ok(B.res.probability >= A.res.probability);
+  assert.match(B.res.summary, /follows that one alone/);
+  // Without overpaying, the interest-only one is never cleared: the summary names it.
+  const none = withGoal(''); none.strategy.overpayPct = 0;
+  assert.match(check(none).res.summary, /Mortgage on the rented-out property is still owed at the end/);
+  // A goal about a debt that is gone falls back to everything owed.
+  assert.equal(E.goalDebtId(withGoal('nope')), '');
+});

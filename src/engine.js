@@ -337,6 +337,7 @@
       includePensions: g.includePensions !== undefined ? !!g.includePensions : true,
       months: Math.min(24, Math.max(1, Math.round(num(g.months, 6)))),
       counts: oneOf(g.counts, ['cash', 'investments'], 'cash'),   // emergency fund: cash only, or cash + ISAs, GIA and bonds
+      debtId: type === 'debtFree' ? str(g.debtId, '') : '',       // one mortgage or loan the goal is about ('' = everything owed)
     };
   }
 
@@ -1316,9 +1317,16 @@
 
   // ---------------------------------------------------------------- simulation
 
+  // The one mortgage or loan the plan's "paid off by" goal is about ('' when it is about
+  // everything owed). Overpayments go to it first, and the goal watches it alone.
+  function goalDebtId(plan) {
+    const g = (plan.goals || []).find(x => x.type === 'debtFree' && x.debtId);
+    return g && plan.accounts.some(a => a.id === g.debtId && a.type === 'debt' && !a.excluded) ? g.debtId : '';
+  }
+
   function newPath(N, detail, nPeople = 2) {
     const out = {};
-    for (const k of ['cash', 'isa', 'gia', 'pension', 'bonds', 'property', 'debt', 'short', 'locked', 'cashIsa']) out[k] = new Float64Array(N + 1);
+    for (const k of ['cash', 'isa', 'gia', 'pension', 'bonds', 'property', 'debt', 'goalDebt', 'short', 'locked', 'cashIsa']) out[k] = new Float64Array(N + 1);
     if (detail) {
       for (const k of FLOW_KEYS) out[k] = new Float64Array(N + 1);
       out.persons = Array.from({ length: nPeople }, () => ({
@@ -1455,7 +1463,9 @@
         });
       }
     }
-    debts.sort((d1, d2) => d2.rate - d1.rate); // overpay the most expensive first
+    // Overpay the one the goal is about first, then the most expensive.
+    const goalDebt = goalDebtId(plan);
+    debts.sort((d1, d2) => (d2.id === goalDebt) - (d1.id === goalDebt) || d2.rate - d1.rate);
     // Someone with no ISA (or no general account, and no joint one) gets one to open, so their
     // share stays theirs: id `new:isa:<person id>` or `new:gia:<person id>`.
     people.forEach((pp, i) => {
@@ -1499,6 +1509,7 @@
       out.bonds[t] = bonds.reduce((acc, b) => acc + b.bal, 0);
       out.property[t] = props.reduce((acc, p) => acc + (p.owned ? p.val : 0), 0);
       out.debt[t] = debts.reduce((acc, d) => acc + d.bal, 0);
+      out.goalDebt[t] = goalDebt ? debts.reduce((acc, d) => acc + (d.id === goalDebt ? d.bal : 0), 0) : out.debt[t];
       out.short[t] = short;
       out.locked[t] = pre.locked[t];
       if (detail) {
@@ -2138,7 +2149,7 @@
           (r.__paths = r.__paths || {})[g.id] = path;
         } else if (g.type === 'debtFree') {
           // Nothing owed in the target year (a mortgage taken out later counts too).
-          r[g.id] = out.debt[tg] <= 0.5;
+          r[g.id] = out.goalDebt[tg] <= 0.5;
         } else if (g.type === 'emergency') {
           for (const k in snap) snap[k] = out[k][Math.min(tg, N - 1)];
           r[g.id] = emergencyHave(g, snap) >= emergencyNeed(g, pre, out.debt[tg] > 0.5 ? debtPayments : 0, tg) * EF_NEAR;
@@ -2259,10 +2270,11 @@
     return { need, buffer, have, invested, already: plan.strategy.cashReserve + invested >= need - 0.5, cashNow: r0.cash };
   }
 
-  function debtFreeYear(proj) {
+  // `own`: only the mortgage or loan the goal is about, when it names one.
+  function debtFreeYear(proj, own = false) {
     // The year after the last one with anything owed.
     let last = -1;
-    proj.rows.forEach((x, t) => { if (x.debt > 0.5) last = t; });
+    proj.rows.forEach((x, t) => { if ((own ? proj.out.goalDebt[t] : x.debt) > 0.5) last = t; });
     const r = proj.rows[last + 1];
     return r ? r.year : null;
   }
@@ -2275,7 +2287,10 @@
   // The goal described in words, e.g. "£1M by 2031" (also the subtitle of named goals).
   function autoTitle(goal, plan) {
     const p1 = plan.household.people[0];
-    if (goal.type === 'debtFree') return `Mortgage-free by ${goal.year}`;
+    if (goal.type === 'debtFree') {
+      const one = goal.debtId && goal.debtId === goalDebtId(plan) ? plan.accounts.find(a => a.id === goal.debtId) : null;
+      return one ? `${one.name} paid off by ${goal.year}` : `Mortgage-free by ${goal.year}`;
+    }
     if (goal.type === 'retire') {
       const who = retiree(plan, goal), couple = plan.household.people.length > 1;
       // Already retired: the goal is that the money lasts.
@@ -2326,10 +2341,17 @@
           ? `Covered from ${res.expectedYear} on average: ${goal.months} months of spending and mortgage payments${goal.counts === 'investments' ? ', counting ISAs and investments' : ' in cash'}.`
           : `${goal.counts === 'investments' ? 'Cash and investments are' : 'Your cash buffer is'} short of ${goal.months} months of spending and mortgage payments.`;
       } else if (goal.type === 'debtFree') {
-        res.expectedYear = debtFreeYear(proj);
+        res.expectedYear = debtFreeYear(proj, true);
         res.probability = mc.debtFreeByYear[t];
         res.byYear = mc.debtFreeByYear;
-        res.summary = res.expectedYear ? (res.expectedYear > plan.startYear ? `Expected to be paid off during ${res.expectedYear - 1}, so nothing is owed from ${res.expectedYear}.` : 'Nothing is owed.') : 'Not paid off within the plan.';
+        const owed = plan.accounts.filter(a => a.type === 'debt' && !a.excluded && a.balance > 0.5);
+        const one = goalDebtId(plan);
+        // Which ones are still owed at the end: the reason "everything" is never cleared.
+        const stuck = !one && !res.expectedYear && proj.out.debts ? owed.filter(a => { const d = proj.out.debts.find(x => x.id === a.id); return d && d.bal[d.bal.length - 1] > 0.5; }) : [];
+        res.summary = res.expectedYear ? (res.expectedYear > plan.startYear ? `Expected to be paid off during ${res.expectedYear - 1}, so nothing is owed from ${res.expectedYear}.` : 'Nothing is owed.')
+          : stuck.length && stuck.length < owed.length ? `Not everything is paid off within the plan: ${stuck.map(a => a.name).join(' and ')} is still owed at the end. Change the goal to be about one mortgage or loan to follow that one alone.`
+            : 'Not paid off within the plan.';
+        if (one && owed.length > 1) res.summary += ' This goal follows that one alone; anything overpaid goes to it first.';
       } else {
         const who = retiree(plan, goal);
         const delta = goal.age - who.retireAge;
@@ -2407,7 +2429,7 @@
     const normal = makeNormal(mulberry32(seed));
     const draw = makeRandomEcon(plan, N, normal);
     const out = newPath(N, false);
-    const SERIES = ['liquid', 'netWorth', 'property', 'debt', 'earnings'];
+    const SERIES = ['liquid', 'netWorth', 'property', 'debt', 'goalDebt', 'earnings'];
     const data = {};
     for (const k of SERIES) data[k] = new Float64Array(T * runs);
     const price = new Float64Array(T * runs);
@@ -2436,6 +2458,7 @@
         data.netWorth[k] = liquid + out.property[t] - out.debt[t] - out.locked[t];
         data.property[k] = out.property[t];
         data.debt[k] = out.debt[t];
+        data.goalDebt[k] = out.goalDebt[t];
         let e = 0;
         if (t < N) for (const P of pre.people) e += P.gross[t] + P.netPay[t];
         data.earnings[k] = e;
@@ -2443,7 +2466,7 @@
         infl[k] = t < N ? econ.infl[t] : econ.infl[N - 1];
         if (out.short[t] <= 0) funded[t] += 1;
         // Owing nothing in year t (a mortgage for a home bought later starts owing again).
-        if (out.debt[t] <= 0.5) debtFree[t] += 1;
+        if (out.goalDebt[t] <= 0.5) debtFree[t] += 1;
         nwGoals.forEach((g, j) => {
           const v = g.type === 'passiveIncome' ? passiveIncome(snap, nonWorkIncome(pre, t), g) : goalValue(snap, g.measure);
           gvals[g.id][k] = v;
@@ -2603,7 +2626,7 @@
       const p = clonePlan(plan);
       p.strategy.overpayPct = pct;
       if (cap !== undefined) p.strategy.overpayCapPct = cap;
-      return debtFreeYear(project(p));
+      return debtFreeYear(project(p), true);
     };
     const ok = (pct, cap) => { const y = at(pct, cap); return y !== null && y <= year; };
     if (ok(plan.strategy.overpayPct)) return { overpayPct: plan.strategy.overpayPct, capNeeded: false, already: true };
@@ -2853,7 +2876,7 @@
     incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
-    waysThere, ownPensionTrial, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
+    waysThere, ownPensionTrial, goalDebtId, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,

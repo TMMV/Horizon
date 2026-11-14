@@ -1470,7 +1470,7 @@
   function goalWhen(res) {
     const g = res.goal;
     if (g.type === 'retire') return res.retired ? 'Retired' : `Retire ${res.expectedYear}`;
-    if (g.type === 'debtFree') return !plan().accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded) ? 'Nothing owed' : res.expectedYear ? `Nothing owed from ${res.expectedYear}` : 'Not paid off in the plan';
+    if (g.type === 'debtFree') return !plan().accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded && (!E.goalDebtId(plan()) || a.id === E.goalDebtId(plan()))) ? 'Nothing owed' : res.expectedYear ? `Nothing owed from ${res.expectedYear}` : 'Not paid off in the plan';
     if (g.type === 'emergency') return res.expectedYear ? `Covered from ${res.expectedYear}` : 'Not covered yet';
     return res.expectedYear ? `Expected ${res.expectedYear}` : 'Not reached on average';
   }
@@ -1611,7 +1611,7 @@
     if (g.type === 'netWorth') return `${money(g.amount)} ${basis} by ${g.year}: ${E.GOAL_MEASURES[g.measure].toLowerCase()}`;
     if (g.type === 'passiveIncome') return `${money(g.amount)} a year ${basis} by ${g.year}, at ${g.withdrawalRate}% of investments${g.includePensions ? ' including pensions' : ''}`;
     if (g.type === 'emergency') return `${g.months} months (${money(res.need || 0)} today) by ${g.year}, ${g.counts === 'investments' ? 'counting ISAs and investments' : 'in cash'}`;
-    if (g.type === 'debtFree') return `No mortgage or loans left by ${g.year}`;
+    if (g.type === 'debtFree') return E.goalDebtId(plan()) && g.debtId === E.goalDebtId(plan()) ? `Nothing owed on it by ${g.year}; anything overpaid goes to it first` : `No mortgage or loans left by ${g.year}`;
     // The person the goal is for (its owner), not always the first.
     const who = people().find(x => x.id === g.owner) || people()[0];
     if (res.retired) return `${who.name} has retired; the money is to last to ${who.endAge}, with ${g.confidence}% confidence wanted`;
@@ -1694,9 +1694,10 @@
       title = g.counts === 'investments' ? 'Cash and investments against what you need' : 'Cash against what you need';
       sub = `What counts towards the fund, against ${g.months} months of spending and mortgage payments, in ${unitLabel()}.`;
     } else if (g.type === 'debtFree') {
-      bands = mc.series.debt[view()];
-      expected = rows.map((r, t) => D(r.debt, t));
-      title = 'Mortgage and loans still owed';
+      const one = E.goalDebtId(plan()) ? plan().accounts.find(a => a.id === E.goalDebtId(plan())) : null;
+      bands = mc.series.goalDebt[view()];
+      expected = rows.map((r, t) => D(model.proj.out.goalDebt[t], t));
+      title = one ? `${one.name}: still owed` : 'Mortgage and loans still owed';
       sub = `Interest rates vary after any fixed period, so the payoff date varies too. In ${unitLabel()}.`;
     } else {
       bands = mc.series.liquid[view()];
@@ -2307,7 +2308,11 @@
         previewGoal();
         return;
       } else if (g.type === 'debtFree') {
-        fields.push(field('Mortgage-free by the start of', h('input', { type: 'number', value: g.year, min: plan().startYear, max: plan().startYear + 40, oninput: e => { g.year = parseInt(e.target.value, 10) || g.year; previewGoal(); } })));
+        const owed = plan().accounts.filter(a => a.type === 'debt' && !a.excluded);
+        if (owed.length > 1) fields.push(field('Which one', h('select', { 'aria-label': 'Which mortgage or loan', onchange: e => { g.debtId = e.target.value; previewGoal(); } },
+          [['', 'Everything owed'], ...owed.map(a => [a.id, a.name])].map(([v, l]) => h('option', { value: v, selected: (g.debtId || '') === v }, l))),
+          'Pick one to follow it alone: anything overpaid then goes to it first. Otherwise the most expensive is overpaid first, and the goal is met when nothing at all is owed.'));
+        fields.push(field(owed.length > 1 ? 'Paid off by the start of' : 'Mortgage-free by the start of', h('input', { type: 'number', value: g.year, min: plan().startYear, max: plan().startYear + 40, oninput: e => { g.year = parseInt(e.target.value, 10) || g.year; previewGoal(); } })));
       } else {
         $('#gwIntro').textContent = 'A few questions about the retirement you want. Everything updates the preview on the right; nothing changes in your plan until you save.';
         setKids(body, ident, retireQuestions());
