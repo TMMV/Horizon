@@ -18,7 +18,7 @@ You set the plan up once, then review it once a year.
 |---|---|
 | **Home** | Your portfolio *today*: a donut and every account, grouped by when the money can be used (available now, locked in pensions and Lifetime ISAs, property, owed), estimated from your last figures (or a balance you updated since), with your estimated net worth and the change since your last update. The chart of where you're heading shows each part growing and adding up to your net worth, by account or by access, up to an age you choose (85 by default; the plan itself runs to each person's end age). Your goals as badges (swipe them on a phone), money in and out (this month, and a chart of what comes in against everyday spending, future costs, one-off costs and the mortgage over the years), what to put away each month, suggestions as a row of cards you swipe through (plan checks, saving ideas and guides you haven't done yet), and where you're heading. |
 | **One tab per goal** | How it's tracking (its range of outcomes against the target), the chance by year, what moves it, what it would take, levers to try and how it does if history repeated. The retirement tab also replays the plan through every starting year since 1928. Add a goal with **+**. |
-| **Finances** | All your inputs, each shown as a plain line you click to change, with a summary at the top of each page and their prediction alongside and a "What your changes do" panel that shows every goal's chance move as you edit: **Portfolio** (accounts and how each grows), **Income**, **Spending** (with **Future costs**: children, cars, home repairs, care), **Saving & investing** (your own monthly amounts for Lifetime ISAs, ISAs, a general account and extra pension, or automatic; a suggested UK order with amounts for your household; and where the money goes year by year), **Cash flow & tax**, **Assumptions** (household, markets, tax rules and how things vary in the simulations) and **Past reviews**. At the top: the date your figures are as at. |
+| **Your figures** | All your inputs, each shown as a plain line you click to change, with a summary at the top of each page and their prediction alongside and a "What your changes do" panel that shows every goal's chance move as you edit: **Portfolio** (accounts and how each grows), **Income**, **Spending** (with **Future costs**: children, cars, home repairs, care), **Saving & investing** (your own monthly amounts for Lifetime ISAs, ISAs, a general account and extra pension, or automatic; a suggested UK order with amounts for your household; and where the money goes year by year), **Cash flow & tax**, **Assumptions** (household, markets, tax rules and how things vary in the simulations) and **Past reviews**. At the top: the date your figures are as at. |
 | **Scenarios** | Every scenario against every goal in one table (chance and expected year, compared with the one you have open), common choices compared side by side, and ready-made what-ifs to add. |
 
 The **bell** at the top reminds you when it's time for the yearly review and when your figures
@@ -26,7 +26,7 @@ are a month old (update a few balances, or do a full review). Charts that look a
 today's money; off, they're the actual pounds of each year.
 
 **Figures "as at" a date.** Balances, pay and spending describe one date (shown at the top of
-Finances). From there Horizon estimates every account for any later day: Home shows today's
+“Your figures”). From there Horizon estimates every account for any later day: Home shows today's
 estimate, and the yearly review starts from the estimate for the review date, so you only type
 over what's different. Between reviews, **Update balances** records a figure from your banking
 app with its date; it shows on Home and feeds the next review.
@@ -69,7 +69,7 @@ app with its date; it shows on Home and feeds the next review.
   property, and stress tests. A side-by-side table shows how every goal moves, so you can see
   that paying the mortgage off faster costs investing, and apply the result or save it as a
   scenario.
-- **Workings under every input.** Each Finances page shows its prediction as a chart and a
+- **Workings under every input.** Each “Your figures” page shows its prediction as a chart and a
   spreadsheet-style table: assumptions, income, spending, tax per person and each account's
   roll-forward (start + growth + in − out = end, checked on every
   row), each downloadable as CSV. Income items show their typical trend range.
@@ -95,7 +95,7 @@ app with its date; it shows on Home and feeds the next review.
   2026/27 rules: emergency fund, saving rate, Child Benefit and the £60k–£80k charge,
   Tax-Free Childcare, the £100k tax trap, ISA allowances, overpaying vs investing, PLSA
   retirement living standards and how much wealth is tied up in property.
-- **Future costs** (Finances → Spending). A questionnaire for the big costs that come with time:
+- **Future costs** (Your figures → Spending). A questionnaire for the big costs that come with time:
   children (school, university, first car, wedding, house deposit), replacing cars, major
   home repairs, active early retirement, spending less later on, care in later life and
   helping family. Answers become dated spending items and events you can review.
@@ -196,12 +196,12 @@ to a file first to be safe.
 
 To reproduce a simple spreadsheet exactly, use the same simplifications it does:
 
-- Finances → Assumptions → switch **Work out UK tax** off and enter take-home pay.
-- Finances → Assumptions → Markets → **Use your own return** for investments and pensions (e.g. 10% and 7%).
+- Your figures → Assumptions → switch **Work out UK tax** off and enter take-home pay.
+- Your figures → Assumptions → Markets → **Use your own return** for investments and pensions (e.g. 10% and 7%).
 - Set cash interest to 0 and the cash buffer to 0 so every penny of surplus is invested.
 - Enter rent with its exchange rate, costs (%) and a flat tax rate, as in the sheet.
 
-The tables under each Finances page then show the same year-by-year numbers, with a CSV download
+The tables under each “Your figures” page then show the same year-by-year numbers, with a CSV download
 to compare.
 
 ## Develop

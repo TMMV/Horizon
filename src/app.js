@@ -2546,10 +2546,10 @@
           h('div', { class: 'fields' },
             h('label', { class: 'field' }, h('span', {}, 'Spend less from age (0 = never)'), num(() => r.slowDownAge, v => { r.slowDownAge = Math.round(v); }, { min: 0, max: 100, label: 'Slow down age' })),
             h('label', { class: 'field' }, h('span', {}, 'Spending from then'), num(() => r.slowDownPct, v => { r.slowDownPct = v; }, { min: 30, max: 150, step: 5, suffix: '%', label: 'Spending later' }))),
-          h('p', { class: 'hint' }, 'Spending often falls from the late 70s, though care costs can rise (Finances → Spending → Future costs).')),
+          h('p', { class: 'hint' }, 'Spending often falls from the late 70s, though care costs can rise (Your figures → Spending → Future costs).')),
         sec(5, 'Pensions you will be paid',
           h('div', { class: 'fields' }, sps),
-          h('p', { class: 'hint' }, `Full new State Pension: ${money(R.STATE_PENSION_FULL)} a year. Get your own forecast at gov.uk/check-state-pension.${dbs.length ? ` Also counted: ${dbs.map(i => i.name).join(', ')} (edit in Finances → Income).` : ''}`)),
+          h('p', { class: 'hint' }, `Full new State Pension: ${money(R.STATE_PENSION_FULL)} a year. Get your own forecast at gov.uk/check-state-pension.${dbs.length ? ` Also counted: ${dbs.map(i => i.name).join(', ')} (edit in Your figures → Income).` : ''}`)),
         sec(6, 'How sure do you want to be?',
           h('div', { class: 'fields' }, h('label', { class: 'field' }, h('span', {}, 'Confidence'),
             h('select', { onchange: e => { gw.goal.confidence = +e.target.value; r.answers = null; previewRetire(); } }, [70, 75, 80, 85, 90, 95].map(v => h('option', { value: v, selected: gw.goal.confidence === v }, `${v}% of simulated futures`))))),
@@ -3556,7 +3556,7 @@
         nowLabel: e => `Now (${e.freq === 'month' ? 'a month' : 'a year'})`,
       }),
       actual,
-      h('p', { class: 'hint' }, 'For a walk-through with typical UK amounts for each category, run the Spending check-up (Finances → Spending) after the review.'),
+      h('p', { class: 'hint' }, 'For a walk-through with typical UK amounts for each category, run the Spending check-up (Your figures → Spending) after the review.'),
     ];
   }
 
@@ -3863,7 +3863,7 @@
     });
     setKids($('#udBody'), 
       h('label', { class: 'asof-label' }, h('strong', {}, 'Balances as at'), dateIn),
-      p.accounts.length ? h('div', { class: 'rv-rows' }, rows) : h('p', { class: 'sub' }, 'No accounts yet: add them in Finances → Portfolio.'));
+      p.accounts.length ? h('div', { class: 'rv-rows' }, rows) : h('p', { class: 'sub' }, 'No accounts yet: add them in Your figures → Portfolio.'));
     updateUpdateNote();
   }
 
@@ -5507,7 +5507,7 @@
     if (kind === 'saving') Object.assign(base, { eventName: evNames[0] || '', name: evNames[0] || 'Saving up' });
     if (kind === 'budget') {
       const e = items.find(x => x.freq === 'year' && !p.reserves.some(r => r.expenseId === x.id)) || items.find(x => x.freq === 'year') || items[0];
-      if (!e) { toast('Add the spending item first (Finances → Spending).'); return; }
+      if (!e) { toast('Add the spending item first (Your figures → Spending).'); return; }
       Object.assign(base, { expenseId: e.id, name: e.name });
     }
     p.reserves.push(E.normalizePlan({ ...p, reserves: [base] }).reserves[0]);
@@ -6721,7 +6721,7 @@
         goals.map(g => tab(`goal/${g.id}`, goalTabName(g), { cls: 'goal-tab', style: `--gc:${cssVar(goalColor(g))}`, icon: glyph(ICON_GLYPH[g.icon] || 'goal') })),
         h('button', { type: 'button', class: 'tab-add', title: 'Add a goal', 'aria-label': 'Add a goal', onclick: () => openGoalWizard() }, '+')),
       h('div', { class: 'side-tabs', role: 'presentation' },
-        tab(`finances/${moneyPage}`, 'Finances'),
+        tab(`finances/${moneyPage}`, 'Your figures'),
         tab('scenarios', 'Scenarios'),
         h('button', { type: 'button', class: 'tab-plan', id: 'tabDossier', title: 'What to expect and what to do each year: read it, print it or save it as a PDF', onclick: openDossier }, glyph('review'), 'Plan, year by year')));
   }
@@ -7123,8 +7123,8 @@
           ['Attendance Allowance', () => { goIncome(); const x = people().reduce((a, b) => (b.age > a.age ? b : a)); addIncomeOf('other', { owner: x.id, name: plan().household.region === 'scotland' ? 'Pension Age Disability Payment' : 'Attendance Allowance', tax: 'none', amount: Math.round(R.ATTENDANCE_ALLOWANCE.lower * 52), freq: 'year', inflationLinked: true, startRef: 'age', startAge: Math.max(x.age, x.statePensionAge, 80), endRef: 'end' }); }]] },
       { title: 'A lodger', how: 'Rent from a lodger is tax-free up to £7,500 a year under Rent a Room: add it as Rent with no tax. Above that, choose UK income tax.',
         add: [['Lodger', () => { goIncome(); addIncomeOf('rental', { owner: 'joint', name: 'Lodger', tax: 'none', endRef: 'year', toYear: yearsFrom(3) }); }]] },
-      { title: 'Living abroad, or UK tax does not apply', how: 'On Finances → Assumptions, under Household, turn off “Work out UK tax”: every amount is then taken as already taxed. Incomes can still carry their own flat tax rate.',
-        add: [['Switch off UK tax', () => { plan().household.ignoreTax = true; renderPlan(); refresh(); toast('UK tax is off: amounts are taken as already taxed. Turn it back on under Finances → Assumptions → Household.'); }]] },
+      { title: 'Living abroad, or UK tax does not apply', how: 'On Your figures → Assumptions, under Household, turn off “Work out UK tax”: every amount is then taken as already taxed. Incomes can still carry their own flat tax rate.',
+        add: [['Switch off UK tax', () => { plan().household.ignoreTax = true; renderPlan(); refresh(); toast('UK tax is off: amounts are taken as already taxed. Turn it back on under Your figures → Assumptions → Household.'); }]] },
     ] },
     { title: 'Home and property', stages: ['starting', 'nearing'], items: [
       { title: 'Buying a first home', how: 'Add the home as “Buying it later”: the year, today’s price, the deposit and the mortgage. In that year the deposit comes from your savings (a Lifetime ISA for a first home is paid out then) and the mortgage starts. End your rent in that year and add stamp duty and moving costs as a one-off.',
@@ -7753,29 +7753,29 @@
     afterImport();
     navigate('home');
     window.scrollTo(0, 0);
-    toast('Your plan is ready. This page says how you are doing; “Plan, year by year” at the top writes out what to do each year. Everything can be changed under Finances.');
+    toast('Your plan is ready. This page says how you are doing; “Plan, year by year” at the top writes out what to do each year. Everything can be changed under “Your figures”.');
   }
 
   // ------------------------------------------------------------------ the dossier
   // The whole plan as a document: what to expect and what to do, year by year. Read on screen,
   // printed, or saved as a PDF with the browser's own print (nothing leaves this computer).
-  let docYears = 0;   // 0 = every year
+  let docYears = -2;   // 0 = every year; -1 = only what to do; -2 = ten years, then every fifth; else that many years
   function dossierDoc() {
     const p = plan();
     const steps = todoItems().filter(s => !s.fromDoc).map(s => ({ when: s.when, title: s.title, text: s.text }));
     const sc = ws.scenarios.find(s => s.id === ws.activeId);
-    return DS.build(p, model.proj, model.mc, model.goals, { steps, years: docYears < 0 ? 1 : docYears || undefined, scenario: ws.scenarios.length > 1 && sc ? sc.name : '' });
+    return DS.build(p, model.proj, model.mc, model.goals, { steps, years: docYears === -1 ? 1 : docYears === -2 ? 10 : docYears || undefined, thenEvery: docYears === -2 ? 5 : 0, scenario: ws.scenarios.length > 1 && sc ? sc.name : '' });
   }
 
   function openDossier() {
     if (setupStep !== null) closeSetup();
     const N = model.proj.rows.length - 1, ps = people();
     const toRetire = Math.max(...ps.map(x => x.retireAge - x.age), 0) + 5;
-    const opts = [[-1, 'Only what to do now and next year (a page or two)'], [0, `Every year, to ${plan().startYear + N - 1} (${N} years)`], [Math.min(N, Math.max(5, toRetire)), `Until five years after stopping work (${Math.min(N, Math.max(5, toRetire))} years)`], [Math.min(N, 10), 'The next ten years'], [Math.min(N, 5), 'The next five years']];
+    const opts = [[-2, 'The next ten years, then every fifth year'], [-1, 'Only what to do now and next year (a page or two)'], [0, `Every year, to ${plan().startYear + N - 1} (${N} years)`], [Math.min(N, Math.max(5, toRetire)), `Until five years after stopping work (${Math.min(N, Math.max(5, toRetire))} years)`], [Math.min(N, 10), 'The next ten years'], [Math.min(N, 5), 'The next five years']];
     const sel = $('#docYears');
     setKids(sel, opts.filter(([v], i, a) => a.findIndex(o => o[0] === v) === i).map(([v, label]) => h('option', { value: String(v) }, label)));
     sel.value = String(docYears);
-    if (sel.selectedIndex < 0) { docYears = 0; sel.value = '0'; }
+    if (sel.selectedIndex < 0) { docYears = -2; sel.value = '-2'; }
     document.body.classList.add('dossier-open');
     $('#dossier').hidden = false;
     renderDossier();
@@ -7818,6 +7818,15 @@
         h('ul', { class: 'doc-barkeys' }, parts.map(x => h('li', {}, h('i', { class: 'key square', style: `--key:var(${DOC_COLOR[x.id] || '--s7'})` }), h('span', {}, x.label),
           h('b', {}, monthly ? `${g(x.value / 12)} a month` : g(x.value)), h('em', {}, `${Math.round((x.value / total) * 100)}%`)))));
     };
+    // Where the money goes: one line each, its bar to scale, in one colour (the names carry the meaning;
+    // colours are kept for the kinds of account).
+    const rowBars = parts => {
+      const shown = parts.filter(x => x.value > 0.5), total = shown.reduce((a, x) => a + x.value, 0), max = Math.max(1, ...shown.map(x => x.value));
+      if (!(total > 0.5)) return null;
+      return h('ul', { class: 'doc-rowbars' }, shown.map(x => h('li', {}, h('span', {}, x.label), h('i', {}, h('u', { style: `width:${(x.value / max) * 100}%` })),
+        h('b', {}, `${g(x.value / 12)} a month`), h('em', {}, `${Math.round((x.value / total) * 100)}%`))));
+    };
+    const twoCol = W >= 600;   // room for two columns: the charts in a year are drawn half as wide
     const worthSeries = coloured(pic.kinds);
     const netLine = { label: 'Net worth', color: '--text', values: pic.net };
     const fan = pic.range ? [
@@ -7850,30 +7859,32 @@
     const table = (group, monthly) => h('table', { class: `lines${monthly ? '' : ' no-month'}` },
       h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', { class: 'num' }, group.id === 'end' || group.id === 'debt' ? 'At the end' : 'In the year'), h('th', { class: 'num' }, monthly ? 'A month' : ''), h('th', {}, ''))),
       h('tbody', {},
-        group.lines.map(l => h('tr', { class: l.strong ? 'strong' : null }, h('td', {}, l.label), h('td', { class: 'num' }, g(l.value)), h('td', { class: 'num' }, monthly ? g(l.value / 12) : ''), h('td', { class: 'note' }, l.note))),
+        group.lines.map(l => { const perMonth = /^£[\d,]+ a month$/.test(l.note || '');   // a note that is only the monthly amount goes in that column
+          return h('tr', { class: l.strong ? 'strong' : null }, h('td', {}, l.label), h('td', { class: 'num' }, g(l.value)), h('td', { class: 'num' }, perMonth ? l.note.replace(' a month', '') : monthly && group.id !== 'pension' ? g(l.value / 12) : ''), h('td', { class: 'note' }, perMonth ? '' : l.note)); }),
         group.total ? h('tr', { class: 'total' }, h('td', {}, group.total.label), h('td', { class: 'num' }, g(group.total.value)), h('td', { class: 'num' }, monthly ? g(group.total.value / 12) : ''), h('td', { class: 'note' }, monthly && / a month$/.test(group.total.note) ? '' : group.total.note)) : null));
-    const MONTHLY = { in: true, off: true, out: true, save: true, draw: true, pension: false, debt: false, end: false };
+    const MONTHLY = { in: true, off: true, out: true, save: true, draw: true, pension: true, debt: false, end: false };
     const yearSection = y => h('section', { class: 'doc-year', id: `doc-${y.year}` },
       h('h2', {}, String(y.year), h('small', {}, `${planYearSpan(d.meta.asOf, y.t) ? `${fmtDate(planYearSpan(d.meta.asOf, y.t).from)} to ${fmtDate(planYearSpan(d.meta.asOf, y.t).to)} · ` : ''}${y.ages.map(a => `${a.name === 'You' ? 'You' : a.name} ${a.age}`).join(' · ')} · ${y.phase === 'working' ? 'working' : y.phase === 'part' ? 'one of you working' : 'retired'}`)),
+      docYears === -2 && y === d.years.find(z => z.t >= 10) ? h('p', { class: 'doc-explain doc-skip' }, 'From here every fifth year is written out; the years between follow the same pattern. “Every year” under “Years written out” writes them all.') : null,
       h('p', { class: 'doc-headline' }, y.headline),
       y.net ? h('p', { class: 'doc-sub' }, `By ${planYearSpan(d.meta.asOf, y.t) ? fmtDate(planYearSpan(d.meta.asOf, y.t).to) : 'the end of the year'}, net worth is about ${g(y.net.value)} (${g(y.net.real)} in today’s money) on average returns${y.net.low !== null && y.net.high !== null ? `; in a bad run of markets about ${g(y.net.low)}, in a good run about ${g(y.net.high)}` : ''}.`) : null,
       y.changes.length ? h('div', { class: 'doc-box new' }, h('h3', {}, y.t === 0 ? 'Worth knowing this year' : 'New this year'), h('ul', {}, y.changes.map(c => h('li', {}, c)))) : null,
       y.todo.length ? h('div', { class: 'doc-box todo' }, h('h3', {}, 'To do this year'), h('ul', {}, y.todo.map(s => h('li', {}, h('strong', {}, s.title), s.text ? ` ${s.text}` : '')))) : null,
       y.split.length ? h('div', { class: 'doc-glance' },
-        h('h3', {}, 'The year at a glance'),
-        h('p', { class: y.drawn > 0.5 ? 'doc-explain' : 'doc-explain rep' }, `Where the year’s money goes${y.drawn > 0.5 ? `. ${g(y.drawn)} of it comes out of savings and pensions` : ''}.`),
-        bar(y.split, true),
-        pic.range || pic.net.length > 2 ? [
-          h('p', { class: 'doc-explain' }, `Where ${y.year} sits on the plan: net worth at the end of the year and in the years around it${pic.range ? ', with the range across the futures tried (8 in 10 fall inside the band)' : ''}.`),
+        h('div', {}, h('h3', {}, 'Where the year’s money goes'),
+          y.drawn > 0.5 ? h('p', { class: 'doc-explain' }, `${g(y.drawn)} of it comes out of savings and pensions.`) : null,
+          rowBars(y.split)),
+        pic.range || pic.net.length > 2 ? h('div', {},
+          h('h3', {}, `Where ${y.year} sits on the plan`),
+          h('p', { class: 'doc-explain rep' }, `Net worth at the end of the year and in the years around it${pic.range ? ', with the range across the futures tried (8 in 10 fall inside the band)' : ''}.`),
           (() => { const box = h('div', { class: 'doc-plot' }); // Ten years back and fifteen on: the whole plan on one scale would flatten the early years.
             const from = Math.max(0, y.t + 1 - 10), to = Math.min(pic.years.length, Math.max(y.t + 1 + 16, from + 26)), cut = v => v.slice(from, to);
-            box.innerHTML = SV.plot({ width: W, height: 130, xs: cut(pic.years), bands: fan.slice(0, 1).map(f => ({ ...f, lower: cut(f.lower), upper: cut(f.upper) })), lines: [{ label: 'Net worth', color: '--s1', values: cut(pic.net) }], here: y.t + 1 - from, label: `Net worth around ${y.year}, with the year marked` }); return box; })(),
-        ] : null) : null,
-      y.groups.map(gr => [h('h3', {}, gr.id === 'end' && planYearSpan(d.meta.asOf, y.t) ? `Where you should be on ${fmtDate(planYearSpan(d.meta.asOf, y.t).to)}` : gr.title), h('p', { class: gr.id === 'save' || gr.id === 'draw' ? 'doc-explain' : 'doc-explain rep' }, gr.explain), table(gr, MONTHLY[gr.id]),
-        gr.id === 'end' && y.holdings.length > 1 ? [h('p', { class: 'doc-explain' }, `What you own ${planYearSpan(d.meta.asOf, y.t) ? `on ${fmtDate(planYearSpan(d.meta.asOf, y.t).to)}` : `at the end of ${y.year}`}, by kind${y.owed > 0.5 ? ` (before taking off the ${g(y.owed)} still owed)` : ''}.`), bar(y.holdings, false)] : null]));
+            box.innerHTML = SV.plot({ width: twoCol ? Math.round(W / 2 - 14) : W, height: 130, xs: cut(pic.years), bands: fan.slice(0, 1).map(f => ({ ...f, lower: cut(f.lower), upper: cut(f.upper) })), lines: [{ label: 'Net worth', color: '--s1', values: cut(pic.net) }], here: y.t + 1 - from, label: `Net worth around ${y.year}, with the year marked` }); return box; })()) : null) : null,
+      h('div', { class: 'doc-groups' }, y.groups.map(gr => h('div', { class: 'doc-group' }, h('h3', {}, gr.id === 'end' && planYearSpan(d.meta.asOf, y.t) ? `Where you should be on ${fmtDate(planYearSpan(d.meta.asOf, y.t).to)}` : gr.title), h('p', { class: gr.id === 'save' || gr.id === 'draw' ? 'doc-explain' : 'doc-explain rep' }, gr.explain), table(gr, MONTHLY[gr.id]),
+        gr.id === 'end' && y.holdings.length > 1 ? [h('p', { class: 'doc-explain' }, `What you own ${planYearSpan(d.meta.asOf, y.t) ? `on ${fmtDate(planYearSpan(d.meta.asOf, y.t).to)}` : `at the end of ${y.year}`}, by kind${y.owed > 0.5 ? ` (before taking off the ${g(y.owed)} still owed)` : ''}.`), bar(y.holdings, false)] : null))));
     const decades = [];
     for (const y of d.years) if (y.t === 0 || y.year % 5 === 0) decades.push(y.year);
-    const only = docYears < 0;   // just the sheet to act on
+    const only = docYears === -1;   // just the sheet to act on
     const doList = items => h('ul', {}, items.map(s => h('li', {}, h('strong', {}, s.title), s.text ? ` ${s.text}` : '')));
     const sh = d.sheet;
     const sheet = h('section', { class: 'doc-section', id: 'doc-do' }, h('h2', {}, 'What to do: now and next year'),

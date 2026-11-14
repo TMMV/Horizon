@@ -168,3 +168,15 @@ test('when a mortgage ends is said one way: paid off during a year, nothing owed
   const goal = E.evaluateGoals(plan, proj, E.monteCarlo(plan, 120, 7), { runs: 120, seed: 7 }).find(r => r.goal.type === 'debtFree');
   assert.equal(goal.summary, `Expected to be paid off during ${free - 1}, so nothing is owed from ${free}.`);
 });
+
+test('the short plan: the next ten years, then every fifth year', () => {
+  const E = require('../../src/engine.js');
+  const plan = E.defaultPlan(2026), proj = E.project(plan), N = proj.rows.length - 1;
+  const d = D.build(plan, proj, null, [], { years: 10, thenEvery: 5 });
+  const want = proj.rows.slice(0, N).filter((r, t) => t < 10 || r.year % 5 === 0).map(r => r.year);
+  assert.deepEqual(d.years.map(y => y.year), want);
+  assert.ok(want.length < N / 2);
+  // Without it, only the years asked for.
+  assert.equal(D.build(plan, proj, null, [], { years: 10 }).years.length, 10);
+  assert.equal(D.build(plan, proj, null, [], {}).years.length, N);
+});

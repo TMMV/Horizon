@@ -137,7 +137,10 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#homePortfolio .delta')).toContainText('since your last update');
   });
 
-  test('the date your figures are as at can be changed on Finances', async ({ page }) => {
+  test('the date your figures are as at can be changed on Your figures', async ({ page }) => {
+    // The tab is named for what it is for, and Home leads with what you own, then the answers.
+    await expect(page.locator('.tab-list button[data-tab^="finances/"]')).toHaveText('Your figures');
+    expect(await page.evaluate(() => [...document.querySelectorAll('#view-home > section')].slice(0, 2).map(e => e.id))).toEqual(['homePortfolio', 'homeShort']);
     await go(page, 'finances/portfolio');
     const input = page.locator('#asOfBar input[type="date"]');
     const year = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.startYear);
@@ -2365,9 +2368,19 @@ test.describe('the dossier', () => {
     const doc = page.locator('#docBody');
     await expect(doc.locator('h1')).toHaveText('Alex and Sam’s plan, year by year');
     await expect(page.locator('main')).toBeHidden();
-    // One block for every year of the plan, each with the same parts.
+    // To start with: the next ten years, then every fifth year, so the printout stays short.
     const years = await page.evaluate(() => window.__horizon.model.proj.rows.length - 1);
+    const shown = await page.evaluate(() => window.__horizon.model.proj.rows.slice(0, -1).filter((r, t) => t < 10 || r.year % 5 === 0).length);
+    await expect(page.locator('#docYears option:checked')).toHaveText('The next ten years, then every fifth year');
+    await expect(doc.locator('.doc-year')).toHaveCount(shown);
+    await expect(doc.locator('#doc-2035')).toHaveCount(1);
+    await expect(doc.locator('#doc-2036')).toHaveCount(0);
+    await expect(doc.locator('#doc-2040 .doc-skip')).toContainText('From here every fifth year is written out');
+    await expect(doc.locator('.doc-skip')).toHaveCount(1);
+    // On request: one block for every year of the plan, each with the same parts.
+    await page.selectOption('#docYears', '0');
     await expect(doc.locator('.doc-year')).toHaveCount(years);
+    await expect(doc.locator('.doc-skip')).toHaveCount(0);
     const first = doc.locator('.doc-year').first();
     for (const part of ['Money coming in', 'What comes off first', 'Money going out', 'What is left, and where to put it', 'Pensions', 'Mortgage and loans', 'Where you should be on 31 Aug 2027']) await expect(first).toContainText(part);
     await expect(first).toContainText('To do this year');
@@ -2402,15 +2415,24 @@ test.describe('the dossier', () => {
     for (const title of ['What you own and owe, year by year', 'Money in and money out, each year', 'Pension pots', 'What is still owed', 'How far off it could be']) await expect(pics).toContainText(title);
     await expect(pics.locator('svg.doc-svg')).toHaveCount(5);
     await expect(pics.locator('svg.doc-svg').first()).toContainText('Alex retires');
-    // Every year: a bar of where the money goes (its shares add up), the year marked on the whole plan, and what is owned.
+    // Every year: where the money goes as a line each with a bar to scale, in one colour (colours are kept
+    // for the kinds of account, in the bar of what is owned); and the year marked on the whole plan.
     const first = doc.locator('.doc-year').first();
-    await expect(first.locator('.doc-glance')).toContainText('The year at a glance');
-    const widths = await first.locator('.doc-glance .doc-barline i').evaluateAll(els => els.map(el => parseFloat(el.style.width)));
+    await expect(first.locator('.doc-glance')).toContainText('Where the year’s money goes');
+    await expect(first.locator('.doc-glance .doc-barline')).toHaveCount(0);
+    const bars = await first.locator('.doc-glance .doc-rowbars li').evaluateAll(els => els.map(el => ({ w: parseFloat(el.querySelector('u').style.width), c: getComputedStyle(el.querySelector('u')).backgroundColor, pc: parseInt(el.querySelector('em').textContent, 10) })));
+    expect(bars.length).toBeGreaterThan(2);
+    expect(Math.max(...bars.map(b => b.w))).toBe(100);
+    expect(new Set(bars.map(b => b.c)).size).toBe(1);
+    expect(Math.abs(bars.reduce((a, b) => a + b.pc, 0) - 100)).toBeLessThanOrEqual(2);
+    const widths = await first.locator('.doc-group .doc-barline i').evaluateAll(els => els.map(el => parseFloat(el.style.width)));
     expect(widths.length).toBeGreaterThan(2);
     expect(Math.abs(widths.reduce((a, b) => a + b, 0) - 100)).toBeLessThan(0.01);
+    // A year is set in two columns, so the tables are no wider than their figures.
+    expect(await first.locator('.doc-groups').evaluate(el => getComputedStyle(el).columnCount)).toBe('2');
     await expect(first.locator('.doc-glance svg circle')).toHaveCount(1);
     await expect(first).toContainText('What you own on 31 Aug 2027, by kind');
-    // On paper, the lines that say the same every year are printed on the first year only, so a year fits two sheets.
+    // On paper, the lines that say the same every year are printed on the first year only, so a year fits a sheet.
     await page.emulateMedia({ media: 'print' });
     await expect(first.locator('.doc-explain.rep').first()).toBeVisible();
     await expect(doc.locator('#doc-2027 .doc-explain.rep').first()).toBeHidden();

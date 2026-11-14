@@ -305,6 +305,7 @@
 
   // steps: the plan's dated instructions ({ when: 'now' | 'yearly' | year, title, text }).
   // goals: the evaluated goals. opts.years: how many years to write out (default: all).
+  // opts.thenEvery: after those, also write out each year that divides by this (5: 2040, 2045...).
   function build(plan, proj, mc, goals, opts = {}) {
     const rows = proj.rows, N = rows.length - 1;
     const ps = plan.household.people;
@@ -312,6 +313,8 @@
     const steps = opts.steps || [];
     const years = [];
     for (let t = 0; t < Math.max(count, Math.min(N, 2)); t++) years.push(yearBlock(plan, proj, mc, t, steps));
+    const later = t => opts.thenEvery > 0 && t >= count && rows[t].year % opts.thenEvery === 0;
+    for (let t = Math.max(count, Math.min(N, 2)); t < N; t++) if (later(t)) years.push(yearBlock(plan, proj, mc, t, steps));
 
     const verdict = g => {
       const pc = Math.round((g.probability || 0) * 100);
@@ -352,7 +355,7 @@
       assumptions: assumptions(plan),
       dates,
       everyYear: steps.filter(s => s.when === 'yearly').map(s => ({ title: s.title, text: s.text })),
-      years: years.slice(0, count),
+      years: years.filter(y => y.t < count || later(y.t)),
       range,
       pictures: pictures(plan, proj, mc),
       glossary: GLOSSARY,
