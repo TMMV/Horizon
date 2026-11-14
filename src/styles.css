@@ -157,7 +157,7 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .menu summary { list-style: none; }
 .menu summary::-webkit-details-marker { display: none; }
 .menu-pop {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18); padding: 6px; min-width: 190px;
   display: flex; flex-direction: column;
@@ -427,6 +427,13 @@ dialog#quickDlg::backdrop { background: rgba(0, 0, 0, 0.55); }
 .short-now { margin-top: 12px; display: grid; gap: 4px; }
 .short-now ul { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
 .short-none { margin: 0; }
+.short-plan { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 14px 0 0; padding: 14px 16px; border-radius: 12px; background: var(--accent-soft); border-left: 4px solid var(--accent); }
+.short-plan > div { display: grid; gap: 2px; flex: 1 1 320px; min-width: 0; }
+.short-plan strong { font-size: 1.02rem; }
+.short-plan span { color: var(--text-2); font-size: 0.92rem; }
+.side-tabs > .tab-plan { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; padding: 6px 12px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 600; background: none; white-space: nowrap; }
+.side-tabs > .tab-plan:hover { background: var(--accent-soft); color: var(--accent); }
+.side-tabs > .tab-plan svg { width: 14px; height: 14px; }
 .short-foot { margin: 12px 0 0; font-size: 0.88rem; color: var(--text-2); }
 
 /* ---------- the dossier: the plan as a document */

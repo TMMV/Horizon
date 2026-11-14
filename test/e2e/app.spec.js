@@ -2383,7 +2383,9 @@ test.describe('the dossier', () => {
 
   test('the dossier has pictures: the whole plan in charts, and each year at a glance', async ({ page }) => {
     const { problems } = await openApp(page);
-    await page.evaluate(() => window.__horizon.openDossier());
+    // The plan has its own place in the row of pages, and a box of its own on Home.
+    await expect(page.locator('#homeShort .short-plan')).toContainText('Your plan, year by year');
+    await page.click('#tabDossier');
     const doc = page.locator('#docBody');
     const pics = doc.locator('#doc-pictures');
     for (const title of ['What you own and owe, year by year', 'Money in and money out, each year', 'Pension pots', 'What is still owed', 'How far off it could be']) await expect(pics).toContainText(title);

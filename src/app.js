@@ -895,6 +895,7 @@
 
   // One popover for every "i" and suggestion marker.
   let infoOpen = null;
+  let infoAt = 0;   // when it opened: the scroll that brought the button into view may still be arriving
   function infoPop() {
     let el = $('#infoPop');
     if (!el) {
@@ -903,7 +904,7 @@
       document.addEventListener('click', e => { if (infoOpen && !el.contains(e.target) && !infoOpen.contains(e.target)) closeInfo(); }, true);
       document.addEventListener('keydown', e => { if (e.key === 'Escape' && infoOpen) { const b = infoOpen; closeInfo(); b.focus(); } });
       // Scrolling the page (or the panel the button is in) moves the button away: close. Other scrolling, like a carousel, doesn't.
-      window.addEventListener('scroll', e => { if (infoOpen && (e.target === document || (e.target.contains && e.target.contains(infoOpen)))) closeInfo(); }, true);
+      window.addEventListener('scroll', e => { if (infoOpen && Date.now() - infoAt > 250 && (e.target === document || (e.target.contains && e.target.contains(infoOpen)))) closeInfo(); }, true);
       window.addEventListener('resize', () => { if (infoOpen) closeInfo(); });
     }
     return el;
@@ -922,6 +923,7 @@
     el.setAttribute('aria-label', btn.getAttribute('aria-label') || 'Details');
     el.hidden = false;
     infoOpen = btn;
+    infoAt = Date.now();
     btn.setAttribute('aria-expanded', 'true');
     const r = btn.getBoundingClientRect();
     const w = Math.min(340, window.innerWidth - 32);
@@ -1134,7 +1136,10 @@
         h('button', { type: 'button', class: 'btn small primary', onclick: () => openGoalWizard() }, '+ Add a goal')),
       now.length ? h('div', { class: 'short-now' }, h('strong', {}, 'This month'),
         h('ul', {}, now.map(x => h('li', {}, x.title)))) : null,
-      h('p', { class: 'short-foot' }, h('button', { type: 'button', class: 'btn small', id: 'shortDossier', onclick: openDossier }, 'Read the full plan, year by year'), ' What to expect and what to do each year, to read, print or save as a PDF.'),
+      h('div', { class: 'short-plan' },
+        h('div', {}, h('strong', {}, 'Your plan, year by year'),
+          h('span', {}, `Every year from ${plan().startYear} written out: what comes in, what goes out, how much to put where, what each account should hold, and what changes. Read it, print it or save it as a PDF, and follow it.`)),
+        h('button', { type: 'button', class: 'btn primary', id: 'shortDossier', onclick: openDossier }, 'Open the plan')),
       su && su.quick === 'yes' ? h('p', { class: 'short-foot' }, 'Worked out from round figures and typical values. ',
         h('button', { type: 'button', class: 'short-link', onclick: () => openSetup() }, 'Make it more exact')) : null);
   }
@@ -6606,7 +6611,8 @@
         h('button', { type: 'button', class: 'tab-add', title: 'Add a goal', 'aria-label': 'Add a goal', onclick: () => openGoalWizard() }, '+')),
       h('div', { class: 'side-tabs', role: 'presentation' },
         tab(`finances/${moneyPage}`, 'Finances'),
-        tab('scenarios', 'Scenarios')));
+        tab('scenarios', 'Scenarios'),
+        h('button', { type: 'button', class: 'tab-plan', id: 'tabDossier', title: 'What to expect and what to do each year: read it, print it or save it as a PDF', onclick: openDossier }, glyph('review'), 'Plan, year by year')));
   }
   const tabKey = r => (r.tab === 'goal' ? `goal/${r.sub}` : r.tab === 'finances' ? `finances/${moneyPage}` : r.tab);
 
@@ -7342,7 +7348,8 @@
           sField('Each year', 'Each autumn, the yearly review swaps the estimates for your real balances and shows how close the plan was. Home reminds you.'),
           sField('In between', 'Update a few balances whenever you like (Home → Update balances): the plan moves on from them.'),
         ),
-        sText('That is everything. Home now shows where you are heading and what to do.'),
+        sText('That is everything. Home now shows where you are heading, and the plan is written out year by year to read, print and follow.'),
+        sAdds(h('button', { type: 'button', class: 'btn small primary', id: 'setupDossier', onclick: openDossier }, 'Open the plan, year by year')),
       ],
     },
   ];
@@ -7599,7 +7606,7 @@
     afterImport();
     navigate('home');
     window.scrollTo(0, 0);
-    toast('Your plan is ready. This page says how you are doing and what to do each month. Everything can be changed under Finances.');
+    toast('Your plan is ready. This page says how you are doing; “Plan, year by year” at the top writes out what to do each year. Everything can be changed under Finances.');
   }
 
   // ------------------------------------------------------------------ the dossier
