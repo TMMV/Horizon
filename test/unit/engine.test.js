@@ -286,3 +286,19 @@ test('a goal that is not on track gets ways there: each one, applied, reaches it
   const g2 = E.evaluateGoals(fine, E.project(fine), E.monteCarlo(fine, 120, 1), { runs: 120, seed: 1 }).find(r => r.goal.type === 'debtFree');
   assert.deepEqual(E.waysThere(fine, g2).map(w => w.id), ['wait']);
 });
+
+test('a gap before a pension can be reached is "runs short", not "runs out"', () => {
+  const mk = pension => E.normalizePlan({
+    startYear: 2026,
+    household: { region: 'ruk', people: [{ id: 'p1', name: 'Fern', age: 50, retireAge: 52, endAge: 90, pensionAccessAge: 57, statePension: 11500 }] },
+    accounts: [{ id: 'c', name: 'Bank', type: 'cash', owner: 'joint', balance: 30000 }, { id: 'pn', name: 'Pension', type: 'pension', owner: 'p1', balance: pension }],
+    income: [{ id: 'pay', name: 'Pay', kind: 'salary', owner: 'p1', amount: 40000, freq: 'year', endRef: 'retire' }],
+    expenses: [{ id: 'l', name: 'Living', amount: 24000, freq: 'year' }], events: [],
+    goals: [{ id: 'r', type: 'retire', person: 'p1', age: 52, confidence: 85 }],
+  });
+  const words = pension => { const p = mk(pension); return E.evaluateGoals(p, E.project(p), E.monteCarlo(p, 60, 1), { runs: 60, seed: 1 })[0].words; };
+  // A big pension that cannot be touched until 57: cash is gone at 54, and it is fine from 57.
+  assert.match(words(900000), /the money runs short from about 54 \(2030\) to 56 \(2032\): the savings that can be used are spent before pensions or other income take over\. After that it lasts to 90\./);
+  // A small one: it really does run out.
+  assert.match(words(60000), /the money runs out at about \d+ \(\d{4}\), \d+ years before the plan ends\./);
+});

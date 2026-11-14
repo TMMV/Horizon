@@ -2366,8 +2366,16 @@
         const short = pr.rows.findIndex((r, t) => t < pr.pre.N && r.shortfall > 0.5);
         const last = pr.rows[pr.pre.N];
         const gbp = v => `£${Math.round(v).toLocaleString('en-GB')}`;
-        const words = short >= 0
-          ? ` On average returns the money runs out at about ${p1v.age + short} (${pr.rows[short].year}), ${p1v.endAge - p1v.age - short} years before the plan ends.`
+        // A gap that closes again (savings spent before a pension can be reached) is not the money
+        // running out for good: say when it runs short and that it lasts from then.
+        // (`shortfall` adds up and never falls; `unfunded` is each year's own.)
+        let firstShort = -1, lastShort = -1;
+        for (let t = 0; t < pr.pre.N; t++) if ((pr.rows[t].unfunded || 0) > 0.5) { if (firstShort < 0) firstShort = t; lastShort = t; }
+        const at = t => `${p1v.age + t} (${pr.rows[t].year})`;
+        const words = short >= 0 && firstShort >= 0 && lastShort < pr.pre.N - 1
+          ? ` On average returns the money runs short ${lastShort === firstShort ? `at about ${at(firstShort)}` : `from about ${at(firstShort)} to ${at(lastShort)}`}: the savings that can be used are spent before pensions or other income take over. After that it lasts to ${p1v.endAge}.`
+          : short >= 0
+          ? ` On average returns the money runs out at about ${at(short)}, ${p1v.endAge - p1v.age - short} years before the plan ends.`
           : ` On average returns it lasts to ${p1v.endAge}, with about ${gbp(last.liquid / last.deflator)} of savings and pensions left (today’s money).`;
         const fb = !variant && mc.fundedByYear ? mc.fundedByYear.findIndex((v, t) => t > 0 && v < 0.75) : -1;
         res.words = words + (fb > 0 && short < 0 ? ` In a bad run of markets (1 in 4 futures) it runs short from about ${vp.household.people.length > 1 ? `${plan.startYear + fb} (${p1v.name} ${p1v.age + fb})` : p1v.age + fb}.` : '');
