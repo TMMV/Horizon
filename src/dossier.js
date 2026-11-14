@@ -55,6 +55,48 @@
     ['A bad run / a good run', 'The outcome that only 1 future in 10 is worse than, and the one only 1 in 10 is better than. Most futures fall between them.'],
   ].map(([term, text]) => ({ term, text }));
 
+  // What is owned, by kind, from one row of the projection (start-of-year balances).
+  const holdingsOf = r => [
+    { id: 'cash', label: 'Cash and savings', value: r.cash + (r.cashIsa || 0) },
+    { id: 'isa', label: 'ISAs', value: r.isa - (r.cashIsa || 0) },
+    { id: 'gia', label: 'General investment account', value: r.gia },
+    { id: 'pension', label: 'Pension pots', value: r.pension },
+    { id: 'bonds', label: 'Bonds and gilts', value: r.bonds },
+    { id: 'property', label: 'Property', value: r.property },
+  ];
+
+  // The series behind the dossier's charts, for the whole plan whatever years are written out.
+  // Balances are at the start of each year (as in the projection); flows are for the year.
+  function pictures(plan, proj, mc) {
+    const rows = proj.rows, N = rows.length - 1, ps = plan.household.people;
+    const years = rows.map(r => r.year);
+    const kinds = holdingsOf(rows[0]).map((k, j) => ({ id: k.id, label: k.label, values: rows.map(r => holdingsOf(r)[j].value) })).filter(k => k.values.some(v => v > 0.5));
+    if (rows.some(r => r.debt > 0.5)) kinds.push({ id: 'debt', label: 'Mortgage and loans', values: rows.map(r => -r.debt) });
+    const flow = (id, label, fn) => ({ id, label, values: rows.slice(0, N).map(fn) });
+    const flows = [
+      flow('income', 'Pay and other income', r => r.earnings + r.otherIncome),
+      flow('statePension', 'State Pension', r => r.statePension),
+      flow('drawn', 'Drawn from savings and pensions', r => r.withdrawals || 0),
+      flow('spending', 'Spending', r => -r.spending),
+      flow('tax', 'Tax and National Insurance', r => -r.taxes),
+      flow('debt', 'Mortgage and loans', r => -(r.debtPay || 0)),
+      flow('saved', 'Saved', r => -r.saved),
+    ].filter(f => f.values.some(v => Math.abs(v) > 0.5));
+    const debts = (proj.out.debts || []).map(d => ({ id: d.id, label: (plan.accounts.find(a => a.id === d.id) || { name: 'Debt' }).name, values: years.map((y, t) => d.bal[t] || 0) })).filter(d => d.values.some(v => v > 0.5));
+    // The debt chart stops two years after the last one is cleared.
+    const lastOwed = Math.max(-1, ...debts.map(d => d.values.reduce((k, v, t) => (v > 0.5 ? t : k), -1)));
+    const pensions = ps.map((x, i) => ({ id: x.id, label: `${cap(poss(x.name))} pension pots`, values: rows.map(r => r.persons[i].pension || 0) })).filter(p => p.values.some(v => v > 0.5));
+    const nw = mc && mc.series && mc.series.netWorth ? mc.series.netWorth.nominal : null;
+    const seen = new Set();
+    const markers = E.milestones(plan, proj).filter(m => ['retire', 'debt', 'home', 'short'].includes(m.kind) && !seen.has(m.year) && seen.add(m.year)).map(m => ({ year: m.year, label: m.label }));
+    return {
+      years, flowYears: years.slice(0, N), kinds, net: rows.map(r => r.netWorth), flows,
+      debts, debtYears: lastOwed >= 0 ? Math.min(N + 1, lastOwed + 3) : 0, pensions,
+      range: nw ? { p10: nw.p10, p25: nw.p25, p50: nw.p50, p75: nw.p75, p90: nw.p90 } : null,
+      markers,
+    };
+  }
+
   // ---------------------------------------------------------------- one year
 
   function yearBlock(plan, proj, mc, t, steps) {
@@ -217,7 +259,17 @@
     ].filter(g => g && (g.lines.length || g.total));
 
     const todo = (steps || []).filter(s => s.when === r.year || (t === 0 && s.when === 'now')).map(s => ({ title: s.title, text: s.text }));
-    return { t, year: r.year, ages, phase, headline, changes, groups, todo, net, inn, left, spending: r.spending + debtPay };
+
+    // ---- the year as two bars: where the money goes, and what is owned at the end of it
+    const split = [
+      { id: 'tax', label: 'Tax and National Insurance', value: Math.max(0, r.taxes) },
+      { id: 'pension', label: 'Into pensions from pay', value: employee + (r.extraPension || 0) + (r.sharesKept || 0) },
+      { id: 'spending', label: 'Spending', value: r.spending },
+      { id: 'debt', label: 'Mortgage and loans', value: debtPay },
+      { id: 'saved', label: 'Left to save', value: Math.max(0, left) },
+    ].filter(x => x.value > 0.5);
+    const holdings = next ? holdingsOf(next).filter(x => x.value > 0.5) : [];
+    return { t, year: r.year, ages, phase, headline, changes, groups, todo, net, inn, left, spending: r.spending + debtPay, split, drawn: r.withdrawals || 0, holdings, owed: next ? next.debt : 0 };
   }
 
   // ---------------------------------------------------------------- the whole document
@@ -267,11 +319,12 @@
       everyYear: steps.filter(s => s.when === 'yearly').map(s => ({ title: s.title, text: s.text })),
       years,
       range,
+      pictures: pictures(plan, proj, mc),
       glossary: GLOSSARY,
     };
   }
 
-  const api = { build, yearBlock, assumptions, GLOSSARY, gbp };
+  const api = { build, yearBlock, pictures, assumptions, GLOSSARY, gbp };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Dossier = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

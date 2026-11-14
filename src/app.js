@@ -13,6 +13,7 @@
   const SI = window.ScenarioIdeas;
   const QS = window.QuickStart;
   const DS = window.Dossier;
+  const SV = window.SvgChart;
   const DRIVER_RUNS = 300;
   const MARKET = window.MARKET_DATA || null;
   const STORE = 'horizon-uk-v3';
@@ -7633,10 +7634,66 @@
     window.scrollTo(0, 0);
   }
 
+  // Colours follow the thing, as on the live charts: cash is always the same blue, and so on.
+  const DOC_COLOR = { cash: '--s1', isa: '--s2', gia: '--s3', pension: '--s4', bonds: '--s5', property: '--s6', debt: '--s8',
+    income: '--s1', statePension: '--s3', drawn: '--s4', spending: '--s5', tax: '--s6', saved: '--s2' };
+  let docWidth = 0;   // the width the dossier's charts were last drawn for
+
   function renderDossier() {
-    const d = dossierDoc(), g = DS.gbp;
+    const d = dossierDoc(), g = DS.gbp, pic = d.pictures;
+    // Charts are drawn for the width of the text column, so their labels stay readable on any screen.
+    const body = $('#docBody'), cs = getComputedStyle(body);
+    const W = Math.max(240, Math.min(768, Math.round(body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight))));
+    docWidth = W;
+    const keys = items => h('div', { class: 'doc-keys' }, items.map(it => h('span', {}, h('i', { class: `key ${it.shape || 'square'}`, style: `--key:var(${it.color})` }), it.label)));
+    const figure = (title, svg, items, note) => {
+      const box = h('div', { class: 'doc-plot' });
+      box.innerHTML = svg;
+      return h('figure', { class: 'doc-fig' }, h('figcaption', {}, title), box, items && items.length ? keys(items) : null, note ? h('p', { class: 'doc-explain' }, note) : null);
+    };
+    const tipOf = (xs, series) => i => `${xs[i]}\n${series.filter(s => Math.abs(s.values[i]) > 0.5).map(s => `${s.label}: ${g(Math.abs(s.values[i]))}`).join('\n')}`;
+    const coloured = list => list.map(s => ({ ...s, color: DOC_COLOR[s.id] || '--s7' }));
+    const marks = pic.markers.map(m => ({ x: m.year, label: m.label }));
+    // One bar cut into its parts, with each part's amount and share written underneath.
+    const bar = (parts, monthly) => {
+      const total = parts.reduce((a, x) => a + x.value, 0);
+      if (!(total > 0.5)) return null;
+      return h('div', { class: 'doc-bar-fig' },
+        h('div', { class: 'doc-barline', role: 'img', 'aria-label': parts.map(x => `${x.label} ${Math.round((x.value / total) * 100)}%`).join(', ') },
+          parts.map(x => h('i', { style: `width:${(x.value / total) * 100}%;background:var(${DOC_COLOR[x.id] || '--s7'})`, title: `${x.label}: ${g(x.value)}` }))),
+        h('ul', { class: 'doc-barkeys' }, parts.map(x => h('li', {}, h('i', { class: 'key square', style: `--key:var(${DOC_COLOR[x.id] || '--s7'})` }), h('span', {}, x.label),
+          h('b', {}, monthly ? `${g(x.value / 12)} a month` : g(x.value)), h('em', {}, `${Math.round((x.value / total) * 100)}%`)))));
+    };
+    const worthSeries = coloured(pic.kinds);
+    const netLine = { label: 'Net worth', color: '--text', values: pic.net };
+    const fan = pic.range ? [
+      { lower: pic.range.p10, upper: pic.range.p90, color: '--band', alpha: 0.14 },
+      { lower: pic.range.p25, upper: pic.range.p75, color: '--band', alpha: 0.26 },
+    ] : [];
+    const fanLines = pic.range ? [{ label: 'The middle future', color: '--s1', values: pic.range.p50 }, { label: 'On average returns', color: '--text-2', values: pic.net, dash: [6, 4] }] : [];
+    const fanKeys = [{ label: 'The middle future', color: '--s1', shape: 'line' }, { label: 'On average returns (the figures in this document)', color: '--text-2', shape: 'dash' }, { label: 'Half of futures', color: '--band', shape: 'band' }, { label: '8 in 10 futures', color: '--band', shape: 'band' }];
+    const pictures = h('section', { class: 'doc-section', id: 'doc-pictures' }, h('h2', {}, 'The plan in pictures'),
+      h('p', { class: 'doc-sub' }, 'The whole plan at a glance, before the detail. Amounts are in the pounds of each year, on average returns; the last chart shows how far real markets could push it either way.'),
+      figure('What you own and owe, year by year',
+        SV.plot({ width: W, height: 280, xs: pic.years, areas: worthSeries, lines: [netLine], markers: marks, label: 'What you own and owe, year by year', tip: tipOf(pic.years, [...worthSeries, netLine]) }),
+        [...worthSeries.map(s => ({ label: s.label, color: s.color })), { label: 'Net worth (what you own minus what you owe)', color: '--text', shape: 'line' }],
+        'Balances at the start of each year. What is owed is drawn below the line; the black line is what is left once it is taken off.'),
+      (() => { const fl = coloured(pic.flows); return figure('Money in and money out, each year',
+        SV.plot({ width: W, height: 280, xs: pic.flowYears, bars: fl, markers: marks, label: 'Money in and money out, each year', tip: tipOf(pic.flowYears, fl) }),
+        fl.map(s => ({ label: s.label, color: s.color })),
+        'Above the line is what comes in; below it is where it goes. While you work, pay covers everything and the rest is saved. Later, savings and pensions fill the gap.'); })(),
+      pic.pensions.length ? (() => { const ps = pic.pensions.map((s, i) => ({ ...s, color: ['--s4', '--s7'][i % 2] })); return figure('Pension pots',
+        SV.plot({ width: W, height: 220, xs: pic.years, lines: ps, markers: marks, label: 'Pension pots by year', tip: tipOf(pic.years, ps) }),
+        ps.map(s => ({ label: s.label, color: s.color, shape: 'line' })), 'They grow while contributions go in, then fall as they pay for retirement.'); })() : null,
+      pic.debts.length && pic.debtYears > 1 ? (() => { const xs = pic.years.slice(0, pic.debtYears), ds = pic.debts.map((s, i) => ({ ...s, values: s.values.slice(0, pic.debtYears), color: ['--s8', '--s7', '--s5', '--s3'][i % 4] })); return figure('What is still owed',
+        SV.plot({ width: W, height: 220, xs, lines: ds, label: 'What is still owed, by year', tip: tipOf(xs, ds) }),
+        ds.map(s => ({ label: s.label, color: s.color, shape: 'line' })), 'Each mortgage or loan, down to nothing.'); })() : null,
+      pic.range ? figure('How far off it could be: net worth across the futures tried',
+        SV.plot({ width: W, height: 260, xs: pic.years, bands: fan, lines: fanLines, markers: marks, label: 'The range of net worth across the futures tried',
+          tip: i => `${pic.years[i]}\nA bad run: ${g(pic.range.p10[i])}\nThe middle: ${g(pic.range.p50[i])}\nA good run: ${g(pic.range.p90[i])}\nOn average returns: ${g(pic.net[i])}` }),
+        fanKeys, 'The darker band holds half of the futures tried and the lighter one eight in ten. The table at the end of the document gives the figures.') : null);
     const who = d.meta.people.map(x => `${x.name === 'You' ? 'You' : x.name}, ${x.age}`).join(' and ');
-    const table = (group, monthly) => h('table', { class: 'lines' },
+    const table = (group, monthly) => h('table', { class: `lines${monthly ? '' : ' no-month'}` },
       h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', { class: 'num' }, group.id === 'end' || group.id === 'debt' ? 'At the end' : 'In the year'), h('th', { class: 'num' }, monthly ? 'A month' : ''), h('th', {}, ''))),
       h('tbody', {},
         group.lines.map(l => h('tr', { class: l.strong ? 'strong' : null }, h('td', {}, l.label), h('td', { class: 'num' }, g(l.value)), h('td', { class: 'num' }, monthly ? g(l.value / 12) : ''), h('td', { class: 'note' }, l.note))),
@@ -7648,7 +7705,18 @@
       y.net ? h('p', { class: 'doc-sub' }, `By the end of the year, net worth is about ${g(y.net.value)} (${g(y.net.real)} in today’s money) on average returns${y.net.low !== null && y.net.high !== null ? `; in a bad run of markets about ${g(y.net.low)}, in a good run about ${g(y.net.high)}` : ''}.`) : null,
       y.changes.length ? h('div', { class: 'doc-box new' }, h('h3', {}, y.t === 0 ? 'Worth knowing this year' : 'New this year'), h('ul', {}, y.changes.map(c => h('li', {}, c)))) : null,
       y.todo.length ? h('div', { class: 'doc-box todo' }, h('h3', {}, 'To do this year'), h('ul', {}, y.todo.map(s => h('li', {}, h('strong', {}, s.title), s.text ? ` ${s.text}` : '')))) : null,
-      y.groups.map(gr => [h('h3', {}, gr.title), h('p', { class: 'doc-explain' }, gr.explain), table(gr, MONTHLY[gr.id])]));
+      y.split.length ? h('div', { class: 'doc-glance' },
+        h('h3', {}, 'The year at a glance'),
+        h('p', { class: 'doc-explain' }, `Where the year’s money goes${y.drawn > 0.5 ? `. ${g(y.drawn)} of it comes out of savings and pensions` : ''}.`),
+        bar(y.split, true),
+        pic.range || pic.net.length > 2 ? [
+          h('p', { class: 'doc-explain' }, `Where ${y.year} sits on the plan: net worth at the end of the year and in the years around it${pic.range ? ', with the range across the futures tried (8 in 10 fall inside the band)' : ''}.`),
+          (() => { const box = h('div', { class: 'doc-plot' }); // Ten years back and fifteen on: the whole plan on one scale would flatten the early years.
+            const from = Math.max(0, y.t + 1 - 10), to = Math.min(pic.years.length, Math.max(y.t + 1 + 16, from + 26)), cut = v => v.slice(from, to);
+            box.innerHTML = SV.plot({ width: W, height: 130, xs: cut(pic.years), bands: fan.slice(0, 1).map(f => ({ ...f, lower: cut(f.lower), upper: cut(f.upper) })), lines: [{ label: 'Net worth', color: '--s1', values: cut(pic.net) }], here: y.t + 1 - from, label: `Net worth around ${y.year}, with the year marked` }); return box; })(),
+        ] : null) : null,
+      y.groups.map(gr => [h('h3', {}, gr.title), h('p', { class: 'doc-explain' }, gr.explain), table(gr, MONTHLY[gr.id]),
+        gr.id === 'end' && y.holdings.length > 1 ? [h('p', { class: 'doc-explain' }, `What you own at the end of ${y.year}, by kind${y.owed > 0.5 ? ` (before taking off the ${g(y.owed)} still owed)` : ''}.`), bar(y.holdings, false)] : null]));
     const decades = [];
     for (const y of d.years) if (y.t === 0 || y.year % 5 === 0) decades.push(y.year);
     setKids($('#docBody'),
@@ -7660,6 +7728,7 @@
         h('h3', {}, 'What is in here'),
         h('ol', { class: 'doc-toc' },
           h('li', {}, h('a', { href: '#doc-short' }, 'In short')),
+          h('li', {}, h('a', { href: '#doc-pictures' }, 'The plan in pictures')),
           h('li', {}, h('a', { href: '#doc-read' }, 'How to read a year')),
           h('li', {}, h('a', { href: '#doc-assume' }, 'What the plan assumes')),
           h('li', {}, h('a', { href: '#doc-dates' }, 'Dates that matter')),
@@ -7672,9 +7741,11 @@
       h('section', { class: 'doc-section', id: 'doc-short' }, h('h2', {}, 'In short'),
         d.short.length ? h('ul', { class: 'doc-short' }, d.short.map(s => h('li', { class: s.status }, h('strong', {}, s.title), h('br', {}), s.text)))
           : h('p', {}, 'No goals have been set, so there is no verdict to give. The year-by-year figures below still show where the plan leads.')),
-      h('section', { id: 'doc-read' }, h('h2', {}, 'How to read a year'),
+      pictures,
+      h('section', { class: 'doc-section', id: 'doc-read' }, h('h2', {}, 'How to read a year'),
         h('p', {}, 'Every year has the same parts, in the order the money moves:'),
         h('ol', {},
+          h('li', {}, h('strong', {}, 'The year at a glance. '), 'One bar showing where the year’s money goes, and a small chart marking the year on the whole plan.'),
           h('li', {}, h('strong', {}, 'Money coming in. '), 'Pay, pensions and other income, each on its own line, with how much it went up.'),
           h('li', {}, h('strong', {}, 'What comes off first. '), 'Tax, National Insurance and your own pension contributions. What remains is what reaches your bank.'),
           h('li', {}, h('strong', {}, 'Money going out. '), 'Spending, one-off costs, and mortgage and loan payments.'),
@@ -7684,7 +7755,7 @@
         h('p', {}, '“New this year” lists what is different from the year before, and “To do this year” lists anything that needs you to act. All amounts are in the pounds of that year, so they rise with prices; today’s money is given where it helps to compare.')),
       h('section', { id: 'doc-assume' }, h('h2', {}, 'What the plan assumes'),
         h('p', { class: 'doc-sub' }, 'Everything that follows rests on these. Change one in Horizon and the whole document changes with it.'),
-        h('table', {}, h('tbody', {}, d.assumptions.map(a => h('tr', {}, h('td', {}, h('strong', {}, a.label)), h('td', {}, a.value), h('td', { class: 'note' }, a.why)))))),
+        h('table', { class: 'doc-kv' }, h('tbody', {}, d.assumptions.map(a => h('tr', {}, h('td', {}, h('strong', {}, a.label)), h('td', {}, a.value), h('td', { class: 'note' }, a.why)))))),
       h('section', { id: 'doc-dates' }, h('h2', {}, 'Dates that matter'),
         d.dates.length ? h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Year'), h('th', {}, d.meta.people.length > 1 ? 'Ages' : 'Age'), h('th', {}, 'What happens'))),
           h('tbody', {}, d.dates.map(x => h('tr', {}, h('td', {}, h('a', { href: `#doc-${x.year}` }, String(x.year))), h('td', {}, x.ages.join(' and ')), h('td', {}, x.label)))))
@@ -7694,8 +7765,8 @@
       d.years.map(yearSection),
       d.range.length ? h('section', { class: 'doc-section', id: 'doc-range' }, h('h2', {}, 'How far off it could be'),
         h('p', {}, 'The year-by-year figures use average returns. Real markets do not: this is net worth at a few points across the futures tried. A bad run is the outcome only 1 future in 10 falls below; a good run, the one only 1 in 10 beats.'),
-        h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Year'), h('th', {}, d.meta.people.length > 1 ? 'Ages' : 'Age'), h('th', { class: 'num' }, 'A bad run'), h('th', { class: 'num' }, 'The middle'), h('th', { class: 'num' }, 'A good run'), h('th', { class: 'num' }, 'On average returns'))),
-          h('tbody', {}, d.range.map(x => h('tr', {}, h('td', {}, String(x.year)), h('td', {}, x.ages.join(' and ')), h('td', { class: 'num' }, g(x.low)), h('td', { class: 'num' }, g(x.mid)), h('td', { class: 'num' }, g(x.high)), h('td', { class: 'num' }, g(x.expected)))))),
+        h('div', { class: 'doc-scroll' }, h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Year'), h('th', {}, d.meta.people.length > 1 ? 'Ages' : 'Age'), h('th', { class: 'num' }, 'A bad run'), h('th', { class: 'num' }, 'The middle'), h('th', { class: 'num' }, 'A good run'), h('th', { class: 'num' }, 'On average returns'))),
+          h('tbody', {}, d.range.map(x => h('tr', {}, h('td', {}, String(x.year)), h('td', {}, x.ages.join(' and ')), h('td', { class: 'num' }, g(x.low)), h('td', { class: 'num' }, g(x.mid)), h('td', { class: 'num' }, g(x.high)), h('td', { class: 'num' }, g(x.expected))))))),
         h('p', { class: 'doc-sub' }, 'In the pounds of each year. “On average returns” is higher than “the middle” because a few very good futures pull the average up; the middle is the better guide to what to expect.')) : null,
       h('section', { class: 'doc-section', id: 'doc-words' }, h('h2', {}, 'What the words mean'),
         h('dl', {}, d.glossary.map(x => h('div', {}, h('dt', {}, x.term), h('dd', {}, x.text))))));
@@ -7857,6 +7928,17 @@
     $('#docClose').addEventListener('click', closeDossier);
     $('#docPrint').addEventListener('click', () => window.print());
     $('#docYears').addEventListener('change', e => { docYears = parseInt(e.target.value, 10) || 0; renderDossier(); });
+    // The dossier's charts are drawn for one width: draw them again when the window changes much.
+    let docResize = 0;
+    window.addEventListener('resize', () => {
+      if ($('#dossier').hidden) return;
+      clearTimeout(docResize);
+      docResize = setTimeout(() => {
+        const b = $('#docBody'), c = getComputedStyle(b);
+        const w = Math.max(240, Math.min(768, Math.round(b.clientWidth - parseFloat(c.paddingLeft) - parseFloat(c.paddingRight))));
+        if (!$('#dossier').hidden && Math.abs(w - docWidth) > 24) { const y = window.scrollY; renderDossier(); window.scrollTo(0, y); }
+      }, 200);
+    });
     $('#exampleStart').addEventListener('click', openQuickStart);
     $('#qsClose').addEventListener('click', closeQuickStart);
     $('#qsBack').addEventListener('click', () => { qs.err = ''; qs.step -= 1; renderQuick(); });

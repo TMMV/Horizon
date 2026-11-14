@@ -2381,6 +2381,47 @@ test.describe('the dossier', () => {
     expect(problems).toEqual([]);
   });
 
+  test('the dossier has pictures: the whole plan in charts, and each year at a glance', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => window.__horizon.openDossier());
+    const doc = page.locator('#docBody');
+    const pics = doc.locator('#doc-pictures');
+    for (const title of ['What you own and owe, year by year', 'Money in and money out, each year', 'Pension pots', 'What is still owed', 'How far off it could be']) await expect(pics).toContainText(title);
+    await expect(pics.locator('svg.doc-svg')).toHaveCount(5);
+    await expect(pics.locator('svg.doc-svg').first()).toContainText('Alex retires');
+    // Every year: a bar of where the money goes (its shares add up), the year marked on the whole plan, and what is owned.
+    const first = doc.locator('.doc-year').first();
+    await expect(first.locator('.doc-glance')).toContainText('The year at a glance');
+    const widths = await first.locator('.doc-glance .doc-barline i').evaluateAll(els => els.map(el => parseFloat(el.style.width)));
+    expect(widths.length).toBeGreaterThan(2);
+    expect(Math.abs(widths.reduce((a, b) => a + b, 0) - 100)).toBeLessThan(0.01);
+    await expect(first.locator('.doc-glance svg circle')).toHaveCount(1);
+    await expect(first).toContainText('What you own at the end of 2026, by kind');
+    expect(problems).toEqual([]);
+  });
+
+  test('the dossier on a narrow screen: nothing runs off the page or into the next column', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { problems } = await openApp(page);
+    await page.evaluate(() => window.__horizon.openDossier());
+    await page.selectOption('#docYears', { label: 'The next five years' });
+    const over = await page.evaluate(() => {
+      const vw = document.documentElement.clientWidth, out = [];
+      if (document.documentElement.scrollWidth > vw + 1) out.push('page scrolls sideways');
+      for (const el of document.querySelectorAll('#docBody *')) {
+        if (el.closest('.doc-scroll')) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width && r.right > vw + 1) out.push(`${el.tagName} runs off: ${(el.textContent || '').slice(0, 30)}`);
+        if (el.tagName === 'TD' && el.scrollWidth > el.clientWidth + 1) out.push(`cell overflows: ${el.textContent.slice(0, 30)}`);
+      }
+      return out;
+    });
+    expect(over).toEqual([]);
+    // Charts are drawn for the narrow column, not shrunk from a wide one.
+    expect(await page.locator('#doc-pictures svg.doc-svg').first().evaluate(el => el.viewBox.baseVal.width)).toBeLessThan(400);
+    expect(problems).toEqual([]);
+  });
+
   test('an amount goal: charts stop a few years after its date, and history has its own chart', async ({ page }) => {
     const { problems } = await openApp(page);
     const goal = await page.evaluate(() => { const g = window.__horizon.ws.scenarios[0].plan.goals.find(x => x.type === 'netWorth'); return { id: g.id, year: g.year }; });

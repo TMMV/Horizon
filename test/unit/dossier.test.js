@@ -87,3 +87,42 @@ test('a short dossier for a quick-start plan: fewer years, plain “you”, debt
   assert.ok(d.glossary.length > 10);
   assert.ok(d.short.length === 2 && d.short.every(s => s.text.length > 10));
 });
+
+test('the pictures are the projection: kinds add up to net worth, and each year\u2019s bar to its money', () => {
+  const plan = E.normalizePlan(E.defaultWorkspace().scenarios[0].plan);
+  const { d, proj } = doc(plan, { years: 5 });
+  const pic = d.pictures, rows = proj.rows;
+  // The charts cover the whole plan even when only five years are written out.
+  assert.equal(d.years.length, 5);
+  assert.equal(pic.years.length, rows.length);
+  assert.equal(pic.flowYears.length, rows.length - 1);
+  rows.forEach((r, t) => near(pic.kinds.reduce((a, k) => a + k.values[t], 0), r.netWorth, 2));
+  // Money in and money out balance each year (unless the money has run out).
+  rows.slice(0, -1).forEach((r, t) => { if (!(r.unfunded > 0.5)) near(pic.flows.reduce((a, f) => a + f.values[t], 0), 0, 5); });
+  assert.deepEqual(pic.range.p50.length, rows.length);
+  assert.ok(pic.markers.some(m => m.label === 'Alex retires'));
+  assert.ok(pic.debts.length === 1 && pic.debtYears > 2 && pic.debtYears <= rows.length);
+  for (const y of d.years) {
+    const r = rows[y.t], next = rows[y.t + 1];
+    near(sum(y.split), r.earnings + r.otherIncome + r.statePension + (r.withdrawals || 0), 5);
+    near(sum(y.holdings) - y.owed, next.netWorth, 2);
+  }
+});
+
+test('a chart is plain SVG: stacked layers, columns, a marked year, and nothing unescaped', () => {
+  const S = require('../../src/svg-chart');
+  const layers = S.stack([{ values: [1, 2] }, { values: [3, -1] }, { values: [-2, -2] }], 2);
+  assert.deepEqual(layers.map(l => [l.lower, l.upper]), [[[0, 0], [1, 2]], [[1, -1], [4, 0]], [[-2, -3], [0, -1]]]);
+  const svg = S.plot({ width: 400, height: 200, xs: [2026, 2027, 2028], areas: [{ label: 'A', color: '--s1', values: [10, 20, 30] }],
+    lines: [{ label: 'L', color: '--text', values: [10, 20, 30] }], markers: [{ x: 2027, label: 'Tom & <Jo> stop' }], here: 1, tip: i => `year ${i}` });
+  assert.match(svg, /^<svg [^>]*viewBox="0 0 400 200"/);
+  assert.match(svg, /Tom &amp; &lt;Jo&gt; stop/);
+  assert.equal((svg.match(/<circle /g) || []).length, 1);
+  assert.equal((svg.match(/<title>/g) || []).length, 3);
+  assert.match(svg, /fill:var\(--s1\)/);
+  assert.ok(!/NaN|undefined/.test(svg));
+  const bars = S.plot({ width: 300, xs: [2026, 2027], bars: [{ label: 'In', color: '--s1', values: [5, 0] }, { label: 'Out', color: '--s5', values: [-5, -2] }] });
+  assert.ok(!/NaN|undefined/.test(bars));
+  assert.equal(S.compact(1250000), '£1.25M');
+  assert.equal(S.compact(-4500), '−£4.5K');
+});
