@@ -2410,6 +2410,13 @@ test.describe('the dossier', () => {
     expect(Math.abs(widths.reduce((a, b) => a + b, 0) - 100)).toBeLessThan(0.01);
     await expect(first.locator('.doc-glance svg circle')).toHaveCount(1);
     await expect(first).toContainText('What you own on 31 Aug 2027, by kind');
+    // On paper, the lines that say the same every year are printed on the first year only, so a year fits two sheets.
+    await page.emulateMedia({ media: 'print' });
+    await expect(first.locator('.doc-explain.rep').first()).toBeVisible();
+    await expect(doc.locator('#doc-2027 .doc-explain.rep').first()).toBeHidden();
+    await expect(doc.locator('#doc-2027 .doc-explain:not(.rep)').first()).toBeVisible();
+    await page.emulateMedia({ media: 'screen' });
+    await expect(doc.locator('#doc-2027 .doc-explain.rep').first()).toBeVisible();
     expect(problems).toEqual([]);
   });
 

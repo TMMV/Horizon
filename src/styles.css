@@ -545,13 +545,17 @@ body.dossier-open > header, body.dossier-open > nav, body.dossier-open > main, b
   .doc { max-width: none; margin: 0; padding: 0; border: none; border-radius: 0; font-size: 9.5pt; line-height: 1.4; color: #000; background: #fff; }
   .doc h1 { font-size: 22pt; }
   .doc h2 { font-size: 13pt; margin-top: 0; break-after: avoid; }
-  .doc h3 { break-after: avoid; }
+  .doc h3 { break-after: avoid; margin-top: 12px; }
+  /* On paper each year should fit two sheets: the lines that say the same on every year are printed once, on the first. */
+  .doc-year ~ .doc-year .doc-explain.rep { display: none; }
   .doc table { font-size: 8.8pt; margin-bottom: 8px; }
   .doc td, .doc th { padding-top: 2.5px; padding-bottom: 2.5px; }
   .doc tr, .doc-box, .doc-short > li, .doc dl > div, .doc-fig, .doc-glance, .doc-bar-fig { break-inside: avoid; }
   .doc-keys, .doc-barkeys { font-size: 8.4pt; }
   .doc-fig { margin: 10px 0 14px; }
   .doc-section, .doc-year { break-before: page; margin-top: 0; }
+  /* The short answers share the cover's page. */
+  #doc-short { break-before: auto; margin-top: 18px; }
   .doc-years-nav, .doc-toc a { color: #000; }
   .doc a { color: #000; text-decoration: none; }
   .doc-box.new { background: #eef3fb; }
