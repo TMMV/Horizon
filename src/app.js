@@ -7869,8 +7869,8 @@
             const from = Math.max(0, y.t + 1 - 10), to = Math.min(pic.years.length, Math.max(y.t + 1 + 16, from + 26)), cut = v => v.slice(from, to);
             box.innerHTML = SV.plot({ width: W, height: 130, xs: cut(pic.years), bands: fan.slice(0, 1).map(f => ({ ...f, lower: cut(f.lower), upper: cut(f.upper) })), lines: [{ label: 'Net worth', color: '--s1', values: cut(pic.net) }], here: y.t + 1 - from, label: `Net worth around ${y.year}, with the year marked` }); return box; })(),
         ] : null) : null,
-      y.groups.map(gr => [h('h3', {}, gr.title), h('p', { class: 'doc-explain' }, gr.explain), table(gr, MONTHLY[gr.id]),
-        gr.id === 'end' && y.holdings.length > 1 ? [h('p', { class: 'doc-explain' }, `What you own at the end of ${y.year}, by kind${y.owed > 0.5 ? ` (before taking off the ${g(y.owed)} still owed)` : ''}.`), bar(y.holdings, false)] : null]));
+      y.groups.map(gr => [h('h3', {}, gr.id === 'end' && planYearSpan(d.meta.asOf, y.t) ? `Where you should be on ${fmtDate(planYearSpan(d.meta.asOf, y.t).to)}` : gr.title), h('p', { class: 'doc-explain' }, gr.explain), table(gr, MONTHLY[gr.id]),
+        gr.id === 'end' && y.holdings.length > 1 ? [h('p', { class: 'doc-explain' }, `What you own ${planYearSpan(d.meta.asOf, y.t) ? `on ${fmtDate(planYearSpan(d.meta.asOf, y.t).to)}` : `at the end of ${y.year}`}, by kind${y.owed > 0.5 ? ` (before taking off the ${g(y.owed)} still owed)` : ''}.`), bar(y.holdings, false)] : null]));
     const decades = [];
     for (const y of d.years) if (y.t === 0 || y.year % 5 === 0) decades.push(y.year);
     const only = docYears < 0;   // just the sheet to act on

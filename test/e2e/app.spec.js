@@ -2369,7 +2369,7 @@ test.describe('the dossier', () => {
     const years = await page.evaluate(() => window.__horizon.model.proj.rows.length - 1);
     await expect(doc.locator('.doc-year')).toHaveCount(years);
     const first = doc.locator('.doc-year').first();
-    for (const part of ['Money coming in', 'What comes off first', 'Money going out', 'What is left, and where to put it', 'Pensions', 'Mortgage and loans', 'Where you should be at the end of the year']) await expect(first).toContainText(part);
+    for (const part of ['Money coming in', 'What comes off first', 'Money going out', 'What is left, and where to put it', 'Pensions', 'Mortgage and loans', 'Where you should be on 31 Aug 2027']) await expect(first).toContainText(part);
     await expect(first).toContainText('To do this year');
     await expect(first).toContainText(/a month comes in after tax and pension/);
     // The year someone stops work says so, and says what to draw instead.
@@ -2409,7 +2409,7 @@ test.describe('the dossier', () => {
     expect(widths.length).toBeGreaterThan(2);
     expect(Math.abs(widths.reduce((a, b) => a + b, 0) - 100)).toBeLessThan(0.01);
     await expect(first.locator('.doc-glance svg circle')).toHaveCount(1);
-    await expect(first).toContainText('What you own at the end of 2026, by kind');
+    await expect(first).toContainText('What you own on 31 Aug 2027, by kind');
     expect(problems).toEqual([]);
   });
 
@@ -2443,6 +2443,8 @@ test.describe('the dossier', () => {
     await expect(doc).toContainText(/Each year here starts on 1 Sept?\. Your figures are as at 1 Sept? 2026, so “2026” means 1 Sept? 2026 to 31 Aug 2027/);
     await expect(doc.locator('#doc-2026 h2 small')).toContainText(/^1 Sept? 2026 to 31 Aug 2027 · /);
     await expect(doc.locator('#doc-2026')).toContainText(/By 31 Aug 2027, net worth is about/);
+    await expect(doc.locator('#doc-2026 h3').last()).toHaveText('Where you should be on 31 Aug 2027');
+    await expect(doc.locator('#doc-2026')).toContainText('What you own on 31 Aug 2027, by kind');
     await expect(doc.locator('#doc-2027 .doc-box.todo')).toContainText('Change the standing orders in September.');
     // Amounts with a deadline are a month, and what that comes to by then: not a whole year's.
     await expect(sheet.locator('li', { hasText: 'use this year’s ISA allowance' })).toContainText(/The plan pays in about £[\d,]+ a month, so about £[\d,]+ more by then\./);
@@ -2471,6 +2473,7 @@ test.describe('the dossier', () => {
     await expect(doc.locator('#doc-do .doc-box h3')).toHaveText(['Now', 'Before the tax year ends', 'Next year (2027)', 'Every year']);
     await expect(doc.locator('#doc-2026 h2 small')).not.toContainText(' to ');
     await expect(doc.locator('#doc-2026')).toContainText('By the end of the year, net worth is about');
+    await expect(doc.locator('#doc-2026 h3').last()).toHaveText('Where you should be at the end of the year');
     await expect(doc).not.toContainText('Each year here starts on');
     expect(problems).toEqual([]);
   });
