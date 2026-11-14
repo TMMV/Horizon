@@ -29,6 +29,7 @@
           <button type="button" role="menuitem" id="exportBtn">Save to a file…</button>
           <button type="button" role="menuitem" id="importBtn">Open a saved file…</button>
           <p class="menu-note" id="savedNote"></p>
+          <button type="button" role="menuitem" id="dossierBtn">The full plan, year by year (print or PDF)</button>
           <button type="button" role="menuitem" id="quickBtn">Start my plan: a few questions</button>
           <button type="button" role="menuitem" id="setupBtn">Go through every detail (guide)</button>
           <button type="button" role="menuitem" id="blankBtn">Start a blank plan</button>
@@ -229,6 +230,18 @@
     </form>
   </dialog>
 
+  <!-- The dossier: the whole plan written out, to read on screen, print or save as a PDF -->
+  <div id="dossier" hidden>
+    <div class="doc-bar">
+      <strong>The full plan, year by year</strong>
+      <label>Years written out <select id="docYears" aria-label="Years written out"></select></label>
+      <span class="doc-bar-gap"></span>
+      <button type="button" class="btn primary" id="docPrint">Print or save as PDF</button>
+      <button type="button" class="btn" id="docClose">Back to Horizon</button>
+    </div>
+    <article class="doc" id="docBody"></article>
+  </div>
+
   <dialog id="quickDlg" aria-labelledby="qsTitle">
     <form method="dialog" class="wizard quick" id="qsForm">
       <header class="wiz-head">
@@ -372,6 +385,7 @@
   <script src="src/life-wizard.js"></script>
   <script src="src/review.js"></script>
   <script src="src/quick-start.js"></script>
+  <script src="src/dossier.js"></script>
   <script src="src/app.js"></script>
 </body>
 </html>

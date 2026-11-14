@@ -2100,12 +2100,16 @@
         const tg = tOf(g);
         if (g.type === 'netWorth' || g.type === 'passiveIncome') {
           let hit = false;
-          for (let t = 0; t <= tg && !hit; t++) {
+          const path = [];
+          for (let t = 0; t <= N; t++) {
             for (const k in snap) snap[k] = out[k][t];
             const v = g.type === 'passiveIncome' ? passiveIncome(snap, nonWorkIncome(pre, t), g) : goalValue(snap, g.measure);
-            hit = v >= goalTarget(g, econ.price[t]);
+            if (t <= tg && v >= goalTarget(g, econ.price[t])) hit = true;
+            // In the pounds the goal is set in: today's money for a "real" goal, actual pounds otherwise.
+            path.push(g.basis === 'real' ? v / econ.price[t] : v);
           }
           r[g.id] = hit;
+          (r.__paths = r.__paths || {})[g.id] = path;
         } else if (g.type === 'debtFree') {
           // Nothing owed in the target year (a mortgage taken out later counts too).
           r[g.id] = out.debt[tg] <= 0.5;
@@ -2144,10 +2148,22 @@
     }
     const goalRates = {};
     for (const g of plan.goals) goalRates[g.id] = starts.filter(x => x.goals[g.id]).length / L;
+    // Each amount goal's range across the starting years, year by year.
+    const goalBands = {};
+    for (const g of plan.goals) {
+      if (!base[0].goals.__paths || !base[0].goals.__paths[g.id]) continue;
+      const b = { p10: [], p25: [], p50: [], p75: [], p90: [] };
+      for (let t = 0; t < T; t++) {
+        const col = base.map(x => x.goals.__paths[g.id][t]).sort((x, y) => x - y);
+        for (const [k, p] of PCTS) b[k].push(percentile(col, p));
+      }
+      goalBands[g.id] = b;
+    }
+    for (const x of base) delete x.goals.__paths;
     const years = [];
     for (let t = 0; t < T; t++) years.push(plan.startYear + t);
     return {
-      years, starts, bands, goalRates,
+      years, starts, bands, goalRates, goalBands,
       liquid: base.map(x => x.liquid),
       successRate: starts.filter(x => x.success).length / L,
       complete: starts.filter(x => !x.wraps).length,

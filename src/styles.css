@@ -412,6 +412,8 @@ dialog#quickDlg::backdrop { background: rgba(0, 0, 0, 0.55); }
 }
 
 /* ---------- home: the answer in plain words */
+.short-doubt { display: grid; gap: 6px; justify-items: start; padding: 12px 14px; margin-bottom: 12px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 18%, var(--surface)); border-left: 4px solid var(--warn); }
+.short-doubt p { margin: 0; }
 .short-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .short-goal { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
 .short-goal > div { display: grid; gap: 2px; min-width: 0; }
@@ -426,6 +428,78 @@ dialog#quickDlg::backdrop { background: rgba(0, 0, 0, 0.55); }
 .short-now ul { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
 .short-none { margin: 0; }
 .short-foot { margin: 12px 0 0; font-size: 0.88rem; color: var(--text-2); }
+
+/* ---------- the dossier: the plan as a document */
+body.dossier-open > header, body.dossier-open > nav, body.dossier-open > main, body.dossier-open > .example-banner, body.dossier-open > .tabs, body.dossier-open > .setup-panel { display: none !important; }
+#dossier[hidden] { display: none; }
+#dossier { background: var(--bg, #f1f1ee); min-height: 100vh; }
+.doc-bar { position: sticky; top: 0; z-index: 5; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.doc-bar label { font-size: 0.9rem; color: var(--text-2); display: flex; gap: 6px; align-items: center; }
+.doc-bar select { font: inherit; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }
+.doc-bar-gap { flex: 1; }
+.doc { max-width: 880px; margin: 20px auto 60px; padding: 44px 56px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; line-height: 1.55; }
+.doc h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+.doc h2 { font-size: 1.35rem; margin: 40px 0 8px; padding-top: 14px; border-top: 2px solid var(--text); }
+.doc h3 { font-size: 1.02rem; margin: 20px 0 4px; }
+.doc p { margin: 0 0 10px; }
+.doc .doc-sub { color: var(--text-2); }
+.doc-cover { padding-bottom: 8px; }
+.doc-cover .doc-note { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: var(--surface-2); font-size: 0.9rem; }
+.doc-toc { columns: 2; padding-left: 20px; margin: 8px 0 0; }
+.doc-toc a, .doc-years-nav a { color: var(--accent); }
+.doc-years-nav { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.88rem; margin: 6px 0 0; }
+.doc table { width: 100%; border-collapse: collapse; margin: 4px 0 14px; font-size: 0.9rem; }
+.doc table.lines { table-layout: fixed; }
+.doc table.lines th:first-child { width: 36%; }
+.doc table.lines th.num { width: 13%; }
+.doc section, .doc-year { scroll-margin-top: 64px; }
+.doc th { text-align: left; font-weight: 600; color: var(--text-2); font-size: 0.8rem; border-bottom: 1px solid var(--border-strong); padding: 4px 8px 4px 0; }
+.doc td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+.doc td.num, .doc th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; padding-right: 14px; }
+.doc td.note { color: var(--text-2); font-size: 0.84rem; width: 42%; }
+.doc tr.total td { font-weight: 650; border-top: 1px solid var(--text); border-bottom: none; }
+.doc tr.strong td:first-child, .doc tr.strong td.num { font-weight: 600; }
+.doc-year { margin-top: 34px; }
+.doc-year > h2 { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.doc-year > h2 small { font-size: 0.92rem; font-weight: 500; color: var(--text-2); }
+.doc-headline { font-size: 1.04rem; font-weight: 550; }
+.doc-box { padding: 10px 14px; border-radius: 8px; margin: 0 0 12px; }
+.doc-box h3 { margin: 0 0 4px; font-size: 0.92rem; }
+.doc-box ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+.doc-box.new { background: var(--accent-soft); }
+.doc-box.todo { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); }
+.doc-explain { color: var(--text-2); font-size: 0.86rem; margin: 0 0 2px; }
+.doc-short { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.doc-short li { padding: 10px 14px; border-radius: 8px; background: var(--surface-2); border-left: 4px solid var(--muted); }
+.doc-short li.good { border-left-color: var(--good); }
+.doc-short li.warn { border-left-color: var(--warn); }
+.doc-short li.bad { border-left-color: var(--bad); }
+.doc dl { margin: 0; display: grid; gap: 8px; }
+.doc dt { font-weight: 600; }
+.doc dd { margin: 0; color: var(--text-2); }
+@media (max-width: 760px) { .doc { padding: 22px 18px; margin: 0; border: none; } .doc td.note { width: auto; } }
+
+@page { size: A4; margin: 14mm 13mm; }
+@media print {
+  body { background: #fff !important; }
+  body.dossier-open > *:not(#dossier) { display: none !important; }
+  #dossier { background: #fff; }
+  .doc-bar { display: none; }
+  .doc { max-width: none; margin: 0; padding: 0; border: none; border-radius: 0; font-size: 9.5pt; line-height: 1.4; color: #000; background: #fff; }
+  .doc h1 { font-size: 22pt; }
+  .doc h2 { font-size: 13pt; margin-top: 0; break-after: avoid; }
+  .doc h3 { break-after: avoid; }
+  .doc table { font-size: 8.8pt; margin-bottom: 8px; }
+  .doc td, .doc th { padding-top: 2.5px; padding-bottom: 2.5px; }
+  .doc tr, .doc-box, .doc-short li, .doc dl > div { break-inside: avoid; }
+  .doc-section, .doc-year { break-before: page; margin-top: 0; }
+  .doc-years-nav, .doc-toc a { color: #000; }
+  .doc a { color: #000; text-decoration: none; }
+  .doc-box.new { background: #eef3fb; }
+  .doc-box.todo { background: #fdf3da; }
+  .doc-short li, .doc-cover .doc-note { background: #f3f3f1; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
 
 /* ---------- the example plan says so */
 .example-banner { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 8px 16px; background: color-mix(in srgb, var(--warn) 16%, var(--surface)); border-bottom: 1px solid var(--border); font-size: 0.92rem; }

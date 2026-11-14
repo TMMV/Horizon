@@ -2346,3 +2346,53 @@ test.describe('quick start', () => {
     expect(problems).toEqual([]);
   });
 });
+
+test.describe('the dossier', () => {
+  test('the plan written out year by year, opened from Home, shortened, and closed again', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.click('#shortDossier');
+    const doc = page.locator('#docBody');
+    await expect(doc.locator('h1')).toHaveText('Alex and Sam’s plan, year by year');
+    await expect(page.locator('main')).toBeHidden();
+    // One block for every year of the plan, each with the same parts.
+    const years = await page.evaluate(() => window.__horizon.model.proj.rows.length - 1);
+    await expect(doc.locator('.doc-year')).toHaveCount(years);
+    const first = doc.locator('.doc-year').first();
+    for (const part of ['Money coming in', 'What comes off first', 'Money going out', 'What is left, and where to put it', 'Pensions', 'Mortgage and loans', 'Where you should be at the end of the year']) await expect(first).toContainText(part);
+    await expect(first).toContainText('To do this year');
+    await expect(first).toContainText(/a month comes in after tax and pension/);
+    // The year someone stops work says so, and says what to draw instead.
+    const stop = doc.locator('#doc-2043');
+    await expect(stop).toContainText('Alex stops work this year, at 55');
+    await expect(stop).toContainText('What to take from savings and pensions');
+    for (const id of ['doc-short', 'doc-read', 'doc-assume', 'doc-dates', 'doc-range', 'doc-words']) await expect(doc.locator(`#${id}`)).toHaveCount(1);
+    await expect(doc.locator('#doc-dates')).toContainText('Fixed rate on Mortgage ends');
+    // Fewer years on request.
+    await page.selectOption('#docYears', { label: 'The next five years' });
+    await expect(doc.locator('.doc-year')).toHaveCount(5);
+    // Print styles: only the document, and each year starts a page.
+    await page.emulateMedia({ media: 'print' });
+    await expect(page.locator('.doc-bar')).toBeHidden();
+    expect(await doc.locator('.doc-year').nth(1).evaluate(el => getComputedStyle(el).breakBefore)).toBe('page');
+    await page.emulateMedia({ media: 'screen' });
+    await page.click('#docClose');
+    await expect(page.locator('#dossier')).toBeHidden();
+    await expect(page.locator('main')).toBeVisible();
+    expect(problems).toEqual([]);
+  });
+
+  test('an amount goal: charts stop a few years after its date, and history has its own chart', async ({ page }) => {
+    const { problems } = await openApp(page);
+    const goal = await page.evaluate(() => { const g = window.__horizon.ws.scenarios[0].plan.goals.find(x => x.type === 'netWorth'); return { id: g.id, year: g.year }; });
+    await page.evaluate(id => window.__horizon.navigate(`goal/${id}`), goal.id);
+    await expect(page.locator('#gpHistoryChart')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('#gpHistory')).toContainText('compare it with “How it’s tracking”');
+    await expect(page.locator('#view-goal')).toContainText('simulated futures drawn from your assumptions');
+    // The table view of the tracking chart ends within a few years of the target (or of when it is expected).
+    await page.locator('#view-goal').getByRole('button', { name: 'Table' }).first().click();
+    const last = await page.locator('#view-goal table.data').first().locator('tbody tr').last().locator('td, th').first().innerText();
+    expect(Number(last)).toBeLessThan(goal.year + 12);
+    expect(Number(last)).toBeGreaterThanOrEqual(goal.year);
+    expect(problems).toEqual([]);
+  });
+});
