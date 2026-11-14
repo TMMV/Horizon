@@ -60,7 +60,7 @@ test('what is new in a year: stopping work, the State Pension, a debt paid off, 
   assert.equal(year(2060).phase, 'retired');
   // Steps land in their year; "now" in the first; yearly ones are listed once.
   assert.deepEqual(year(2026).todo.map(s => s.title), ['Pay into ISAs']);
-  assert.deepEqual(year(2043).todo.map(s => s.title), ['Alex retires']);
+  assert.deepEqual(year(2043).todo.map(s => s.title.replace(/£[\d,]+/, '£N')), ['Alex retires', 'Take about £N a month from savings and pensions']);
   assert.deepEqual(d.everyYear.map(s => s.title), ['The yearly review']);
   // Dates that matter are in order and carry ages.
   assert.ok(d.dates.length >= 6);
@@ -125,4 +125,31 @@ test('a chart is plain SVG: stacked layers, columns, a marked year, and nothing 
   assert.ok(!/NaN|undefined/.test(bars));
   assert.equal(S.compact(1250000), '£1.25M');
   assert.equal(S.compact(-4500), '−£4.5K');
+});
+
+test('every later year says what to set up, against the year before; the sheet gathers now, the tax year and next year', () => {
+  const plan = E.normalizePlan(E.defaultWorkspace().scenarios[0].plan);
+  const steps = [{ when: 'now', title: 'Pay into ISAs', text: 'x' }, { when: 'tax', title: 'By 5 April 2027: use the ISA allowance', text: 't' }, { when: 2027, title: 'Mortgage: start looking at new deals', text: 'm' }, { when: 'yearly', title: 'The yearly review', text: 'z' }];
+  const { d, proj } = doc(plan, { steps, years: 1 });
+  const rows = proj.rows;
+  // Asked for one year, the sheet still knows next year.
+  assert.equal(d.years.length, 1);
+  assert.deepEqual(d.sheet.now.map(s => s.title), ['Pay into ISAs']);
+  assert.deepEqual(d.sheet.tax.map(s => s.title), ['By 5 April 2027: use the ISA allowance']);
+  assert.equal(d.sheet.next.year, 2027);
+  assert.deepEqual(d.sheet.next.todo.map(s => s.title), ['Set the monthly amounts for the year', 'Mortgage: start looking at new deals']);
+  // The first year lists the tax-year steps too.
+  assert.deepEqual(d.years[0].todo.map(s => s.title), ['Pay into ISAs', 'By 5 April 2027: use the ISA allowance']);
+  // The amounts are the projection's own, a month, with last year's beside them.
+  const a = D.yearAmounts(rows[1], rows[0], 1);
+  assert.ok(a.text.includes(`${D.gbp(rows[1].toIsa / 12)} a month into ISAs (${D.gbp(rows[0].toIsa / 12)} last year)`), a.text);
+  // Something that stops is said, and something new is marked.
+  const b = D.yearAmounts({ toIsa: 6000, toCash: 0 }, { toIsa: 0, toCash: 2400 }, 1);
+  assert.match(b.text, /£500 a month into ISAs \(new this year\)/);
+  assert.match(b.text, /nothing more into cash savings \(£200 a month last year\)/i);
+  // A year that draws on savings says how much from where.
+  const c = D.yearAmounts({ withdrawals: 24000, wCash: 6000, wPension: 18000 }, { withdrawals: 12000 }, -24000);
+  assert.equal(c.title, 'Take about £2,000 a month from savings and pensions');
+  assert.match(c.text, /£500 from cash and £1,500 from pension pots \(£1,000 a month last year\)/);
+  assert.equal(D.yearAmounts({}, {}, 0), null);
 });

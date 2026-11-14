@@ -255,3 +255,34 @@ test('validation flags impossible inputs', () => {
   assert.ok(warnings.some(w => /plan until age/.test(w)));
   assert.ok(warnings.some(w => /never shrinks/.test(w)));
 });
+
+test('a goal that is not on track gets ways there: each one, applied, reaches it', () => {
+  const plan = E.defaultPlan();
+  for (const x of plan.household.people) x.retireAge -= 6;
+  for (const g of plan.goals) { if (g.type === 'retire') g.age -= 6; if (g.type === 'debtFree') g.year = 2038; if (g.type === 'netWorth') g.amount = 1200000; }
+  const proj = E.project(plan), mc = E.monteCarlo(plan, 120, 1);
+  const goals = E.evaluateGoals(plan, proj, mc, { runs: 120, seed: 1 });
+  const by = t => goals.find(r => r.goal.type === t);
+  // Retirement: spend less now, or stop later; either reaches the goal's confidence.
+  const ret = by('retire');
+  assert.equal(ret.status, 'bad');
+  const ways = E.waysThere(plan, ret, { runs: 120, seed: 1 });
+  const later = ways.find(w => w.id === 'later'), spend = ways.find(w => w.id === 'spend');
+  assert.ok(later && spend, JSON.stringify(ways));
+  const yrs = +later.text.match(/Stop work (\d+) year/)[1];
+  assert.ok(E.successRate(E.shiftRetirement(plan, yrs), 120, 1) >= ret.goal.confidence / 100);
+  assert.ok(E.successRate(E.shiftRetirement(plan, yrs - 1), 120, 1) < ret.goal.confidence / 100);
+  assert.match(spend.text, /^Spend about £[\d,]+ a month less from now until work stops \(about £[\d,]+ instead of £[\d,]+\)/);
+  // The mortgage: an amount to overpay a month, and the year it clears as things are.
+  const debt = E.waysThere(plan, by('debtFree'));
+  assert.ok(debt.some(w => w.id === 'overpay' && /^Overpay about £[\d,]+ a month now/.test(w.text)) || debt.some(w => w.id === 'none'), JSON.stringify(debt));
+  assert.ok(debt.some(w => w.id === 'date'));
+  // An amount: spend less, wait, or aim lower.
+  const nw = E.waysThere(plan, by('netWorth'));
+  assert.ok(nw.length >= 1 && nw.every(w => !/NaN|undefined/.test(w.text)), JSON.stringify(nw));
+  // A goal on track on average says so instead.
+  const fine = E.defaultPlan();
+  for (const g of fine.goals) if (g.type === 'debtFree') g.year = 2060;
+  const g2 = E.evaluateGoals(fine, E.project(fine), E.monteCarlo(fine, 120, 1), { runs: 120, seed: 1 }).find(r => r.goal.type === 'debtFree');
+  assert.deepEqual(E.waysThere(fine, g2).map(w => w.id), ['wait']);
+});

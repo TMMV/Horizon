@@ -1131,6 +1131,7 @@
         return h('li', { class: `short-goal ${st.cls}` },
           h('span', { class: 'short-ico' }, icon(st.icon)),
           h('div', {}, h('strong', {}, res.goal.type === 'retire' && !res.retired ? `${res.title}?` : res.title), h('span', {}, say(res)),
+            waysBox(res),
             h('button', { type: 'button', class: 'short-link', onclick: () => navigate(`goal/${res.goal.id}`) }, 'See why, and what would change it')));
       })) : h('p', { class: 'short-none' }, 'No goals yet. Add one (stop working at an age, an emergency fund, saving up for something) and Horizon gives a plain answer. ',
         h('button', { type: 'button', class: 'btn small primary', onclick: () => openGoalWizard() }, '+ Add a goal')),
@@ -1142,6 +1143,34 @@
         h('button', { type: 'button', class: 'btn primary', id: 'shortDossier', onclick: openDossier }, 'Open the plan')),
       su && su.quick === 'yes' ? h('p', { class: 'short-foot' }, 'Worked out from round figures and typical values. ',
         h('button', { type: 'button', class: 'short-link', onclick: () => openSetup() }, 'Make it more exact')) : null);
+    fillWays();
+  }
+
+  // ---- what would get a goal there: worked out after the page is drawn, one goal at a time
+  // (each takes a second or so), and kept until the plan changes.
+  let ways = { key: '', by: {} }, waysBusy = false;
+  const waysBox = res => (res.status === 'good' ? null : h('div', { class: 'ways', 'data-ways': res.goal.id }));
+  function fillWays() {
+    const key = driversKey();
+    if (ways.key !== key) ways = { key, by: {} };
+    let todo = null;
+    for (const el of $$('[data-ways]')) {
+      const id = el.getAttribute('data-ways'), w = ways.by[id];
+      if (!w) { setKids(el, h('span', { class: 'ways-wait' }, 'Working out what would get you there…')); todo = todo || id; continue; }
+      const notes = w.filter(x => ['early', 'none', 'wait'].includes(x.id)), acts = w.filter(x => !notes.includes(x));
+      setKids(el, notes.map(x => h('p', {}, x.text)),
+        acts.length ? [h('strong', {}, acts.length > 1 ? 'What would get you there (any one of these):' : 'What would get you there:'), h('ul', {}, acts.map(x => h('li', {}, x.text)))] : null);
+    }
+    if (!todo || waysBusy) return;
+    waysBusy = true;
+    setTimeout(() => {
+      waysBusy = false;
+      if (driversKey() === ways.key) {
+        const res = (model.goals || []).find(r => r.goal.id === todo);
+        ways.by[todo] = res ? E.waysThere(plan(), res, { seed: ws.settings.seed }) : [];
+      }
+      fillWays();
+    }, 60);
   }
 
   function todoItems() {
@@ -1228,6 +1257,9 @@
       const who = ps.filter(x => x.age < R.LISA.openBefore && !p.accounts.some(a => a.type === 'lisa' && a.owner === x.id));
       const by = Math.min(...who.map(x => year0 + R.LISA.openBefore - x.age));
       add(E.ownsHome(p) ? by : 'now', `Open Lifetime ISAs before turning 40: ${who.map(x => x.name).join(' and ')}`, `Even with £1, so the option stays open: up to £4,000 a year each then gets a 25% bonus until 50${E.ownsHome(p) ? ', usable from 60' : ', usable for a first home (up to £450,000) or from 60'}.`, ['Compare the options', () => openComparison('sacrifice-lisa')]);
+    }
+    for (const d of p.accounts.filter(a => a.type === 'debt' && !a.excluded && a.balance > 0 && a.fixedUntil > year0)) {
+      add(d.fixedUntil - 1 === year0 ? 'now' : d.fixedUntil - 1, `${d.name}: start looking at new deals`, `The fixed rate ends in ${d.fixedUntil}. Most lenders let you reserve a new rate up to six months ahead at no cost, so if yours ends in the first half of ${d.fixedUntil}, start in the autumn of ${d.fixedUntil - 1}.`, ['Compare rates', () => openComparison('mortgage-rate')], `${d.fixedUntil - 1}-10-01`);
     }
     for (const d of p.accounts.filter(a => a.type === 'debt' && !a.excluded && a.balance > 0 && a.fixedUntil >= year0)) {
       add(d.fixedUntil, `${d.name}: the fixed rate ends`, `Compare deals about six months before, to avoid the lender’s standard variable rate. The plan assumes ${d.rateAfterFix === null ? `${d.rate}%` : `${d.rateAfterFix}%`} afterwards.`, ['Compare rates', () => openComparison('mortgage-rate')], `${d.fixedUntil}-06-01`);   // about six months before it ends
@@ -1326,6 +1358,33 @@
         add('now', `Count about ${money(r.perYear / 12)} a month in ${where} as for ${r.name.toLowerCase()}`, `It is already part of what goes in each month. Home shows it building up to ${money(r.target)} for ${r.dueYear}, spoken for and left out of net worth; then it is taken out to pay.${needs > spare + 1 ? ` All the pots together need about ${money(needs)} a month, more than the ${money(spare)} left over now: the plan pays the difference from savings when each cost comes, so a smaller cost, a later date or more put aside already would help.` : ''}`, go('Set aside', 'finances/saving'));
       }
     }
+    // Before this tax year ends: what has a deadline, with the plan's own amounts.
+    {
+      const td = today(), yr = +td.slice(0, 4), md = td.slice(5);
+      const endY = md <= '04-05' ? yr : yr + 1, by = `By 5 April ${endY}`, r0 = rows[0];
+      const join = a => (a.length <= 1 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
+      const earns = k => p.income.some(it => it.kind === k && E.incomeAfterCosts(it, p, 0) > 0.5);
+      const why = [earns('self') ? 'self-employed income' : '', earns('rental') ? 'rent' : '', (r0.hicbc || 0) > 0.5 ? 'the Child Benefit charge' : '', (r0.cgt || 0) > 0.5 ? 'gains on investments' : ''].filter(Boolean);
+      if (why.length && !(md > '01-31' && md <= '04-05')) add('tax', `By 31 January ${endY}: send the tax return and pay what is due`,
+        `For the tax year that ended on 5 April ${endY - 1}, because of ${join(why)}. HMRC charges £100 for a late return, and interest on tax paid late. If that only started since then, the first return is due a year later.`, null, `${endY}-01-10`);
+      const planned = r0.toIsa + (r0.toLisa || 0), allow = p.strategy.isaAllowance;
+      if (planned > 0.5 || isas.length || r0.gia > 500) add('tax', `${by}: use this year’s ISA allowance`,
+        `Each person can pay up to ${money(allow)} into ISAs before 5 April; what is not used is lost. The plan pays in about ${money(planned)} this year.${r0.gia > 500
+          ? ` Move up to ${money(Math.min(r0.gia, Math.max(0, allow * ps.length - planned)))} from the general investment account into ISAs (“Bed and ISA”: sell, and buy the same again inside the ISA), so its gains and income are tax-free from then on.`
+          : p.strategy.cashReserve > 0 ? ` Spare cash beyond the buffer of ${money(p.strategy.cashReserve)} can go in too.` : ''}`, go('Set amounts', 'finances/saving'), `${endY}-03-01`);
+      for (const a of p.accounts.filter(x => x.type === 'lisa' && !x.excluded && x.contribution > 0)) add('tax', `${by}: pay into ${a.name} for this year’s bonus`,
+        `Up to ${money(R.LISA.maxContribution)} a tax year gets 25% added (up to ${money(R.LISA.maxContribution * R.LISA.bonus)}). The bonus on anything not paid in by 5 April is lost for good.`, go('Set amounts', 'finances/saving'), `${endY}-03-01`);
+      if (earns('salary') || earns('self')) {
+        const total = pre.people.reduce((acc, P) => acc + (P.contrib[0] || 0), 0) + (r0.toPension || 0);
+        add('tax', `${by}: decide on a pension top-up`,
+          `Anything paid into a pension before 5 April gets this tax year’s relief${(r0.hicbc || 0) > 0.5 ? `, and brings down the Child Benefit charge (${money(r0.hicbc)} this year in the plan)` : ''}. The plan pays in about ${money(total)} this year${total > 0.5 ? ', employers included' : ''}; up to ${money(R.PENSION_ANNUAL_ALLOWANCE)} a year is allowed (no more than you earn). It is worth most to anyone paying higher-rate tax. Money in a pension cannot be taken out before ${Math.min(...ps.map(x => x.pensionAccessAge))}.`, go('Saving & investing', 'finances/saving'), `${endY}-03-01`);
+      }
+    }
+    // Next year: the amounts to set up, against this year's.
+    if (N > 1) {
+      const a = DS.yearBlock(p, proj, null, 1, []).todo.find(x => x.auto);
+      if (a) { add(year0 + 1, a.title, a.text, go('Set amounts', 'finances/saving'), `${year0 + 1}-01-05`); out[out.length - 1].fromDoc = true; }
+    }
     add('yearly', 'By 5 April: use the tax-year allowances', 'ISAs, pension top-ups and moving the general account into ISAs. Unused allowances are lost.', ['Tax year-end check', () => openGuide('tax')], '03-01');
     add('yearly', 'Each autumn: the yearly review', 'Swap the estimates for real balances so the plan tracks what actually happened.', ['Start review', () => openReview()], '10-01');
     return out;
@@ -1370,11 +1429,11 @@
     if (!box || !model) return;
     const items = todoItems();
     const y0 = plan().startYear;
-    const rank = w => (w === 'now' ? -1 : w === 'yearly' ? 1e6 : w);
+    const rank = w => (w === 'now' ? -1 : w === 'tax' ? -0.5 : w === 'yearly' ? 1e6 : w);
     items.sort((a, b) => rank(a.when) - rank(b.when));
-    const soon = items.filter(i => i.when === 'now' || i.when === 'yearly' || i.when <= y0 + 12);
+    const soon = items.filter(i => i.when === 'now' || i.when === 'tax' || i.when === 'yearly' || i.when <= y0 + 12);
     const later = items.filter(i => !soon.includes(i));
-    const label = w => (w === 'now' ? 'Now' : w === 'yearly' ? 'Every year' : String(w));
+    const label = w => (w === 'now' ? 'Now' : w === 'tax' ? 'This tax year' : w === 'yearly' ? 'Every year' : String(w));
     const row = i => h('li', { class: `todo-item${i.when === 'now' ? ' now' : ''}`, 'data-when': label(i.when) },
       h('span', { class: 'todo-when' }, label(i.when)),
       h('div', { class: 'todo-body' }, h('strong', {}, i.title), h('p', {}, i.text),
@@ -5897,7 +5956,7 @@
     const pointed = new Set(B.insights(plan(), model.proj).filter(i => !hidden.has(i.id) && i.tone !== 'good').map(i => i.action).filter(Boolean));
     const guideSlide = (id, icon, title, text, open, show) => {
       if (!show || hidden.has(`guide-${id}`) || pointed.has(id)) return;
-      out.push({ id: `guide-${id}`, tone: 'guide', icon, eyebrow: 'Guide · a few minutes', title, text, action: ['Start', open], rank: 2 });
+      out.push({ id: `guide-${id}`, tone: 'guide', icon, eyebrow: 'Guide · a few minutes', title, text, action: ['Open this guide', open], rank: 2 });
     };
     const due = RV.due(ws);
     {
@@ -7615,16 +7674,16 @@
   let docYears = 0;   // 0 = every year
   function dossierDoc() {
     const p = plan();
-    const steps = todoItems().map(s => ({ when: s.when, title: s.title, text: s.text }));
+    const steps = todoItems().filter(s => !s.fromDoc).map(s => ({ when: s.when, title: s.title, text: s.text }));
     const sc = ws.scenarios.find(s => s.id === ws.activeId);
-    return DS.build(p, model.proj, model.mc, model.goals, { steps, years: docYears || undefined, scenario: ws.scenarios.length > 1 && sc ? sc.name : '' });
+    return DS.build(p, model.proj, model.mc, model.goals, { steps, years: docYears < 0 ? 1 : docYears || undefined, scenario: ws.scenarios.length > 1 && sc ? sc.name : '' });
   }
 
   function openDossier() {
     if (setupStep !== null) closeSetup();
     const N = model.proj.rows.length - 1, ps = people();
     const toRetire = Math.max(...ps.map(x => x.retireAge - x.age), 0) + 5;
-    const opts = [[0, `Every year, to ${plan().startYear + N - 1} (${N} years)`], [Math.min(N, Math.max(5, toRetire)), `Until five years after stopping work (${Math.min(N, Math.max(5, toRetire))} years)`], [Math.min(N, 10), 'The next ten years'], [Math.min(N, 5), 'The next five years']];
+    const opts = [[-1, 'Only what to do now and next year (a page or two)'], [0, `Every year, to ${plan().startYear + N - 1} (${N} years)`], [Math.min(N, Math.max(5, toRetire)), `Until five years after stopping work (${Math.min(N, Math.max(5, toRetire))} years)`], [Math.min(N, 10), 'The next ten years'], [Math.min(N, 5), 'The next five years']];
     const sel = $('#docYears');
     setKids(sel, opts.filter(([v], i, a) => a.findIndex(o => o[0] === v) === i).map(([v, label]) => h('option', { value: String(v) }, label)));
     sel.value = String(docYears);
@@ -7726,6 +7785,33 @@
         gr.id === 'end' && y.holdings.length > 1 ? [h('p', { class: 'doc-explain' }, `What you own at the end of ${y.year}, by kind${y.owed > 0.5 ? ` (before taking off the ${g(y.owed)} still owed)` : ''}.`), bar(y.holdings, false)] : null]));
     const decades = [];
     for (const y of d.years) if (y.t === 0 || y.year % 5 === 0) decades.push(y.year);
+    const only = docYears < 0;   // just the sheet to act on
+    const doList = items => h('ul', {}, items.map(s => h('li', {}, h('strong', {}, s.title), s.text ? ` ${s.text}` : '')));
+    const sh = d.sheet;
+    const sheet = h('section', { class: 'doc-section', id: 'doc-do' }, h('h2', {}, 'What to do: now and next year'),
+      h('p', { class: 'doc-sub' }, only ? 'The short version, to keep in sight. The full plan, with every year’s figures, is under “Years written out” at the top.' : 'The short version, to keep in sight. Each year’s page further on has the figures behind it.'),
+      sh.now.length ? h('div', { class: 'doc-box todo' }, h('h3', {}, 'Now'), h('p', { class: 'doc-explain' }, 'Set these up this month; most then run by themselves.'), doList(sh.now)) : null,
+      sh.tax.length ? h('div', { class: 'doc-box todo' }, h('h3', {}, 'Before the tax year ends'), doList(sh.tax)) : null,
+      sh.next ? h('div', { class: 'doc-box todo' }, h('h3', {}, `Next year (${sh.next.year})`),
+        sh.next.todo.length ? doList(sh.next.todo) : h('p', {}, 'Nothing new to set up: carry on as this year.'),
+        sh.next.changes.length ? [h('p', { class: 'doc-explain' }, 'What is different next year:'), h('ul', {}, sh.next.changes.map(c => h('li', {}, c)))] : null) : null,
+      d.everyYear.length ? h('div', { class: 'doc-box new' }, h('h3', {}, 'Every year'), doList(d.everyYear)) : null);
+    if (only) {
+      setKids($('#docBody'),
+        h('section', { class: 'doc-cover' },
+          h('h1', {}, d.meta.title.replace('plan, year by year', 'plan: what to do')),
+          h('p', { class: 'doc-sub' }, `${who}. Figures as at ${fmtDate(d.meta.asOf)}; written out on ${fmtDate(today())}${d.meta.scenario ? `; scenario “${d.meta.scenario}”` : ''}.`)),
+        h('section', { class: 'doc-section', id: 'doc-short' }, h('h2', {}, 'In short'),
+          d.short.length ? h('ul', { class: 'doc-short' }, d.short.map(s => h('li', { class: s.status }, h('strong', {}, s.title), h('br', {}), s.text, s.status === 'good' ? null : h('div', { class: 'ways', 'data-ways': s.id }))))
+            : h('p', {}, 'No goals have been set, so there is no verdict to give.')),
+        sheet,
+        d.dates.length ? h('section', { id: 'doc-dates' }, h('h2', {}, 'Dates that matter'),
+          h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Year'), h('th', {}, d.meta.people.length > 1 ? 'Ages' : 'Age'), h('th', {}, 'What happens'))),
+            h('tbody', {}, d.dates.map(x => h('tr', {}, h('td', {}, String(x.year)), h('td', {}, x.ages.join(' and ')), h('td', {}, x.label)))))) : null,
+        h('p', { class: 'doc-note' }, 'Horizon is a planning model, not financial advice. The figures are estimates on average returns; real years will differ. Check anything important on gov.uk or with a regulated adviser before acting on it.'));
+      fillWays();
+      return;
+    }
     setKids($('#docBody'),
       h('section', { class: 'doc-cover' },
         h('h1', {}, d.meta.title),
@@ -7735,6 +7821,7 @@
         h('h3', {}, 'What is in here'),
         h('ol', { class: 'doc-toc' },
           h('li', {}, h('a', { href: '#doc-short' }, 'In short')),
+          h('li', {}, h('a', { href: '#doc-do' }, 'What to do: now and next year')),
           h('li', {}, h('a', { href: '#doc-pictures' }, 'The plan in pictures')),
           h('li', {}, h('a', { href: '#doc-read' }, 'How to read a year')),
           h('li', {}, h('a', { href: '#doc-assume' }, 'What the plan assumes')),
@@ -7746,8 +7833,9 @@
         h('div', { class: 'doc-years-nav' }, 'Jump to: ', decades.map(y => h('a', { href: `#doc-${y}` }, String(y)))),
         h('p', { class: 'doc-note' }, 'Horizon is a planning model, not financial advice. The figures are estimates on average returns under the assumptions listed; real years will differ. Tax rules are those of the current tax year and will change. Check anything important on gov.uk or with a regulated adviser before acting on it.')),
       h('section', { class: 'doc-section', id: 'doc-short' }, h('h2', {}, 'In short'),
-        d.short.length ? h('ul', { class: 'doc-short' }, d.short.map(s => h('li', { class: s.status }, h('strong', {}, s.title), h('br', {}), s.text)))
+        d.short.length ? h('ul', { class: 'doc-short' }, d.short.map(s => h('li', { class: s.status }, h('strong', {}, s.title), h('br', {}), s.text, s.status === 'good' ? null : h('div', { class: 'ways', 'data-ways': s.id }))))
           : h('p', {}, 'No goals have been set, so there is no verdict to give. The year-by-year figures below still show where the plan leads.')),
+      sheet,
       pictures,
       h('section', { class: 'doc-section', id: 'doc-read' }, h('h2', {}, 'How to read a year'),
         h('p', {}, 'Every year has the same parts, in the order the money moves:'),
@@ -7777,6 +7865,7 @@
         h('p', { class: 'doc-sub' }, 'In the pounds of each year. “On average returns” is higher than “the middle” because a few very good futures pull the average up; the middle is the better guide to what to expect.')) : null,
       h('section', { class: 'doc-section', id: 'doc-words' }, h('h2', {}, 'What the words mean'),
         h('dl', {}, d.glossary.map(x => h('div', {}, h('dt', {}, x.term), h('dd', {}, x.text))))));
+    fillWays();
   }
 
   function startBlankPlan() {
@@ -7934,7 +8023,7 @@
     $('#dossierBtn').addEventListener('click', () => { $('#dataMenu').open = false; openDossier(); });
     $('#docClose').addEventListener('click', closeDossier);
     $('#docPrint').addEventListener('click', () => window.print());
-    $('#docYears').addEventListener('change', e => { docYears = parseInt(e.target.value, 10) || 0; renderDossier(); });
+    $('#docYears').addEventListener('change', e => { docYears = parseInt(e.target.value, 10) || 0; renderDossier(); window.scrollTo(0, 0); });
     // The dossier's charts are drawn for one width: draw them again when the window changes much.
     let docResize = 0;
     window.addEventListener('resize', () => {

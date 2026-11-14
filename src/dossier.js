@@ -99,6 +99,27 @@
 
   // ---------------------------------------------------------------- one year
 
+  // What to pay where this year (or take from where), with what it was the year before.
+  const PLACES = [['hiDebtPay', 'extra off expensive debts'], ['toCash', 'into cash savings'], ['overpay', 'in mortgage overpayments'], ['toLisa', 'into Lifetime ISAs'],
+    ['toIsa', 'into ISAs'], ['toGia', 'into the general investment account'], ['toPension', 'extra into pensions']];
+  const SOURCES = [['wCash', 'from cash'], ['wGia', 'from the general investment account'], ['wIsa', 'from ISAs'], ['wLisa', 'from Lifetime ISAs'], ['wPension', 'from pension pots']];
+  function yearAmounts(r, prev, left) {
+    const m = v => gbp(v / 12);
+    if (left < -0.5) {
+      const parts = SOURCES.filter(([k]) => (r[k] || 0) > 0.5).map(([k, label]) => `${m(r[k])} ${label}`);
+      if (!parts.length) return null;
+      return { title: `Take about ${m(r.withdrawals || -left)} a month from savings and pensions`, text: `${cap(list(parts))}${(prev.withdrawals || 0) > 0.5 ? ` (${m(prev.withdrawals)} a month last year)` : ''}. In this order, tax stays low.`, draw: true, auto: true };
+    }
+    const parts = [];
+    for (const [k, label] of PLACES) {
+      const now = r[k] || 0, was = prev[k] || 0;
+      if (now > 0.5) parts.push(`${m(now)} a month ${label}${was <= 0.5 ? ' (new this year)' : Math.abs(now - was) >= 60 ? ` (${m(was)} last year)` : ' (as last year)'}`);
+      else if (was > 0.5) parts.push(`nothing more ${label} (${m(was)} a month last year)`);
+    }
+    if (!parts.length) return null;
+    return { title: 'Set the monthly amounts for the year', text: `${cap(list(parts))}. Change the standing orders in January.`, auto: true };
+  }
+
   function yearBlock(plan, proj, mc, t, steps) {
     const rows = proj.rows, pre = proj.pre, out = proj.out, r = rows[t], next = rows[t + 1], prev = t > 0 ? rows[t - 1] : null;
     const hh = plan.household, ps = hh.people, infl = plan.assumptions.inflation / 100;
@@ -258,7 +279,13 @@
       end.length ? { id: 'end', title: 'Where you should be at the end of the year', explain: 'On average returns. Compare these with your real balances at the yearly review: that is how you know if you are on plan.', lines: end, total: net ? line('Net worth', net.value, `${gbp(net.real)} in today’s money`) : null } : null,
     ].filter(g => g && (g.lines.length || g.total));
 
-    const todo = (steps || []).filter(s => s.when === r.year || (t === 0 && s.when === 'now')).map(s => ({ title: s.title, text: s.text }));
+    const todo = (steps || []).filter(s => s.when === r.year || (t === 0 && (s.when === 'now' || s.when === 'tax'))).map(s => ({ title: s.title, text: s.text }));
+    // From the second year on: the amounts to set up for the year, against the year before.
+    // (The first year's are the "now" steps.)
+    if (prev) {
+      const amounts = yearAmounts(r, prev, left);
+      if (amounts && !todo.some(s => /^Take about/.test(s.title) && amounts.draw)) todo[amounts.draw ? 'push' : 'unshift'](amounts);
+    }
 
     // ---- the year as two bars: where the money goes, and what is owned at the end of it
     const split = [
@@ -282,7 +309,7 @@
     const count = Math.max(1, Math.min(N, opts.years || N));
     const steps = opts.steps || [];
     const years = [];
-    for (let t = 0; t < count; t++) years.push(yearBlock(plan, proj, mc, t, steps));
+    for (let t = 0; t < Math.max(count, Math.min(N, 2)); t++) years.push(yearBlock(plan, proj, mc, t, steps));
 
     const verdict = g => {
       const pc = Math.round((g.probability || 0) * 100);
@@ -313,18 +340,24 @@
         asOf: plan.asOf, startYear: plan.startYear, endYear: rows[N].year, scenario: opts.scenario || '',
         successRate: mc ? mc.successRate : null,
       },
-      short: (goals || []).map(g => ({ title: g.title, status: g.status, text: verdict(g) })),
+      short: (goals || []).map(g => ({ id: g.goal.id, title: g.title, status: g.status, text: verdict(g) })),
+      // The short list to act on: now, before the tax year ends, and next year.
+      sheet: {
+        now: steps.filter(s => s.when === 'now' || s.when === plan.startYear).map(s => ({ title: s.title, text: s.text })),
+        tax: steps.filter(s => s.when === 'tax').map(s => ({ title: s.title, text: s.text })),
+        next: years[1] ? { year: years[1].year, todo: years[1].todo, changes: years[1].changes } : null,
+      },
       assumptions: assumptions(plan),
       dates,
       everyYear: steps.filter(s => s.when === 'yearly').map(s => ({ title: s.title, text: s.text })),
-      years,
+      years: years.slice(0, count),
       range,
       pictures: pictures(plan, proj, mc),
       glossary: GLOSSARY,
     };
   }
 
-  const api = { build, yearBlock, pictures, assumptions, GLOSSARY, gbp };
+  const api = { build, yearBlock, yearAmounts, pictures, assumptions, GLOSSARY, gbp };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Dossier = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

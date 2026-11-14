@@ -955,7 +955,7 @@ test.describe('Horizon app', () => {
     // The example's mortgage ends after both retire, so there is no "from then" line.
     await expect(page.locator('#ovInOut')).not.toContainText('mortgage paid off: about');
     // Guides not done yet are suggestions too; every guide is under "All guides".
-    await expect(page.locator('#ovInsights [data-insight="guide-protection"]')).toContainText('Start');
+    await expect(page.locator('#ovInsights [data-insight="guide-protection"]')).toContainText('Open this guide');
     // Future costs is suggested once (by the plan check), not again as a guide.
     await expect(page.locator('#ovInsights .sg-card', { hasText: 'costs that come later' })).toHaveCount(1);
     await expect(page.locator('#ovInsights [data-insight^="adv-pension"]')).toContainText('Pension for Alex');
@@ -1233,7 +1233,7 @@ test.describe('Horizon app', () => {
     await todo.locator('summary').click();
     await expect(todo).toContainText('Alex retires at');
     await expect(todo).toContainText('claim the State Pension');
-    await todo.locator('.todo-item', { hasText: 'By 5 April' }).locator('button').click();
+    await todo.locator('.todo-item[data-when="Every year"]', { hasText: 'By 5 April' }).locator('button').click();
     await expect(page.locator('#guideDlg')).toBeVisible();
   });
 
@@ -2399,6 +2399,49 @@ test.describe('the dossier', () => {
     expect(Math.abs(widths.reduce((a, b) => a + b, 0) - 100)).toBeLessThan(0.01);
     await expect(first.locator('.doc-glance svg circle')).toHaveCount(1);
     await expect(first).toContainText('What you own at the end of 2026, by kind');
+    expect(problems).toEqual([]);
+  });
+
+  test('what to do now, before the tax year ends and next year; and what would get a missed goal there', async ({ page }) => {
+    const { problems } = await openApp(page);
+    // Home's steps have a group for this tax year and say what to set up next year.
+    const todo = page.locator('#ovTodo');
+    await expect(todo.locator('.todo-item[data-when="This tax year"]').first()).toContainText(/By (31 January|5 April) \d{4}/);
+    await expect(todo.locator('.todo-item[data-when="2027"]').filter({ hasText: 'Set the monthly amounts for the year' })).toContainText(/£[\d,]+ a month into ISAs \(£[\d,]+ last year\)/);
+    await expect(todo.locator('.todo-item[data-when="2027"]').filter({ hasText: 'start looking at new deals' })).toContainText('The fixed rate ends in 2028');
+    // Goals on track have nothing to add.
+    await expect(page.locator('#homeShort .short-goal', { hasText: 'retires at 55' }).locator('.ways')).toHaveCount(0);
+    // Make the example miss: stop work six years sooner.
+    await page.evaluate(() => {
+      const H = window.__horizon, pl = H.ws.scenarios.find(s => s.id === H.ws.activeId).plan;
+      for (const q of pl.household.people) q.retireAge -= 6;
+      for (const g of pl.goals) if (g.type === 'retire') g.age -= 6;
+      H.refresh();
+    });
+    const ways = page.locator('#homeShort .short-goal', { hasText: 'retires at 49' }).locator('.ways');
+    await expect(ways).toContainText('What would get you there', { timeout: 20000 });
+    await expect(ways).toContainText(/Spend about £[\d,]+ a month less from now until work stops/);
+    await expect(ways).toContainText(/Stop work \d+ years? later/);
+    // The plan opens with the same answers and a sheet to act on.
+    await page.click('#tabDossier');
+    const doc = page.locator('#docBody');
+    await expect(doc.locator('#doc-short .ways').first()).toContainText('What would get you there', { timeout: 20000 });
+    const sheet = doc.locator('#doc-do');
+    await expect(sheet.locator('.doc-box h3')).toHaveText(['Now', 'Before the tax year ends', 'Next year (2027)', 'Every year']);
+    await expect(sheet).toContainText('Pay £');
+    await expect(sheet).toContainText('use this year’s ISA allowance');
+    await expect(sheet).toContainText('Set the monthly amounts for the year');
+    // Every later year has something to do; the amounts are not listed twice in 2027.
+    await expect(doc.locator('#doc-2027 .doc-box.todo li').filter({ hasText: 'Set the monthly amounts' })).toHaveCount(1);
+    await expect(doc.locator('#doc-2031 .doc-box.todo')).toContainText('Set the monthly amounts for the year');
+    // The short version: only the answers, the sheet and the dates.
+    await page.selectOption('#docYears', '-1');
+    await expect(doc.locator('h1')).toContainText('what to do');
+    await expect(doc.locator('.doc-year')).toHaveCount(0);
+    await expect(doc.locator('#doc-do')).toBeVisible();
+    await expect(doc.locator('#doc-dates')).toBeVisible();
+    await page.selectOption('#docYears', '5');
+    await expect(doc.locator('.doc-year')).toHaveCount(5);
     expect(problems).toEqual([]);
   });
 

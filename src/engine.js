@@ -2612,6 +2612,74 @@
     return { spendNowPct: lo, monthlyCut: yearly * (now - lo) / 100 / 12 };
   }
 
+  // What would make a goal that is not on track work: a few separate ways, each enough on
+  // its own, in plain words. `res` is the goal as evaluateGoals returned it.
+  function waysThere(plan, res, opts = {}) {
+    const runs = opts.runs || 120, seed = opts.seed || 1, goal = res.goal, out = [];
+    const gbp = v => `£${Math.round(v).toLocaleString('en-GB')}`;
+    const add = (id, text) => out.push({ id, text });
+    const now = plan.strategy.spendNowPct;
+    const yearly = plan.expenses.reduce((acc, e) => acc + streamAt(e, plan, 0), 0);
+    const monthNow = yearly * now / 100 / 12;
+    if (goal.type === 'netWorth') {
+      const r = solveNetWorth(plan, goal);
+      if (r.already) { add('wait', 'On average returns the plan gets there in time; the chance is lower because markets can fall at the wrong moment. Allowing a year or two more makes it safer.'); return out; }
+      if (r.spendNowPct !== null && r.monthlyCut > 0.5) add('spend', `Spend about ${gbp(r.monthlyCut)} a month less from now (about ${gbp(monthNow - r.monthlyCut)} instead of ${gbp(monthNow)}) and save it.`);
+      if (res.expectedYear) add('date', `Allow until ${res.expectedYear}: that is when the plan gets there as things are.`);
+      if (res.valueAt > 0.5 && res.valueAt < goal.amount) add('amount', `Aim for about ${gbp(Math.floor(res.valueAt / 1000) * 1000)} by ${goal.year}: what the plan reaches by then${goal.basis === 'real' ? ' (today’s money)' : ''}.`);
+      if (!out.length) add('none', 'Saving more alone does not get there in the plan: look at the amount or the date.');
+    } else if (goal.type === 'debtFree') {
+      const r = solveDebtFree(plan, goal.year);
+      if (r.already) { add('wait', 'On average the plan clears it in time; the chance is lower because pay, rates and markets vary.'); return out; }
+      if (r.overpayPct !== null) {
+        const p = clonePlan(plan);
+        p.strategy.overpayPct = r.overpayPct;
+        if (r.capNeeded) p.strategy.overpayCapPct = 0;
+        const first = project(p).rows[0].overpay / 12;
+        add('overpay', `Overpay about ${gbp(first)} a month now (${r.overpayPct}% of what is left over each month, rising as that does).${r.capNeeded ? ' That is more than the 10% of the balance a year most lenders allow without a charge: check with yours.' : ''}`);
+      }
+      if (res.expectedYear && res.expectedYear > goal.year) add('date', `Allow until ${res.expectedYear}: that is when the plan clears it as things are.`);
+      else add('none', `Even overpaying with everything left over does not clear it by ${goal.year}: a lump sum or a later year is needed.`);
+    } else if (goal.type === 'emergency') {
+      const r = solveEmergency(plan, goal);
+      if (r.already) add('wait', `The cash buffer the plan aims for already covers ${goal.months} months; it fills from what is left over each month${res.expectedYear ? `, by ${res.expectedYear}` : ''}.`);
+      else add('buffer', `Set the cash buffer to ${gbp(r.buffer)} (you hold about ${gbp(r.cashNow)} in cash now): what is left over each month then goes into cash first, until it is full.`);
+    } else if (goal.type === 'retire') {
+      const who = retiree(plan, goal);
+      const target = goal.confidence / 100;
+      const gone = !!res.retired;
+      const delta = gone ? 0 : goal.age - who.retireAge;
+      const base = delta ? shiftRetirement(plan, delta, who.id) : plan;
+      const pc = Math.round(target * 100);
+      // The money running short before work stops is a different problem from not having enough to retire on.
+      const pr = project(base), tr = Math.max(0, goal.age - who.age);
+      const early = gone ? -1 : pr.rows.findIndex((r, t) => t < Math.min(tr, pr.pre.N) && r.shortfall > 0.5);
+      if (early >= 0) add('early', `The first problem comes before work stops: on average returns the money runs short in ${pr.rows[early].year}. Look at that year in the plan for the costs behind it; moving or shrinking one of them may be enough.`);
+      if (!gone && yearly > 0.5) {
+        const ok = k => { const p = clonePlan(base); p.strategy.spendNowPct = k; return successRate(p, runs, seed) >= target; };
+        if (ok(0)) {
+          let lo = 0, hi = now;
+          while (hi - lo > 1) { const m = Math.floor((lo + hi) / 2); if (ok(m)) lo = m; else hi = m; }
+          const cut = yearly * (now - lo) / 100 / 12;
+          if (cut > 0.5 && lo > 0) add('spend', `Spend about ${gbp(cut)} a month less from now until work stops (about ${gbp(monthNow - cut)} instead of ${gbp(monthNow)}) and save it.`);
+        }
+      }
+      if (!gone) {
+        const r = solveRetirement(base, target, runs, seed);
+        if (r.delta !== null && r.delta > 0) add('later', `Stop work ${r.delta} year${r.delta === 1 ? '' : 's'} later${plan.household.people.length > 1 ? `, both of you (${who.name} at ${goal.age + r.delta})` : `, at ${goal.age + r.delta}`}.`);
+      }
+      if (gone || !out.some(x => x.id === 'spend' || x.id === 'later')) {
+        const r = solveRetirementSpending(base, target, runs, seed);
+        if (r.amount) add('retireSpend', `Live on about ${gbp(r.amount / 12)} a month ${gone ? 'from now' : 'once work stops'} (${gbp(r.amount)} a year, today’s money).`);
+      }
+      if (!out.some(x => x.id !== 'early')) add('none', `Nothing on its own (spending less, working longer) brings the chance to ${pc} in 100: more than one thing has to change. Try them together under “Try changes” on the goal’s page.`);
+      else out.pc = pc;
+    } else {
+      if (res.expectedYear) add('date', `Allow until ${res.expectedYear}: that is when the plan gets there as things are.`);
+    }
+    return out;
+  }
+
   const LEVERS = {
     overpay: {
       label: 'Share of surplus used to overpay the mortgage',
@@ -2759,7 +2827,7 @@
     incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
-    streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
+    waysThere, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,

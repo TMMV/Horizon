@@ -424,6 +424,13 @@ dialog#quickDlg::backdrop { background: rgba(0, 0, 0, 0.55); }
 .short-goal.warn .short-ico { background: var(--warn); }
 .short-goal.bad .short-ico { background: var(--bad, var(--s2)); }
 .short-link { justify-self: start; background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 0.88rem; text-decoration: underline; }
+.ways { margin: 6px 0 2px; padding: 8px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); font-size: 0.92rem; display: grid; gap: 4px; }
+.ways p { margin: 0; }
+.ways ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.doc .ways { margin-top: 8px; }
+@media print { .ways-wait { display: none; } }
+.ways-wait { color: var(--text-2); font-style: italic; }
+.ways:empty { display: none; }
 .short-now { margin-top: 12px; display: grid; gap: 4px; }
 .short-now ul { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
 .short-none { margin: 0; }
@@ -474,13 +481,13 @@ body.dossier-open > header, body.dossier-open > nav, body.dossier-open > main, b
 .doc-box h3 { margin: 0 0 4px; font-size: 0.92rem; }
 .doc-box ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
 .doc-box.new { background: var(--accent-soft); }
-.doc-box.todo { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); }
+.doc-box.todo { display: block; padding: 10px 14px; margin: 0 0 12px; background: color-mix(in srgb, var(--warn) 14%, var(--surface)); }
 .doc-explain { color: var(--text-2); font-size: 0.86rem; margin: 0 0 2px; }
 .doc-short { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.doc-short li { padding: 10px 14px; border-radius: 8px; background: var(--surface-2); border-left: 4px solid var(--muted); }
-.doc-short li.good { border-left-color: var(--good); }
-.doc-short li.warn { border-left-color: var(--warn); }
-.doc-short li.bad { border-left-color: var(--bad); }
+.doc-short > li { padding: 10px 14px; border-radius: 8px; background: var(--surface-2); border-left: 4px solid var(--muted); }
+.doc-short > li.good { border-left-color: var(--good); }
+.doc-short > li.warn { border-left-color: var(--warn); }
+.doc-short > li.bad { border-left-color: var(--bad); }
 .doc dl { margin: 0; display: grid; gap: 8px; }
 .doc dt { font-weight: 600; }
 .doc dd { margin: 0; color: var(--text-2); }
@@ -541,7 +548,7 @@ body.dossier-open > header, body.dossier-open > nav, body.dossier-open > main, b
   .doc h3 { break-after: avoid; }
   .doc table { font-size: 8.8pt; margin-bottom: 8px; }
   .doc td, .doc th { padding-top: 2.5px; padding-bottom: 2.5px; }
-  .doc tr, .doc-box, .doc-short li, .doc dl > div, .doc-fig, .doc-glance, .doc-bar-fig { break-inside: avoid; }
+  .doc tr, .doc-box, .doc-short > li, .doc dl > div, .doc-fig, .doc-glance, .doc-bar-fig { break-inside: avoid; }
   .doc-keys, .doc-barkeys { font-size: 8.4pt; }
   .doc-fig { margin: 10px 0 14px; }
   .doc-section, .doc-year { break-before: page; margin-top: 0; }
@@ -549,7 +556,7 @@ body.dossier-open > header, body.dossier-open > nav, body.dossier-open > main, b
   .doc a { color: #000; text-decoration: none; }
   .doc-box.new { background: #eef3fb; }
   .doc-box.todo { background: #fdf3da; }
-  .doc-short li, .doc-cover .doc-note { background: #f3f3f1; }
+  .doc-short > li, .doc-cover .doc-note { background: #f3f3f1; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 
