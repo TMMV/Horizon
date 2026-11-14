@@ -1377,6 +1377,10 @@
     return goal.counts === 'investments' ? b.cash + b.isa + b.gia + b.bonds : b.cash + (b.cashIsa || 0);
   }
 
+  // A fund within a few per cent of the need counts as covered: prices and spending move a little
+  // each year, and a buffer set at exactly three months should not read as "not yet" for that.
+  const EF_NEAR = 0.95;
+
   function emergencyNeed(goal, pre, debtPayYear, t) {
     const tt = Math.min(t, pre.N - 1);
     return goal.months * (pre.expenses[tt] + debtPayYear) / 12;
@@ -2115,7 +2119,7 @@
           r[g.id] = out.debt[tg] <= 0.5;
         } else if (g.type === 'emergency') {
           for (const k in snap) snap[k] = out[k][Math.min(tg, N - 1)];
-          r[g.id] = emergencyHave(g, snap) >= emergencyNeed(g, pre, out.debt[tg] > 0.5 ? debtPayments : 0, tg) - 0.5;
+          r[g.id] = emergencyHave(g, snap) >= emergencyNeed(g, pre, out.debt[tg] > 0.5 ? debtPayments : 0, tg) * EF_NEAR;
         } else {
           r[g.id] = out.short[N] <= 0; // retirement as planned; other ages below
         }
@@ -2217,7 +2221,7 @@
 
   // First year the expected projection holds enough cash for an emergency-fund goal.
   function emergencyYear(goal, proj) {
-    const r = proj.rows.find((x, t) => t < proj.pre.N && emergencyHave(goal, x) >= emergencyNeed(goal, proj.pre, debtPayAt(proj, t), t) - 0.5);
+    const r = proj.rows.find((x, t) => t < proj.pre.N && emergencyHave(goal, x) >= emergencyNeed(goal, proj.pre, debtPayAt(proj, t), t) * EF_NEAR);
     return r ? r.year : null;
   }
 
@@ -2427,7 +2431,7 @@
         for (const g of efGoals) {
           const have = emergencyHave(g, snap);
           gvals[g.id][k] = have;
-          if (t < N && have >= emergencyNeed(g, pre, out.debt[t] > 0.5 ? debtPayments : 0, t) - 0.5) hits[g.id][t] += 1;
+          if (t < N && have >= emergencyNeed(g, pre, out.debt[t] > 0.5 ? debtPayments : 0, t) * EF_NEAR) hits[g.id][t] += 1;
         }
       }
       if (out.short[N] > 0) {

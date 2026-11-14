@@ -120,3 +120,63 @@ test('a set pension from a letter, money for the children, a home to buy and a s
   // An owner is not offered a home to buy.
   assert.equal(Q.build({ ...a, home: 'own', homeValue: 200000 }, ctx).accounts.filter(c => c.type === 'property').length, 1);
 });
+
+test('a teacher: the scheme is estimated from the year joined, pay builds it and not a pot, and it is taken when work stops', () => {
+  const a = Q.blank('scotland');
+  Object.assign(a.people[0], { name: 'Fi', age: 49, pay: 'salary', amount: 48000, retireAge: 60, workPension: 'yes', scheme: 'teachers', joined: 2001, pot: 60000 });
+  Object.assign(a, { cash: 7500, home: 'mortgage', homeValue: 210000, mortgage: 95000, mortgagePay: 720, spending: 2300 });
+  const p = Q.build(a, ctx);
+  const db = p.income.find(i => i.kind === 'dbpension'), pay = p.income.find(i => i.kind === 'salary');
+  const e = E.estimateDb({ scheme: 'teachers', joined: 2001, salary: 48000, startYear: 2026, realGrowth: 1 });
+  assert.equal(db.amount, Math.round(e.builtUp));
+  assert.equal(db.dbAccrual, Math.round(48000 / 57));
+  assert.equal(db.startAge, 60);                         // when work stops, not the scheme's pension age
+  assert.equal(db.dbScheme, 'teachers');
+  assert.equal(pay.pensionTo, 'db');                     // contributions are not counted into a pot as well
+  assert.equal(pay.employeePension, Q.SCHEMES.teachers.member);
+  assert.equal(p.accounts.filter(c => c.type === 'pension').length, 1);
+  assert.equal(p.accounts.find(c => c.type === 'pension').balance, 60000);
+  // Without the scheme the same answers give a worse plan: that was the false first answer.
+  const b = JSON.parse(JSON.stringify(a)); b.people[0].scheme = '';
+  const rate = pl => E.successRate(pl, 150, 1);
+  assert.ok(rate(p) > rate(Q.build(b, ctx)));
+  // Someone who stops before 55 takes it at 55; "not sure" about a pension never builds a scheme.
+  a.people[0].retireAge = 52;
+  assert.equal(Q.build(a, ctx).income.find(i => i.kind === 'dbpension').startAge, 55);
+  a.people[0].workPension = 'unsure';
+  assert.equal(Q.build(a, ctx).income.some(i => i.kind === 'dbpension'), false);
+});
+
+test('working for yourself, a property that is rented out on an interest-only mortgage, the employer’s share and State Pension years', () => {
+  const a = Q.blank('ruk');
+  a.partner = true;
+  Object.assign(a.people[0], { name: 'Cal', age: 38, pay: 'self', amount: 50000, retireAge: 60, pot: 9000 });
+  Object.assign(a.people[1], { name: 'Ash', age: 36, pay: 'salary', amount: 41000, workPension: 'yes', eePct: 6, erPct: 4, niYears: 12 });
+  Object.assign(a, { cash: 11000, home: 'mortgage', homeValue: 340000, mortgage: 215000, mortgagePay: 1340, let: true, letValue: 180000, letMortgage: 110000, letPay: 480, letRent: 850, spending: 3250 });
+  const p = Q.build(a, ctx);
+  const self = p.income.find(i => i.kind === 'self');
+  assert.equal(self.amount, 50000);
+  assert.equal(self.tax, 'uk');
+  assert.equal(self.endRef, 'retire');
+  assert.ok(Q.works(a.people[0]) && !Q.employed(a.people[0]));
+  const pay = p.income.find(i => i.kind === 'salary');
+  assert.equal(pay.employeePension, 6);
+  assert.equal(pay.employerPension, 4);
+  assert.equal(p.household.people[1].niYears, 12);
+  assert.equal(p.household.people[0].niYears, null);
+  // The rented-out property: its value, the rent taxed, and a mortgage that stays level.
+  assert.equal(p.accounts.find(c => c.name === 'Rented-out property').balance, 180000);
+  const rent = p.income.find(i => i.kind === 'rental');
+  assert.equal(rent.amount, 850);
+  assert.equal(rent.freq, 'month');
+  const m = p.accounts.find(c => c.name === 'Mortgage on the rented-out property');
+  assert.equal(m.payment, 480);
+  assert.equal(m.rate, 5.23);
+  const proj = E.project(p), d = proj.out.debts.find(x => x.id === m.id);
+  assert.ok(Math.abs(d.bal[20] - 110000) < 1500, String(d.bal[20]));
+  // The rent and the business are counted: something is left each month (it was minus £736 without them).
+  assert.ok(Q.leftover(p) > 500, String(Q.leftover(p)));
+  // A repayment mortgage on it keeps the usual rate.
+  a.letPay = 700;
+  assert.equal(Q.build(a, ctx).accounts.find(c => c.name === 'Mortgage on the rented-out property').rate, Q.MORTGAGE_RATE);
+});
