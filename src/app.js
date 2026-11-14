@@ -5814,6 +5814,18 @@
     return field(label, opts.suffix ? h('div', { class: 'adorn has-suf' }, input, h('span', { class: 'suf' }, opts.suffix)) : input, opts.hint);
   }
 
+  // A cost that is only counted when asked for.
+  function lwAsk(key, label, hint) {
+    const box = h('input', { type: 'checkbox', checked: !!lw.a[key], id: `lw-${key}` });
+    box.addEventListener('change', () => {
+      lw.a[key] = box.checked;
+      if (box.checked && key === 'carsOn' && !(lw.a.cars > 0)) lw.a.cars = 1;
+      if (box.checked && key === 'homeOn' && !(lw.a.homeCost > 0)) lw.a.homeCost = 10000;
+      renderLifeWizard();
+    });
+    return h('label', { class: 'qs-check lw-ask' }, box, h('span', {}, h('strong', {}, label), h('small', {}, hint)));
+  }
+
   function renderLifeWizard() {
     const steps = LW.STEPS;
     const total = steps.length + 1;
@@ -5858,13 +5870,15 @@
           lwNum('helpAge', 'At their age', { min: 18, max: 50 })) : null,
       ];
     } else if (step.id === 'cars') {
-      content = [h('div', { class: 'fields' },
+      content = [lwAsk('carsOn', 'Allow for replacing a car every few years', 'Leave unticked if there is no car, or if what you spend each month already covers it. The amounts below are suggestions: nothing is counted until this is ticked.'),
+        !a.carsOn ? null : h('div', { class: 'fields' },
         lwNum('cars', 'Cars in the household', { min: 0, max: 4 }),
         lwNum('carCost', 'Cost of each replacement', { money: true }),
         lwNum('carEvery', 'Replace every', { min: 1, max: 30, suffix: 'years' }),
         lwNum('carNext', 'Next replacement in', { min: plan().startYear, max: plan().startYear + 30, hint: 'Stops when you are 80.' }))];
     } else if (step.id === 'home') {
-      content = [h('div', { class: 'fields' },
+      content = [lwAsk('homeOn', 'Allow for big repairs to the home every so often', 'Leave unticked if you rent, or would pay for them out of normal spending. Nothing is counted until this is ticked.'),
+        !a.homeOn ? null : h('div', { class: 'fields' },
         lwNum('homeCost', 'Major repairs or renovation', { money: true, hint: 'Roof, boiler, kitchen, bathroom, windows.' }),
         lwNum('homeEvery', 'Every', { min: 0, max: 40, suffix: 'years', hint: '0 = never.' }),
         lwNum('homeNext', 'Next one in', { min: plan().startYear, max: plan().startYear + 40 }))];

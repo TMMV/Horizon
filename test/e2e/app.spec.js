@@ -2635,4 +2635,33 @@ test.describe('the guide beside the page', () => {
     await expect(page.locator('main')).toContainText(/nothing is owed from 20\d\d/);
     expect(problems).toEqual([]);
   });
+
+  test('costs that come later: a car and home repairs are suggestions until ticked', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const H = window.__horizon, pl = H.ws.scenarios.find(s => s.id === H.ws.activeId).plan;
+      pl.life = null;
+      pl.expenses = pl.expenses.filter(e => !(e.key || '').startsWith('life:'));
+      pl.events = pl.events.filter(e => !(e.id || '').startsWith('life:'));
+      H.refresh();
+      H.navigate('finances/spending');
+    });
+    await page.click('#lifeBtn');
+    const wiz = page.locator('#lifeWiz');
+    await expect(wiz.locator('.wiz-total')).toContainText('adds £0 over');
+    await page.click('#lwNext');
+    await expect(page.locator('#lwTitle')).toHaveText('Cars');
+    await expect(wiz.locator('input[aria-label="Cost of each replacement"]')).toHaveCount(0);
+    await wiz.locator('.lw-ask').click();
+    await expect(wiz.locator('input[aria-label="Cost of each replacement"]')).toBeVisible();
+    await expect(wiz.locator('.wiz-total')).not.toContainText('adds £0 over');
+    await page.click('#lwNext');
+    await expect(page.locator('#lwTitle')).toHaveText('Home');
+    await expect(wiz.locator('input[aria-label="Major repairs or renovation"]')).toHaveCount(0);
+    for (let k = 0; k < 3; k++) await page.click('#lwNext');
+    // The review lists the cars by year and no repairs.
+    await expect(wiz.locator('#lwBody')).toContainText('Replace car');
+    await expect(wiz.locator('#lwBody')).not.toContainText('Major home repairs');
+    expect(problems).toEqual([]);
+  });
 });

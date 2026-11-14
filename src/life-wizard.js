@@ -48,8 +48,15 @@
     { id: 'care', title: 'Later life & family', intro: 'Care in later life, and helping parents or other family.' },
   ];
 
+  // Cars and home repairs are only counted when asked for: the amounts are suggestions until
+  // the box is ticked. A plan that went through the check-up before the question existed keeps
+  // what it had.
   function answersFromPlan(plan) {
-    return { ...defaults(plan), ...(plan.life && typeof plan.life === 'object' ? plan.life : {}) };
+    const saved = plan.life && typeof plan.life === 'object' ? plan.life : null;
+    const a = { ...defaults(plan), ...(saved || {}) };
+    if (a.carsOn === undefined) a.carsOn = saved ? a.cars > 0 && a.carEvery > 0 && a.carCost > 0 : false;
+    if (a.homeOn === undefined) a.homeOn = saved ? a.homeEvery > 0 && a.homeCost > 0 : false;
+    return a;
   }
 
   // Turns answers into the spending items, events and strategy settings they imply.
@@ -85,12 +92,12 @@
       ev(`deposit-${i}`, `${label}: help with a house deposit`, yearAtAge(p1At(a.helpAge)), a.depositHelp);
     });
 
-    if (a.cars > 0 && a.carEvery > 0) {
+    if (a.carsOn !== false && a.cars > 0 && a.carEvery > 0) {
       for (let y = a.carNext, k = 0; y <= Math.min(lastYear, yearAtAge(80)); y += a.carEvery, k++) {
         ev(`cars-${k}`, a.cars > 1 ? `Replace ${a.cars} cars` : 'Replace car', y, a.carCost * a.cars);
       }
     }
-    if (a.homeEvery > 0) {
+    if (a.homeOn !== false && a.homeEvery > 0) {
       for (let y = a.homeNext, k = 0; y <= Math.min(lastYear, yearAtAge(85)); y += a.homeEvery, k++) {
         ev(`home-${k}`, 'Major home repairs', y, a.homeCost);
       }
@@ -129,7 +136,10 @@
     const b = build(plan, answers);
     const p1 = plan.household.people[0];
     const lines = [];
-    for (const e of b.expenses) lines.push({ name: e.name, when: `age ${e.startRef === 'retire' ? p1.retireAge : e.startAge}–${e.endRef === 'age' ? e.endAge : ''}`.replace(/–$/, ''), total: e.amount * (e.endAge - (e.startRef === 'retire' ? p1.retireAge : Math.max(p1.age, e.startAge))) });
+    // Years, not ages: an age here would be the first person's, which reads as the child's on a child's line.
+    const yr = age => plan.startYear + (age - p1.age);
+    const span = (from, to) => (to <= from ? String(from) : `${from}–${to}`);
+    for (const e of b.expenses) lines.push({ name: e.name, when: span(yr(e.startRef === 'retire' ? p1.retireAge : Math.max(p1.age, e.startAge)), yr(e.endAge) - 1), total: e.amount * (e.endAge - (e.startRef === 'retire' ? p1.retireAge : Math.max(p1.age, e.startAge))) });
     for (const e of b.events) lines.push({ name: e.name, when: String(e.year), total: e.amount });
     return { lines, total: lines.reduce((s, l) => s + l.total, 0), slowDown: b.slowDownAge ? `Spend ${b.slowDownPct}% from age ${b.slowDownAge}` : null };
   }

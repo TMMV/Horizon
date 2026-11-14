@@ -140,3 +140,29 @@ test('life check-up: care costs rise faster than prices until they start', () =>
   assert.equal(cost({ careRealGrowth: 1 }), Math.round(60000 * Math.pow(1.01, 85 - age)));
   assert.equal(LW.defaults(p).careRealGrowth, 1);
 });
+
+test('life check-up: a car and home repairs are counted only when asked for; an earlier check-up keeps what it had', () => {
+  const p = E.defaultPlan();
+  p.life = null;
+  p.expenses = p.expenses.filter(e => !(e.key || '').startsWith('life:'));
+  p.events = p.events.filter(e => !(e.id || '').startsWith('life:'));
+  const fresh = LW.answersFromPlan(p);
+  assert.equal(fresh.carsOn, false);
+  assert.equal(fresh.homeOn, false);
+  assert.equal(LW.summary(p, fresh).total, 0);                       // nothing before anything is typed
+  const kids = { ...fresh, children: [{ name: '', age: 17 }], schoolCost: 0, carAt17: 0, uniPerYear: 3000, uniYears: 4 };
+  const s = LW.summary(p, kids);
+  assert.deepEqual(s.lines.map(l => l.name), ['Child 1: university support']);
+  assert.equal(s.lines[0].when, `${p.startYear + 1}–${p.startYear + 4}`);   // years, not the parent's age
+  assert.equal(s.total, 12000);
+  const withCar = LW.build(p, { ...kids, carsOn: true });
+  assert.ok(withCar.events.some(e => e.name === 'Replace car'));
+  assert.ok(!withCar.events.some(e => e.name === 'Major home repairs'));
+  // A plan that went through the check-up before the question existed keeps its cars and repairs.
+  const old = E.defaultPlan();
+  old.life = { cars: 1, carCost: 18000, carEvery: 8, carNext: old.startYear + 3, homeCost: 12000, homeEvery: 10, homeNext: old.startYear + 5 };
+  const kept = LW.answersFromPlan(old);
+  assert.equal(kept.carsOn, true);
+  assert.equal(kept.homeOn, true);
+  assert.ok(LW.build(old, kept).events.some(e => e.name === 'Major home repairs'));
+});
