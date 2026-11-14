@@ -1218,7 +1218,7 @@
 
     // Dated: deadlines and changes the plan makes along the way.
     const lisa = ins.find(i => i.id === 'lisa');
-    if (lisa) {
+    if (lisa && mp.surplus - mp.hiDebt > 25) {
       const who = ps.filter(x => x.age < R.LISA.openBefore && !p.accounts.some(a => a.type === 'lisa' && a.owner === x.id));
       const by = Math.min(...who.map(x => year0 + R.LISA.openBefore - x.age));
       add(E.ownsHome(p) ? by : 'now', `Open Lifetime ISAs before turning 40: ${who.map(x => x.name).join(' and ')}`, `Even with £1, so the option stays open: up to £4,000 a year each then gets a 25% bonus until 50${E.ownsHome(p) ? ', usable from 60' : ', usable for a first home (up to £450,000) or from 60'}.`, ['Compare the options', () => openComparison('sacrifice-lisa')]);
@@ -1494,6 +1494,7 @@
 
   const GOAL_TYPE_LABEL = { netWorth: 'Reach an amount', debtFree: 'Mortgage-free', retire: 'Retire', passiveIncome: 'Passive income', emergency: 'Emergency fund' };
   let goalSolve = {};
+  let goalSolveKey = '';   // the plan the answers in goalSolve were worked out for
 
   // Goal types worth offering: one of each kind that only makes sense once, a retirement goal per
   // person, and financial independence only without a retirement goal (they answer the same question).
@@ -1768,7 +1769,7 @@
     setKids(card, h('div', { class: 'card-head' },
       h('div', {}, h('h2', {}, 'What would it take?'), h('p', { class: 'sub' }, { debtFree: 'The share of your surplus to overpay to clear it by the target year.', emergency: 'The cash buffer that covers it.', netWorth: 'How much less to spend each month before retirement.', passiveIncome: 'How much less to spend each month before retirement.', retire: res.retired ? 'What you could spend each year, at your chosen confidence.' : 'The earliest you could retire, and what you could spend, at your chosen confidence.' }[res.goal.type])),
       h('button', { type: 'button', class: 'btn small primary', onclick: e => solveGoal(e.currentTarget, res) }, 'Work it out')),
-    h('div', { class: 'goal-solve' }, goalSolve[res.goal.id] || null));
+    h('div', { class: 'goal-solve' }, (goalSolveKey === driversKey() && goalSolve[res.goal.id]) || null));
   }
 
   // Levers for this goal, with the effect on every goal (the trade-offs).
@@ -1918,7 +1919,7 @@
       ? `${allRetired() ? 'Today' : `When ${people().length > 1 ? 'you have both' : 'you have'} stopped work (${rows[tr].year})`} the plan has about ${fmtCompact(pot)} in savings, investments and pensions (today’s money), and spends about ${money(spend)} a year: ${(rate * 100).toFixed(1)}% of it. That is well below the 3–4% usually thought sustainable, so on average returns the savings keep growing through retirement. ${allRetired() ? 'You could spend more' : 'You could retire earlier or spend more'}: try the levers below.`
       : rate > 0.15
         ? `${allRetired() ? 'Today' : `When ${people().length > 1 ? 'you have both' : 'you have'} stopped work (${rows[tr].year})`} the plan has about ${fmtCompact(pot)} in savings, investments and pensions (today’s money), and spends about ${money(spend)} a year: on their own the savings would last about ${Math.max(0, pot / spend).toFixed(1)} year${pot / spend >= 0.95 && pot / spend < 1.05 ? '' : 's'}, so pensions and other income have to pay most of it.`
-        : `${allRetired() ? 'Today' : `When ${people().length > 1 ? 'you have both' : 'you have'} stopped work (${rows[tr].year})`} the plan has about ${fmtCompact(pot)} in savings, investments and pensions (today’s money), and spends about ${money(spend)} a year: ${(rate * 100).toFixed(1)}% of it. 3–4% a year is usually thought sustainable.`) : '');
+        : `${allRetired() ? 'Today' : `When ${people().length > 1 ? 'you have both' : 'you have'} stopped work (${rows[tr].year})`} the plan has about ${fmtCompact(pot)} in savings, investments and pensions (today’s money), and spends about ${money(spend)} a year: ${(rate * 100).toFixed(1)}% of it. 3–4% a year is usually thought sustainable.${rate > 0.045 && !allRetired() ? ' That is the first year, before the State Pension and any other pensions start; once they do, much less has to come from savings, which is why the chance can still be good.' : ''}`) : '');
     return h('section', { class: 'card' },
       h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Your retirement plan'), h('p', { class: 'sub' }, 'What the chance above assumes. Change it with the retirement questionnaire.')),
         h('button', { type: 'button', class: 'btn small', onclick: () => openGoalWizard(res.goal) }, 'Edit retirement plan')),
@@ -1973,6 +1974,7 @@
             apply('Use this spending', () => { p.strategy.retireSpending = spend.amount; for (const x of people()) x.retireAge += delta; })) : null);
       }
       goalSolve[g.id] = out;
+      goalSolveKey = driversKey();
       renderGoalTake(res);
     }, 30);
   }
@@ -4811,7 +4813,7 @@
         field('Paid now (£ a year)', moneyInput(...bind(item, 'amount'), { label: 'Pension paid now a year' }), 'Before tax, from the pension payslip or the yearly statement. It rises with prices each year, as most do.'),
         field('Tax', selectInput(taxOptions(item.kind), ...bind(item, 'tax'), { rerender: 'income' })),
         noteField(item)) : h('div', { class: 'fields' },
-        field('Whose', selectInput(ownerOptions(false), ...bind(item, 'owner'), { rerender: 'income' })),
+        field('Whose', selectInput(ownerOptions(false), () => item.owner, v => { if (v !== item.owner) { item.owner = v; item.dbSalary = 0; } }, { rerender: 'income' })),
         field('Scheme', selectInput(Object.entries(R.DB_SCHEMES).map(([k, v]) => [k, v.label]), ...bind(item, 'dbScheme'), { label: 'Scheme', rerender: 'income' }), 'Sets how much each year adds, the pension age and the cut for taking it early.'),
         field('Built up so far (£ a year)', moneyInput(...bind(item, 'amount'), { label: 'Pension built up so far' }), 'From the latest benefit statement.'),
         field('Added each year you keep working', moneyInput(...bind(item, 'dbAccrual'), { label: 'Pension added each year' }), `${scheme.label === 'Other' ? 'Most schemes add' : `${scheme.label} adds`} about 1/${scheme.accrual} of salary a year${pay ? ` (about ${money(payGross / scheme.accrual)} on ${money(payGross)})` : ''}.`),
@@ -6620,6 +6622,8 @@
     if (moved) impactBase = null;
     routeChrome(r);
     renderView();
+    // The guide's "only this part" view follows the page: off elsewhere, back on the step's own page.
+    if (moved && setupStep !== null) setTimeout(applySetupFocus, 0);
     scheduleDrivers();
     if (moved) window.scrollTo(0, 0);
     requestAnimationFrame(() => Object.values(charts).forEach(c => c.draw()));
@@ -7426,7 +7430,7 @@
       out.push({
         id: `pay${i}`, title: i === 0 ? 'Your pay' : `${qsName(i)}’s pay`,
         render: () => [
-          qsQ(`How ${qsDo(i)} know ${qsYour(i)} pay?`, qsChoices([
+          qsQ(i === 0 ? 'How do you know your pay?' : `How do you know ${qsName(i)}’s pay?`, qsChoices([
             ['takehome', 'What lands in the bank each month', 'After tax and everything else has come off'],
             ['salary', 'A yearly salary', 'Before tax, as on a contract or job advert'],
             ['hourly', 'By the hour', 'An hourly rate and usual hours'],
@@ -7450,7 +7454,9 @@
             'Most employees are put into one automatically.') : null,
           QS.works(x) && (x.workPension === 'yes' || x.workPension === 'unsure') ? qsNote(`Horizon will assume the usual amounts: ${QS.AUTO_ENROL.employee}% of pay from ${qsYou(i)} and ${QS.AUTO_ENROL.employer}% from the employer. If the payslip says something else, you can change it later.`, 'good') : null,
           qsQ(`Roughly how much is in ${qsYour(i)} pensions so far?`, qsMoney(() => x.pot, v => { x.pot = v; }, 'Pension pots so far'), 'All pension pots added together: this job and old ones. It is on the yearly statement or the provider’s app. Not sure? Leave it empty for now and add it when you find out; the answer will be on the cautious side.'),
-          qsNote('A pension that promises a fixed amount a year (NHS, council, teachers, some old jobs) and the State Pension are not typed here. Horizon assumes a full State Pension, and you can add the others afterwards.'),
+          qsQ(`Any pension that will pay ${qsYou(i)} a set amount a year?`, qsMoney(() => x.fixedPension, v => { x.fixedPension = v; }, 'Pension paying a set amount', { suffix: 'a year' }), 'From an old job, or the council, NHS, teachers’ or civil service scheme: the letter or yearly statement says “£X a year from age Y”. Add them together if there is more than one. Leave empty if none, or if you have lost the paperwork (gov.uk/find-pension-contact-details can trace it).'),
+          qsQ('If so, paid from what age?', qsNum(() => x.fixedAge || spa, v => { x.fixedAge = v; }, 'Age the set pension starts'), `As the letter says. Not sure? Leave it at ${spa}.`),
+          qsNote('The State Pension is not typed here: Horizon assumes a full one, and you can put your own forecast in afterwards.'),
         ],
         check: () => (QS.works(x) && !x.workPension ? 'Please choose Yes, No or Not sure.' : ''),
       });
@@ -7460,7 +7466,9 @@
       render: () => [
         qsQ('How much is in bank and savings accounts?', qsMoney(() => a.cash, v => { a.cash = v; }, 'Bank and savings'), 'All accounts added together, including Premium Bonds. If you are usually overdrawn, leave this empty: the overdraft goes in with debts.'),
         qsQ('Anything in ISAs or other investments?', qsMoney(() => a.investments, v => { a.investments = v; }, 'ISAs and investments'), 'Stocks and shares ISAs, funds, shares. Leave empty if none or not sure what this is.'),
-        qsQ('Any other money coming in each month?', qsMoney(() => a.otherIncome, v => { a.otherIncome = v; }, 'Other money coming in', { suffix: 'a month' }), 'Child Benefit, Universal Credit, maintenance, money from a lodger or grown-up child. Leave empty if none.'),
+        qsQ('Any money coming in each month because of children?', qsMoney(() => a.childMoney, v => { a.childMoney = v; }, 'Money for children', { suffix: 'a month' }), 'Child Benefit, maintenance from the other parent, the child part of Universal Credit. Leave empty if none.'),
+        qsQ('If so, how old is the youngest child?', qsNum(() => a.youngest, v => { a.youngest = v; }, 'Age of the youngest child'), 'That money is counted until the youngest turns 18, then it stops.'),
+        qsQ('Any other money coming in each month?', qsMoney(() => a.otherIncome, v => { a.otherIncome = v; }, 'Other money coming in', { suffix: 'a month' }), 'The rest of Universal Credit, money from a lodger or a grown-up child, help from family. Counted for good; you can give it an end date afterwards. Leave empty if none.'),
       ],
     });
     out.push({
@@ -7490,7 +7498,15 @@
           h('label', {}, 'Paid a month', qsMoney(() => d.pay, v => { d.pay = v; }, 'Paid a month')),
           h('button', { type: 'button', class: 'btn ghost icon-btn', 'aria-label': 'Remove this debt', onclick: () => { a.debts.splice(k, 1); renderQuick(true); } }, '✕'))),
         h('div', {}, h('button', { type: 'button', class: 'btn', id: 'qsAddDebt', onclick: () => { a.debts.push({ kind: 'card', owed: 0, pay: 0 }); renderQuick(true); } }, a.debts.length ? '+ Add another' : '+ Add something I owe')),
-        a.debts.length ? qsNote('Not sure of the interest rate? You do not need it: Horizon uses a typical rate for each kind, and you can correct it afterwards. For an overdraft, leave “Paid a month” empty. A student loan is not a debt to list here; it comes off pay and can be added afterwards.') : null,
+        a.debts.length ? qsNote('Not sure of the interest rate? You do not need it: Horizon uses a typical rate for each kind, and you can correct it afterwards. For an overdraft, or if you do not know the payment, leave “Paid a month” empty.') : null,
+        ...qsWho().map((x, i) => QS.works(x) ? (() => {
+          const box = h('input', { type: 'checkbox', checked: !!x.loan });
+          box.addEventListener('change', () => { x.loan = box.checked; renderQuick(true); });
+          const plan = QS.loanPlanFor(x.age || 40, a.region, ctx.startYear);
+          return h('div', { class: 'qs-q' },
+            h('label', { class: 'qs-check' }, box, h('span', {}, h('strong', {}, i === 0 ? 'A student loan comes off my pay' : `A student loan comes off ${qsName(i)}’s pay`), h('small', {}, 'It is repaid through pay, 9% of what is earned above a threshold, and written off after 25 to 40 years.'))),
+            x.loan ? qsQ('Roughly how much is left to repay?', qsMoney(() => x.loanOwed, v => { x.loanOwed = v; }, i === 0 ? 'Student loan left' : `${qsName(i)}’s student loan left`), `On the yearly statement or at gov.uk/sign-in-to-manage-your-student-loan-balance. Not sure? Leave it empty: Horizon uses a typical ${money(QS.LOAN_TYPICAL[plan])} and the rules for ${R.STUDENT_LOANS[plan].label.replace(/ \(.*/, '')}, the usual one for your age and where you live.`) : null);
+        })() : null),
       ],
     });
     out.push({
@@ -7534,7 +7550,12 @@
           h('p', { class: 'qs-lead' }, 'Tick what matters to you. Each becomes a goal that Horizon tracks, with a plain answer.'),
           check('retire', QS.works(first) ? `Can I stop working at ${first.retireAge || QS.spaOf(first, ctx.startYear)}?` : 'Will my money last?', 'Whether the money lasts for the rest of your life.'),
           check('emergency', 'Do I have enough set aside for emergencies?', 'Three months of spending in cash, for a lost job or a broken boiler.'),
-          check('save', 'Can I save up for something big?', 'A deposit for a home, a car, a wedding.'),
+          a.home === 'rent' || a.home === 'family' ? check('buy', a.partner ? 'Could we buy a home?' : 'Could I buy a home?', 'Horizon works out the deposit and the mortgage, stops the rent that year, and shows what it does to everything else.') : null,
+          g.buy && (a.home === 'rent' || a.home === 'family') ? h('div', { class: 'qs-person' },
+            h('div', { class: 'qs-row' },
+              qsQ('What does that kind of home cost today?', qsMoney(() => g.buyPrice, v => { g.buyPrice = v; }, 'Home price today'), 'Look at what similar homes nearby sell for. Horizon assumes a 10% deposit and a 30-year mortgage.'),
+              qsQ('In which year?', qsNum(() => g.buyYear || ctx.startYear + 5, v => { g.buyYear = v; }, 'Year to buy')))) : null,
+          check('save', 'Can I save up for something big?', 'A car, a wedding, a trip.'),
           g.save ? h('div', { class: 'qs-person' },
             qsQ('What for?', qsText(() => g.saveName, v => { g.saveName = v; }, 'Saving for')),
             h('div', { class: 'qs-row' },
@@ -7542,7 +7563,7 @@
               qsQ('By which year?', qsNum(() => g.saveYear || ctx.startYear + 5, v => { g.saveYear = v; }, 'Year')))) : null,
         ];
       },
-      check: () => (a.goals.save && !(a.goals.saveAmount > 0) ? 'Please type how much you want to save up, or untick that box.' : ''),
+      check: () => (a.goals.buy && (a.home === 'rent' || a.home === 'family') && !(a.goals.buyPrice > 0) ? 'Please type roughly what the home would cost, or untick that box.' : a.goals.save && !(a.goals.saveAmount > 0) ? 'Please type how much you want to save up, or untick that box.' : ''),
     });
     return out;
   }
@@ -7709,8 +7730,31 @@
     if (ws.guides.setup && ws.guides.setup.answers) { const { open, ...rest } = ws.guides.setup.answers; ws.guides.setup = { ...ws.guides.setup, answers: rest }; save(); }
     document.body.classList.remove('setup-open');
     for (const el of $$('.setup-focus')) el.classList.remove('setup-focus');
+    applySetupFocus();
     setupPanel().hidden = true;
     renderNotifications();
+  }
+
+  // While a step of the guide is open, the page shows only the part that step is about: everything
+  // beside it (charts, other sections, the page's own menus) is put away until the step changes.
+  let setupWhole = false;   // "show the whole page" was asked for
+  function applySetupFocus() {
+    for (const el of $$('.setup-away')) el.classList.remove('setup-away');
+    for (const el of $$('.setup-path')) el.classList.remove('setup-path');
+    document.body.classList.remove('setup-only');
+    if (setupStep === null || setupWhole) return;
+    const st = SETUP_STEPS[setupStep], t = st.target && $(st.target), main = $('main');
+    if (!t || !main || !main.contains(t)) return;
+    // Only on the step's own page (a button in the guide can lead to another), and never while
+    // something outside that part is open to be filled in.
+    if (route.tab + (route.sub && route.tab === 'finances' ? `/${route.sub}` : '') !== st.route) return;
+    if ($$('[data-editing]', main).some(el => !t.contains(el))) return;
+    document.body.classList.add('setup-only');
+    for (let el = t; el && el !== main; el = el.parentElement) {
+      if (el !== t) el.classList.add('setup-path');
+      // The page's own menu stays, so it is always possible to walk away from the step.
+      for (const sib of el.parentElement.children) if (sib !== el && sib.id !== 'moneyNav' && !sib.querySelector('#moneyNav')) sib.classList.add('setup-away');
+    }
   }
 
   function goSetupStep(i) {
@@ -7724,7 +7768,10 @@
     setTimeout(() => {
       for (const el of $$('.setup-focus')) el.classList.remove('setup-focus');
       const t = st.target && $(st.target);
-      if (t) { t.classList.add('setup-focus'); t.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+      if (t) t.classList.add('setup-focus');
+      applySetupFocus();
+      if (t) t.scrollIntoView({ block: 'start', behavior: setupWhole ? 'smooth' : 'auto' });
+      if (t && !setupWhole) window.scrollTo(0, 0);
     }, 80);
   }
 
@@ -7733,13 +7780,16 @@
     const el = setupPanel();
     const st = SETUP_STEPS[setupStep];
     const n = SETUP_STEPS.length;
+    setTimeout(applySetupFocus, 120);
     el.hidden = false;
     setKids(el,
       h('div', { class: 'st-head' },
         h('div', {}, h('span', { class: 'eyebrow' }, `Get started · step ${setupStep + 1} of ${n}`), h('h2', { id: 'setupTitle' }, st.title)),
         h('button', { type: 'button', class: 'btn ghost icon-btn small', 'aria-label': 'Close the guide (carry on later)', title: 'Close (carry on later from Data → Set up my plan)', onclick: closeSetup }, '✕')),
       h('div', { class: 'st-bar' }, h('i', { style: `width:${((setupStep + 1) / n) * 100}%` })),
-      h('div', { class: 'st-body', id: 'setupBody' }, st.render()),
+      h('div', { class: 'st-body', id: 'setupBody' }, st.render(),
+        st.target ? h('p', { class: 'st-whole' }, setupWhole ? 'The whole page is showing. ' : 'The page beside this guide shows only the part this step is about. ',
+          h('button', { type: 'button', class: 'linkish', id: 'setupWhole', onclick: () => { setupWhole = !setupWhole; applySetupFocus(); renderSetup(); } }, setupWhole ? 'Show only this part' : 'Show the whole page')) : null),
       h('div', { class: 'st-foot' },
         h('button', { type: 'button', class: 'btn small', id: 'setupBack', disabled: setupStep === 0, onclick: () => goSetupStep(setupStep - 1) }, 'Back'),
         h('select', { class: 'st-jump', 'aria-label': 'Go to a step', onchange: e => goSetupStep(Number(e.target.value)) },

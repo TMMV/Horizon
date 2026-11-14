@@ -329,7 +329,7 @@
     }
 
     // 6. Mortgage: overpay or invest?
-    const debt = plan.accounts.find(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
+    const debt = plan.accounts.find(a => a.type === 'debt' && a.balance > 0 && !a.excluded && a.rate < 8);   // dearer debts are cleared first anyway (see 1b)
     if (debt) {
       const ret = proj.pre.econ.ret[0] * 100;
       if (debt.rate >= ret - 1) out.push({ id: 'overpay', tone: 'tip', title: `Overpaying the mortgage earns a sure ${debt.rate}%`, text: `That is close to the ${ret.toFixed(1)}% expected from investing, without the risk. Scenarios compares the two on every goal.`, action: 'compare:overpay-invest' });

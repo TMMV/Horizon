@@ -12,6 +12,9 @@
   // Someone still to retire (work-related ideas make no sense once everyone has stopped).
   const working = p => people(p).some(x => x.retireAge > x.age);
   const hasDebt = p => p.accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
+  // What is left over a month this year (worked out once for each plan asked about).
+  const spareOf = new WeakMap();
+  const spare = p => { if (!spareOf.has(p)) spareOf.set(p, E.monthlyPlan(E.project(p)).surplus); return spareOf.get(p); };
   // The home lived in now: owned, not being sold, the most valuable.
   const ownHome = p => p.accounts.filter(a => a.type === 'property' && !a.excluded && !(a.buyYear >= p.startYear) && !a.sellYear).sort((a, b) => b.balance - a.balance)[0] || null;
   const fixedDebt = p => p.accounts.find(a => a.type === 'debt' && a.balance > 0 && a.fixedUntil >= p.startYear);
@@ -87,9 +90,9 @@
       apply: p => { p.strategy.spendNowPct = Math.round(p.strategy.spendNowPct * 0.9); } },
     { key: 'spendLessRetired', kind: 'choice', label: 'Spend 10% less in retirement', applies: p => p.strategy.retireSpending > 0 || retirementSpending(p) > 0,
       apply: p => { p.strategy.retireSpending = Math.round((p.strategy.retireSpending > 0 ? p.strategy.retireSpending : retirementSpending(p)) * 0.9); } },
-    { key: 'pension', kind: 'choice', label: '£200 a month more into pensions', applies: p => people(p)[0].retireAge > people(p)[0].age,
+    { key: 'pension', kind: 'choice', label: '£200 a month more into pensions', applies: p => people(p)[0].retireAge > people(p)[0].age && spare(p) >= 200,
       apply: p => { people(p)[0].extraPension += 200; } },
-    { key: 'overpay', kind: 'choice', label: 'Overpay the mortgage with half the surplus', applies: p => hasDebt(p) && p.strategy.overpayPct < 50,
+    { key: 'overpay', kind: 'choice', label: 'Overpay the mortgage with half the surplus', applies: p => p.accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded && a.rate < 8) && p.strategy.overpayPct < 50,
       apply: p => { p.strategy.overpayPct = 50; } },
     { key: 'weakMarkets', kind: 'risk', label: 'Shares return 2 points a year less', applies: () => true,
       apply: p => { p.assumptions.stockReturn -= 2; } },

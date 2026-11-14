@@ -2396,3 +2396,74 @@ test.describe('the dossier', () => {
     expect(problems).toEqual([]);
   });
 });
+
+test.describe('the guide beside the page', () => {
+  test('each step shows only the part of the page it is about, and the whole page on request', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => window.__horizon.openSetup(1));
+    await expect(page.locator('#setupPanel')).toBeVisible();
+    await expect(page.locator('#sec-household')).toBeVisible();
+    // The markets section and the charts beside it are put away while this step is open.
+    await expect(page.locator('#sec-market')).toBeHidden();
+    await expect(page.locator('#setupPanel')).toContainText('shows only the part this step is about');
+    await page.click('#setupWhole');
+    await expect(page.locator('#sec-market')).toBeVisible();
+    await page.click('#setupWhole');
+    await expect(page.locator('#sec-market')).toBeHidden();
+    // Another step, another part.
+    await page.click('#setupNext');
+    await expect(page.locator('#sec-income')).toBeVisible();
+    await expect(page.locator('#sec-household')).toBeHidden();
+    // Closing the guide brings everything back.
+    await page.locator('#setupPanel button[aria-label^="Close the guide"]').click();
+    await expect(page.locator('#setupPanel')).toBeHidden();
+    await go(page, 'finances/assumptions');
+    await expect(page.locator('#sec-market')).toBeVisible();
+    await expect(page.locator('#sec-household')).toBeVisible();
+    expect(await page.locator('.setup-away').count()).toBe(0);
+    expect(problems).toEqual([]);
+  });
+
+  test('the quick start asks about a set pension, children, a student loan and a home to buy', async ({ page }) => {
+    const { problems } = await openApp(page, '', { quick: true });
+    const body = page.locator('#qsBody');
+    const fill = (label, v) => body.locator(`input[aria-label="${label}"]`).fill(String(v));
+    const pick = t => body.locator('.qs-choice', { hasText: t }).first().click();
+    const next = () => page.click('#qsNext');
+    await page.click('#qsStart');
+    await fill('Your age', 46);
+    await next();
+    await pick('By the hour');
+    await fill('Hourly rate', 12.9);
+    await fill('Hours a week', 38);
+    await next();
+    await pick('Yes');
+    await fill('Pension paying a set amount', 3200);
+    await fill('Age the set pension starts', 65);
+    await next();
+    await fill('Money for children', 510);
+    await fill('Age of the youngest child', 15);
+    await next();
+    await pick('Renting');
+    await fill('Rent a month', 520);
+    await next();
+    await body.locator('.qs-check', { hasText: 'A student loan comes off my pay' }).click();
+    await expect(body).toContainText('Plan 4');
+    await next();
+    await pick('what is left at the end');
+    await fill('Left over a month', 100);
+    await next();
+    await body.locator('.qs-check', { hasText: 'Could I buy a home?' }).click();
+    await fill('Home price today', 130000);
+    await next();
+    await expect(page.locator('#quickDlg')).toBeHidden();
+    const plan = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    expect(plan.income.find(i => i.kind === 'dbpension').amount).toBe(3200);
+    expect(plan.income.find(i => i.name === 'Money for the children').toYear).toBe(plan.startYear + 3);
+    expect(plan.household.people[0].loanPlan).toBe('plan4');
+    const home = plan.accounts.find(a => a.type === 'property');
+    expect(home.buyYear).toBe(plan.startYear + 5);
+    expect(plan.expenses.find(e => e.name === 'Rent').toYear).toBe(home.buyYear);
+    expect(problems).toEqual([]);
+  });
+});

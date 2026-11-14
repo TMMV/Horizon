@@ -1716,7 +1716,7 @@ h2 > .info-btn, h2 > .tip-btn { width: 22px; height: 22px; }
 
 /* ---- Get started: the guide panel beside the pages */
 .setup-panel { position: fixed; top: 76px; right: 16px; bottom: 16px; width: 380px; z-index: 60; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18); overflow: hidden; }
-body.setup-open main, body.setup-open .tabs { margin-right: 404px; }
+body.setup-open main, body.setup-open .tabs, body.setup-open .example-banner { margin-right: 404px; }
 .st-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 14px 16px 8px; }
 .st-head h2 { margin: 2px 0 0; font-size: 1.15rem; }
 .st-bar { height: 4px; background: var(--surface-2); margin: 0 16px; border-radius: 2px; overflow: hidden; }
@@ -1741,6 +1741,10 @@ body.setup-open main, body.setup-open .tabs { margin-right: 404px; }
 .st-have .glyph { color: var(--good, var(--s3)); flex: none; }
 .st-foot { display: flex; gap: 8px; align-items: center; padding: 10px 16px 14px; border-top: 1px solid var(--border); }
 .st-jump { flex: 1; min-width: 0; font-size: 0.82rem; }
+body.setup-only .setup-away { display: none !important; }
+body.setup-only .setup-path { display: block !important; max-width: 760px; }
+body.setup-only .setup-focus { outline: none; }
+.st-whole { margin: 4px 0 0; font-size: 0.82rem; color: var(--muted); }
 .setup-focus { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 14px; transition: outline-color 0.3s; }
 @media (max-width: 900px) {
   .setup-panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 55vh; }

@@ -86,3 +86,37 @@ test('a couple who own with a mortgage: salary before tax, pay by the hour, a pa
   assert.equal(q.household.people[1].retireAge, 66);
   assert.equal(q.income.find(i => i.owner === 'p2').amount, 400);
 });
+
+test('a set pension from a letter, money for the children, a home to buy and a student loan', () => {
+  const a = Q.blank('scotland');
+  Object.assign(a.people[0], { name: 'Mara', age: 46, pay: 'hourly', hourly: 12.9, hours: 38, workPension: 'yes', fixedPension: 3200, fixedAge: 65, loan: true });
+  a.childMoney = 510; a.youngest = 15; a.otherIncome = 100;
+  a.home = 'rent'; a.rent = 520; a.spending = 900;
+  a.goals = { retire: true, emergency: false, save: false, buy: true, buyPrice: 130000, buyYear: 2031 };
+  const p = Q.build(a, ctx);
+  // The letter's amount at the letter's age, not cut.
+  const db = p.income.find(i => i.kind === 'dbpension');
+  assert.deepEqual([db.amount, db.startAge, db.dbScheme, db.owner], [3200, 65, 'other', 'p1']);
+  assert.equal(E.dbEarly(db, p.household.people[0]).factor, 1);
+  // Money for the children stops when the youngest is 18; the rest carries on.
+  const kids = p.income.find(i => i.name === 'Money for the children');
+  assert.deepEqual([kids.amount, kids.endRef, kids.toYear], [510, 'year', 2029]);
+  assert.ok(E.incomeAfterCosts(kids, p, 2) > 0 && E.incomeAfterCosts(kids, p, 3) === 0);
+  assert.equal(p.income.find(i => i.name === 'Other money coming in').endRef, 'end');
+  // The home is bought in 2031 and the rent stops then.
+  const home = p.accounts.find(c => c.type === 'property');
+  assert.deepEqual([home.balance, home.buyYear, home.deposit], [130000, 2031, 10]);
+  const rent = p.expenses.find(e => e.name === 'Rent');
+  assert.deepEqual([rent.endRef, rent.toYear], ['year', 2031]);
+  assert.ok(E.streamAt(rent, p, 4) > 0 && E.streamAt(rent, p, 5) === 0);
+  // The student loan: Scotland's plan, a typical balance when none is given.
+  const x = p.household.people[0];
+  assert.deepEqual([x.loanPlan, x.loanBalance], ['plan4', Q.LOAN_TYPICAL.plan4]);
+  assert.ok(x.loanEndYear > 2026);
+  assert.equal(Q.loanPlanFor(20, 'ruk', 2026), 'plan5');
+  assert.equal(Q.loanPlanFor(30, 'ruk', 2026), 'plan2');
+  assert.equal(Q.loanPlanFor(50, 'ruk', 2026), 'plan1');
+  assert.deepEqual(E.validatePlan(p), []);
+  // An owner is not offered a home to buy.
+  assert.equal(Q.build({ ...a, home: 'own', homeValue: 200000 }, ctx).accounts.filter(c => c.type === 'property').length, 1);
+});
