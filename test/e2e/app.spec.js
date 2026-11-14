@@ -2620,4 +2620,19 @@ test.describe('the guide beside the page', () => {
     expect(plan.accounts.find(a => a.name === 'Mortgage on the rented-out property').rate).toBe(5.23);
     expect(problems).toEqual([]);
   });
+
+  test('a goal shows one chance: “Try changes” starts from the figure at the top of the page', async ({ page }) => {
+    const { problems } = await openApp(page);
+    const goals = await page.evaluate(() => window.__horizon.model.goals.map(r => ({ id: r.goal.id, type: r.goal.type, title: r.title, pc: Math.round(r.probability * 100) })));
+    const ret = goals.find(g => g.type === 'retire');
+    await page.evaluate(id => window.__horizon.navigate(`goal/${id}`), ret.id);
+    const table = page.locator('#gpImpact table');
+    await expect(table).toBeVisible({ timeout: 20000 });
+    for (const g of goals) await expect(table.locator('tr', { hasText: g.title }).locator('td').nth(1)).toContainText(`${g.pc}%`);
+    // The mortgage goal's tile says the same year as its summary.
+    const debt = goals.find(g => g.type === 'debtFree');
+    await page.evaluate(id => window.__horizon.navigate(`goal/${id}`), debt.id);
+    await expect(page.locator('main')).toContainText(/nothing is owed from 20\d\d/);
+    expect(problems).toEqual([]);
+  });
 });

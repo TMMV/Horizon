@@ -238,7 +238,7 @@
       const b0 = d.bal[t] || 0, b1 = d.bal[t + 1] || 0;
       if (b0 <= 0.5 && b1 <= 0.5) return;
       debts.push(line(acc.name, -b1, b0 <= 0.5 ? 'Taken out this year' : b1 <= 0.5 ? `Paid off this year (owed ${gbp(b0)} at the start)` : `Down from ${gbp(b0)} at the start of the year`));
-      if (b0 > 0.5 && b1 <= 0.5) changes.push(`${acc.name} is paid off this year. Its payments are free for saving from then on.`);
+      if (b0 > 0.5 && b1 <= 0.5) changes.push(`${acc.name} is paid off this year: nothing is owed on it from ${r.year + 1}, and its payments are free for saving from then on.`);
       if (acc.fixedUntil === r.year) changes.push(`The fixed rate on ${acc.name} ends this year${acc.rateAfterFix !== null && acc.rateAfterFix !== undefined ? `; the plan assumes ${acc.rateAfterFix}% afterwards` : ''}. Shop around for a new deal three to six months before.`);
     });
     if (debts.length && r.debtInterest > 0.5) debts.push(line('Interest charged this year', -r.debtInterest, 'Part of the payments above goes on this'));
@@ -320,7 +320,7 @@
 
     // Dates that matter, in order: milestones, events, debts ending, fixes ending.
     const timeline = [];
-    for (const m of E.milestones(plan, proj)) timeline.push({ year: m.year, label: m.label });
+    for (const m of E.milestones(plan, proj)) timeline.push({ year: m.year, label: m.kind === 'debt' && m.label === 'Mortgage-free' && m.year > plan.startYear ? `Mortgage-free from this year (the last payment is during ${m.year - 1})` : m.label });
     for (const e of plan.events) timeline.push({ year: e.year, label: `${e.name} (${gbp(e.amount)} in today’s money)` });
     for (const a of plan.accounts) if (a.type === 'debt' && a.fixedUntil >= plan.startYear) timeline.push({ year: a.fixedUntil, label: `Fixed rate on ${a.name} ends` });
     timeline.sort((a, b) => a.year - b.year);

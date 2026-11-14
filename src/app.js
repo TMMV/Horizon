@@ -1281,7 +1281,7 @@
       }
     }
     const dEnd = rows.findIndex((r, t) => t > 0 && t < N && rows[0].debt > 0.5 && r.debt <= 0.5);
-    if (dEnd > 0) add(rows[dEnd].year, `${cap(debtWord())} paid off`, `The payments become savings. The plan then puts ${where(rows[dEnd])} (in ${rows[dEnd].year} pounds).`, go('Set amounts', 'finances/saving'));
+    if (dEnd > 0) add(rows[dEnd].year, `No more ${debtWord()} payments`, `The last one was paid during ${rows[dEnd].year - 1}. The payments become savings: the plan then puts ${where(rows[dEnd])} (in ${rows[dEnd].year} pounds).`, go('Set amounts', 'finances/saving'));
     const giaStart = rows.findIndex((r, t) => t > 0 && t < N && r.toGia > 100);
     const fromSale = giaStart > 0 && (rows[giaStart].propSold || 0) > 0.5;
     if (fromSale) add(rows[giaStart].year, `The sale puts ${money(rows[giaStart].propSold)} into savings`, `Up to ${money(p.strategy.isaAllowance * ps.length)} of it can go into ISAs that year; the rest goes into a general investment account, where gains are taxed. Each April after, move ${money(p.strategy.isaAllowance * ps.length)} of it into ISAs (“Bed and ISA”).`, go('Saving & investing', 'finances/saving'));
@@ -1460,7 +1460,7 @@
   function goalWhen(res) {
     const g = res.goal;
     if (g.type === 'retire') return res.retired ? 'Retired' : `Retire ${res.expectedYear}`;
-    if (g.type === 'debtFree') return !plan().accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded) ? 'Nothing owed' : res.expectedYear ? `Paid off ${res.expectedYear}` : 'Not paid off in the plan';
+    if (g.type === 'debtFree') return !plan().accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded) ? 'Nothing owed' : res.expectedYear ? `Nothing owed from ${res.expectedYear}` : 'Not paid off in the plan';
     if (g.type === 'emergency') return res.expectedYear ? `Covered from ${res.expectedYear}` : 'Not covered yet';
     return res.expectedYear ? `Expected ${res.expectedYear}` : 'Not reached on average';
   }
@@ -1869,7 +1869,7 @@
     const changed = L.changed(plan(), gp.values);
     const before = baseComparison();
     const after = changed.length ? evaluatePlan(L.apply(plan(), gp.values)) : before;
-    setKids($('#gpImpact'), impactTable({ before, after }));
+    setKids($('#gpImpact'), impactTable({ before, after }, undefined, { goals: model.goals, success: model.mc.successRate }));
     $('#gpStatus').textContent = changed.length
       ? `${changed.length} change${changed.length === 1 ? '' : 's'}: ${changed.map(d => `${d.label} ${fmtLever(d, gp.values[d.key])}`).join(' · ')}.`
       : `Move a slider to compare. ${EXPLORE_RUNS} simulated futures each, same markets for both.`;
@@ -2100,18 +2100,25 @@
     return { text: `${good ? '▲' : '▼'} ${fmt(after, before)}`, cls: good ? 'pos' : 'neg' };
   };
 
-  function impactTable(cmp, labels = ['Your plan', 'With changes']) {
+  // `live`: the chances the page itself shows for the plan as it is (worked out over more
+  // futures than a comparison has time for). The table then starts from those and applies the
+  // change the comparison found, so the same goal never shows two different chances.
+  function impactTable(cmp, labels = ['Your plan', 'With changes'], live = null) {
     const { before, after } = cmp;
+    const pair = (b, a, shown) => (shown === undefined || shown === null ? [b, a] : [shown, Math.max(0, Math.min(1, shown + (a - b)))]);
     const rows = after.goals.map(a => {
       const b = before.goals.find(x => x.goal.id === a.goal.id) || { probability: 0, expectedYear: null };
+      const lv = live && live.goals ? live.goals.find(x => x.goal.id === a.goal.id) : null;
+      const [pb, pa] = pair(b.probability || 0, a.probability || 0, lv ? lv.probability || 0 : null);
       const when = r => (r.goal.type === 'retire' ? '' : r.expectedYear ? ` · ${r.expectedYear}` : ' · not reached');
       return {
-        cells: [h('span', { class: 'goal-name' }, h('i', { class: 'key dot', style: `--key:${cssVar(goalColor(a.goal))}` }), a.title), `${pct(b.probability)}${when(b)}`, `${pct(a.probability)}${when(a)}`,
-          deltaCell(Math.round(b.probability * 100), Math.round(a.probability * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} points`)],
+        cells: [h('span', { class: 'goal-name' }, h('i', { class: 'key dot', style: `--key:${cssVar(goalColor(a.goal))}` }), a.title), `${pct(pb)}${when(b)}`, `${pct(pa)}${when(a)}`,
+          deltaCell(Math.round(pb * 100), Math.round(pa * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} points`)],
       };
     });
     const sb = before.summary, sa = after.summary;
-    rows.push({ cls: 'sep', cells: ['Chance the money lasts', pct(sb.success), pct(sa.success), deltaCell(Math.round(sb.success * 100), Math.round(sa.success * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} points`)] });
+    const [lb, la] = pair(sb.success, sa.success, live ? live.success : null);
+    rows.push({ cls: 'sep', cells: ['Chance the money lasts', pct(lb), pct(la), deltaCell(Math.round(lb * 100), Math.round(la * 100), (x, y) => x > y, (x, y) => `${Math.abs(x - y)} points`)] });
     rows.push({ cells: [`Net worth at retirement (today's £)`, money(sb.netWorthAtRetire), money(sa.netWorthAtRetire), deltaCell(Math.round(sb.netWorthAtRetire), Math.round(sa.netWorthAtRetire), (x, y) => x > y, (x, y) => money(Math.abs(x - y)))] });
     rows.push({ cells: ['Mortgage-free', sb.debtFree ? String(sb.debtFree) : '—', sa.debtFree ? String(sa.debtFree) : '—', deltaCell(sb.debtFree, sa.debtFree, (x, y) => x < y, (x, y) => `${Math.abs(x - y)} yrs`)] });
     rows.push({ cells: ['Invest each month now', money(sb.monthly.invest), money(sa.monthly.invest), deltaCell(Math.round(sb.monthly.invest), Math.round(sa.monthly.invest), (x, y) => x > y, (x, y) => money(Math.abs(x - y)))] });
@@ -4062,7 +4069,7 @@
     const p = plan();
     const markers = p.events.filter(e => e.kind === 'expense' && e.year >= xs[0] && e.year <= xs[xs.length - 1]).map(e => ({ x: e.year, label: e.name, color: '--s3' }));
     const debtEnd = s.find((x, i) => i > 0 && s[0].mortgage > 0.5 && x.mortgage <= 0.5);
-    if (debtEnd) markers.push({ x: debtEnd.year, label: `${cap(debtWord())} paid off`, color: '--s8' });
+    if (debtEnd) markers.push({ x: debtEnd.year, label: `No more ${debtWord()} payments`, color: '--s8' });
     for (const x of people()) { const y = p.startYear + x.retireAge - x.age; if (y <= xs[xs.length - 1]) markers.push({ x: y, label: `${people().length > 1 ? `${x.name} retires` : 'Retire'}`, color: '--muted' }); }
     const m = x => money(x / 12);
     const out0 = now.everyday + now.future + now.oneOff + now.mortgage;

@@ -2307,7 +2307,7 @@
         res.expectedYear = debtFreeYear(proj);
         res.probability = mc.debtFreeByYear[t];
         res.byYear = mc.debtFreeByYear;
-        res.summary = res.expectedYear ? `Expected to be paid off in ${res.expectedYear}.` : 'Not paid off within the plan.';
+        res.summary = res.expectedYear ? (res.expectedYear > plan.startYear ? `Expected to be paid off during ${res.expectedYear - 1}, so nothing is owed from ${res.expectedYear}.` : 'Nothing is owed.') : 'Not paid off within the plan.';
       } else {
         const who = retiree(plan, goal);
         const delta = goal.age - who.retireAge;
@@ -2642,7 +2642,7 @@
         const first = project(p).rows[0].overpay / 12;
         add('overpay', `Overpay about ${gbp(first)} a month now (${r.overpayPct}% of what is left over each month, rising as that does).${r.capNeeded ? ' That is more than the 10% of the balance a year most lenders allow without a charge: check with yours.' : ''}`);
       }
-      if (res.expectedYear && res.expectedYear > goal.year) add('date', `Allow until ${res.expectedYear}: that is when the plan clears it as things are.`);
+      if (res.expectedYear && res.expectedYear > goal.year) add('date', `Allow until ${res.expectedYear}: as things are, the plan clears it during ${res.expectedYear - 1}.`);
       else add('none', `Even overpaying with everything left over does not clear it by ${goal.year}: a lump sum or a later year is needed.`);
     } else if (goal.type === 'emergency') {
       const r = solveEmergency(plan, goal);

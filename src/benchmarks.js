@@ -333,7 +333,7 @@
     if (debt) {
       const ret = proj.pre.econ.ret[0] * 100;
       if (debt.rate >= ret - 1) out.push({ id: 'overpay', tone: 'tip', title: `Overpaying the mortgage earns a sure ${debt.rate}%`, text: `That is close to the ${ret.toFixed(1)}% expected from investing, without the risk. Scenarios compares the two on every goal.`, action: 'compare:overpay-invest' });
-      else out.push({ id: 'overpay', tone: 'info', title: `Investing is expected to beat overpaying (${ret.toFixed(1)}% vs ${debt.rate}%)`, text: `Overpaying is a guaranteed ${debt.rate}% and clears the debt sooner. Scenarios compares the two on every goal.`, action: 'compare:overpay-invest' });
+      else out.push({ id: 'overpay', tone: 'info', title: `Investing is expected to beat overpaying (${ret.toFixed(1)}% vs ${debt.rate}%)`, text: `${plan.strategy.overpayPct > 0 ? `Your plan overpays (${plan.strategy.overpayPct}% of what is left over)${plan.goals.some(g => g.type === 'debtFree') ? ', to reach your mortgage goal' : ''}: that is a choice for certainty over the likely higher return. ` : ''}Overpaying is a guaranteed ${debt.rate}% and clears the debt sooner. Scenarios compares the two on every goal.`, action: 'compare:overpay-invest' });
       if (debt.fixedUntil && debt.fixedUntil <= plan.startYear + 1) {
         const after = debt.rateAfterFix === null ? `the same ${debt.rate}%` : `${debt.rateAfterFix}%`;
         out.push({ id: `remortgage-${debt.fixedUntil}`, tone: 'tip', title: `Mortgage fix ends ${debt.fixedUntil}`, text: `The plan assumes ${after} afterwards. Compare deals about six months before to avoid the lender’s standard variable rate. Scenarios shows what a lower or higher rate does to each goal.`, action: 'compare:mortgage-rate' });

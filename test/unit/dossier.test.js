@@ -153,3 +153,15 @@ test('every later year says what to set up, against the year before; the sheet g
   assert.match(c.text, /£500 from cash and £1,500 from pension pots \(£1,000 a month last year\)/);
   assert.equal(D.yearAmounts({}, {}, 0), null);
 });
+
+test('when a mortgage ends is said one way: paid off during a year, nothing owed from the next', () => {
+  const plan = E.normalizePlan(E.defaultWorkspace().scenarios[0].plan);
+  const { d, proj } = doc(plan);
+  const free = E.debtFreeYear(proj);
+  const paid = d.years.find(y => y.changes.some(c => /Mortgage is paid off this year/.test(c)));
+  assert.equal(paid.year, free - 1);
+  assert.ok(paid.changes.some(c => c.includes(`nothing is owed on it from ${free}`)));
+  assert.ok(d.dates.some(x => x.year === free && x.label === `Mortgage-free from this year (the last payment is during ${free - 1})`));
+  const goal = E.evaluateGoals(plan, proj, E.monteCarlo(plan, 120, 7), { runs: 120, seed: 7 }).find(r => r.goal.type === 'debtFree');
+  assert.equal(goal.summary, `Expected to be paid off during ${free - 1}, so nothing is owed from ${free}.`);
+});
