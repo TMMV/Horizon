@@ -5065,6 +5065,9 @@
           item.tax === 'flat' ? field('Tax rate', numInput(...bind(item, 'taxRate'), { step: 1, min: 0, max: 100, suffix: '%' }), 'E.g. tax withheld abroad.') : null,
           item.kind === 'rental' ? costFields : null),
         item.kind === 'rental' && hasCosts ? h('p', { class: 'hint calc', 'data-calc': item.id }, incomeWorking(item, p)) : null,
+        // Money paid only once (a redundancy payment, an inheritance, a sale) typed as income would come in every year.
+        item.kind === 'other' ? h('p', { class: 'hint once-hint' }, 'Paid only once, like a redundancy payment, an inheritance or a sale? As income it would come in every year. ',
+          h('button', { type: 'button', class: 'btn small', 'data-once': item.id, onclick: () => incomeToOneOff(item) }, 'Make it a one-off amount')) : null,
         isSalary ? payProgression(item, owner) : null,
         more(`income-${item.id}`, 'More options',
           h('div', { class: 'fields' },
@@ -7089,6 +7092,18 @@
   // Adding a one-off event, an expense or other items already filled in, then opened to check.
   const addEventOf = extra => { const ev = addEventItem(); Object.assign(ev, extra); renderSection('events'); refresh(); return ev; };
   const addCostOf = extra => addExpenseItem(extra);
+  // An income that is really paid once becomes a one-off amount received, in the year it starts (or next year).
+  function incomeToOneOff(item) {
+    const p = plan(), year = item.startRef === 'year' && item.fromYear >= p.startYear ? item.fromYear : p.startYear + 1;
+    const amount = Math.round(item.amount);
+    p.income.splice(p.income.indexOf(item), 1);
+    const ev = addEventItem();
+    Object.assign(ev, { name: item.name && !/^(other income|new income)$/i.test(item.name) ? item.name : 'Money received', kind: 'income', amount, year, note: item.tax === 'uk' ? 'Before tax: check what is taxed (the first £30,000 of a redundancy payment is not)' : '' });
+    renderSection('income');
+    renderSection('events');
+    refresh();
+    toast(`“${ev.name}” is now a one-off amount of ${money(amount)} received in ${year}, under Spending → One-off events, where you can change the year. Amounts there are taken as after tax.`);
+  }
   // A baby next year: a year of leave on half pay for `pid`, the pay afterwards as its own line,
   // nursery, everyday costs and Child Benefit, all opened or named so they can be corrected.
   function babyChange(pid) {
@@ -7098,7 +7113,7 @@
     for (const id of r.added) editing.add(id);
     renderPlan();
     refresh();
-    toast(`A baby in ${r.year}: ${who.name === 'You' ? 'your' : `${who.name}’s`} pay is halved for that year of leave and has its own line for afterwards (lower it for fewer days a week). Nursery, everyday costs and Child Benefit are added under Spending and Income. Change the year, the pay and the costs to yours.`);
+    toast(`A baby in ${r.year}: ${who.name === 'You' ? 'your' : `${who.name}’s`} pay is halved for that year of leave and has its own line for afterwards (lower it for fewer days a week). Added with typical amounts: nursery £1,100 a month for three years from ${r.year + 1}, everyday costs £350 a month to 18, and Child Benefit. Change the year, the pay and the costs to yours under Income and Spending.`);
     return r;
   }
   // A change of job (or a redundancy): the person's pay stops part-way through next year and a copy
@@ -7730,6 +7745,7 @@
           const plan = QS.loanPlanFor(x.age || 40, a.region, ctx.startYear);
           return h('div', { class: 'qs-q' },
             h('label', { class: 'qs-check' }, box, h('span', {}, h('strong', {}, i === 0 ? 'A student loan comes off my pay' : `A student loan comes off ${qsName(i)}’s pay`), h('small', {}, 'It is repaid through pay, 9% of what is earned above a threshold, and written off after 25 to 40 years.'))),
+            x.loan ? qsQ('Which plan?', (() => { const s = h('select', { 'aria-label': i === 0 ? 'Student loan plan' : 'Partner’s student loan plan', class: 'qs-select' }, h('option', { value: '' }, `Not sure: ${R.STUDENT_LOANS[plan].label.replace(/ \(.*/, '')} is most likely`), Object.entries(R.STUDENT_LOANS).map(([k, v]) => h('option', { value: k }, v.label))); s.value = x.loanKind || ''; s.addEventListener('change', () => { x.loanKind = s.value; }); return s; })(), 'On the loan statement or at gov.uk/sign-in-to-manage-your-student-loan-balance.') : null,
             x.loan ? qsQ('Roughly how much is left to repay?', qsMoney(() => x.loanOwed, v => { x.loanOwed = v; }, i === 0 ? 'Student loan left' : `${qsName(i)}’s student loan left`), `On the yearly statement or at gov.uk/sign-in-to-manage-your-student-loan-balance. Not sure? Leave it empty: Horizon uses a typical ${money(QS.LOAN_TYPICAL[plan])} and the rules for ${R.STUDENT_LOANS[plan].label.replace(/ \(.*/, '')}, the usual one for your age and where you live.`) : null);
         })() : null),
       ],

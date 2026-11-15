@@ -401,7 +401,7 @@ dialog#quickDlg .qs-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; alig
 .qs-debt.qs-big { grid-template-columns: 1.5fr 1.4fr 1fr 0.7fr auto; }
 .qs-debt label { display: grid; gap: 4px; font-size: 0.86rem; color: var(--text-2); }
 .qs-debt .qs-input, .qs-debt select { max-width: none; font-size: 1rem; padding: 8px 10px; }
-.qs-debt select { font: inherit; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }
+.qs-select, .qs-debt select { font: inherit; padding: 8px 10px; font-size: 1rem; max-width: 100%; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }
 .qs-check { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-strong); cursor: pointer; }
 .qs-check input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
 .qs-check small { display: block; color: var(--text-2); font-size: 0.86rem; }

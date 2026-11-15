@@ -161,6 +161,18 @@ test.describe('Horizon app', () => {
     await expect.poll(() => page.evaluate(() => window.__horizon.model.proj.rows[1].earnings)).toBeCloseTo(before, 0);
   });
 
+  test('money paid once, typed as other income, can be made a one-off amount', async ({ page }) => {
+    await go(page, 'finances/income');
+    await page.locator('#sec-income .add-row button', { hasText: '+ Other' }).first().click();
+    const item = page.locator('#sec-income [data-editing]').last();
+    await item.locator('input.name').fill('Redundancy payment');
+    await item.locator('input[aria-label="Amount"]').fill('35000');
+    await page.click('#sec-income button[data-once]');
+    await expect(page.locator('#toast')).toContainText('“Redundancy payment” is now a one-off amount of £35,000 received in 2027');
+    const got = await page.evaluate(() => { const H = window.__horizon, p = H.ws.scenarios.find(s => s.id === H.ws.activeId).plan; return { inc: p.income.some(i => i.name === 'Redundancy payment'), ev: p.events.filter(e => e.name === 'Redundancy payment').map(e => [e.kind, e.amount, e.year]) }; });
+    expect(got).toEqual({ inc: false, ev: [['income', 35000, 2027]] });
+  });
+
   test('a baby: leave on reduced pay, the pay afterwards, nursery, everyday costs and Child Benefit in one click', async ({ page }) => {
     await go(page, 'finances/income');
     await page.click('#sec-income button[data-baby="p2"]');

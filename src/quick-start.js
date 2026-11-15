@@ -28,7 +28,7 @@
   };
   const MORTGAGE_RATE = 4.5;
 
-  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, bonus: 0, schemeFigure: 0, retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, niYears: 0, loan: false, loanOwed: 0 });
+  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, bonus: 0, schemeFigure: 0, loanKind: '', retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, niYears: 0, loan: false, loanOwed: 0 });
   // What a student loan is typically worth when the person does not know theirs.
   const LOAN_TYPICAL = { plan1: 8000, plan2: 45000, plan4: 15000, plan5: 30000 };
   // The plan most likely for someone of that age living there (it can be changed afterwards).
@@ -77,7 +77,8 @@
     const people = ps.map((x, i) => {
       const age = Math.min(100, Math.max(16, Math.round(x.age || 40)));
       const stop = works(x) ? Math.min(80, Math.max(age + 1, Math.round(x.retireAge || spaOf(x, startYear)))) : age;
-      const loan = x.loan ? loanPlanFor(age, a.region, startYear) : '';
+      // The plan chosen, or the one most likely from the age and where they live.
+      const loan = x.loan ? (R.STUDENT_LOANS[x.loanKind] ? x.loanKind : loanPlanFor(age, a.region, startYear)) : '';
       return {
         name: nameOf(x, i), age, retireAge: stop,
         ...(x.niYears > 0 ? { niYears: Math.min(50, Math.round(x.niYears)) } : {}),

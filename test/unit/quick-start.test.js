@@ -374,3 +374,14 @@ test('a scheme pension from the statement replaces the estimate, and is not coun
   const est = b.income.find(i => i.kind === 'dbpension');
   assert.ok(est.amount > 11200 && est.dbAccrual > 0, JSON.stringify([est.amount, est.dbAccrual]));
 });
+
+test('a student loan plan can be chosen; left alone, the likely one from age and region', () => {
+  const a = renter();
+  a.spending = 900;
+  Object.assign(a.people[0], { loan: true, loanOwed: 41000 });
+  const likely = Q.build(a, ctx).household.people[0].loanPlan;
+  assert.equal(likely, Q.loanPlanFor(27, 'scotland', 2026));
+  a.people[0].loanKind = 'plan2';
+  const p = Q.build(a, ctx).household.people[0];
+  assert.deepEqual([p.loanPlan, p.loanBalance], ['plan2', 41000]);
+});
