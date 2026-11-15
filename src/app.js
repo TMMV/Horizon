@@ -1331,6 +1331,27 @@
         if (k > 0 && k < N) add(rows[k].year, `${x.name}: claim the ${db.dbScheme === 'uss' ? 'USS' : 'workplace'} pension`, `From ${db.startAge}: about ${money(E.incomeAfterCosts(db, p, k) / 12)} a month${db.lumpMultiple > 0 ? `, plus a tax-free lump sum of about ${money(E.incomeAfterCosts(db, p, k) * db.lumpMultiple)}` : ''}. Tell the scheme a few months before.`, null);
       }
     });
+    // A sum of money coming in: what the plan does with it, and what paying the mortgage or a loan off with it would change.
+    for (const w of E.windfallTrial(p, proj)) {
+      const year = w.year;
+      const what = [...p.events.filter(e => e.kind === 'income' && e.year === year).map(e => e.name),
+        ...p.income.filter(i => i.kind === 'dbpension' && i.lumpMultiple > 0 && ps.some(x => x.id === i.owner && x.age + w.t === i.startAge)).map(i => `the lump sum from ${i.name}`)];
+      const saved = `With nothing else decided, the plan saves it: ISAs first (up to ${money(p.strategy.isaAllowance)} each a tax year), then the general account, and draws on it when needed.`;
+      if (!w.debt) {
+        add(w.t === 0 ? 'now' : year, `${money(w.amount)} coming in: what to do with it`, `${what.length ? `${what.join(' and ')}. ` : ''}${saved} Use this year’s ISA allowances first: what goes in stays tax-free for good.`, go('Saving & investing', 'finances/saving'));
+        continue;
+      }
+      const debt = /^(mortgage|loan)$/i.test(w.debt.trim()) ? `the ${w.debt.trim().toLowerCase()}` : w.debt;
+      const changes = [
+        w.freeThen && w.freeThen !== w.freeNow ? `everything paid off by ${w.freeThen} instead of ${w.freeNow || 'later'}` : '',
+        `${money(Math.abs(w.interest))} ${w.interest <= 0 ? 'less' : 'more'} interest over the plan`,
+        `${money(Math.abs(w.end))} ${w.end >= 0 ? 'more' : 'less'} left at the end (today’s money)`,
+        w.short && (!w.shortNow || w.short < w.shortNow) ? `but money runs short from ${w.short}` : '',
+      ].filter(Boolean);
+      add(w.t === 0 ? 'now' : year, `${money(w.amount)} coming in: save it, or pay off ${debt}?`,
+        `${what.length ? `${what.join(' and ')}. ` : ''}${saved} Paying ${w.all ? `what is left on ${debt} (about ${money(w.pay)})` : `${money(w.pay)} off ${debt}`} with it instead: ${changes.join(', ')}. ${w.end < 0 ? 'Investing is expected to earn more than the debt costs; paying it off is the sure, safer return.' : 'Paying it off comes out ahead as well as being the safer choice.'}${w.fixed ? ` Until the fix ends in ${w.fixed}, most lenders charge for paying off more than 10% a year: ask first.` : ''} To do it, add a one-off “Pay off a loan” in ${year} under Spending.`,
+        go('Spending', 'finances/spending'));
+    }
     // Working for oneself: the tax is paid to HMRC twice a year, so put it aside as the money comes in.
     ps.forEach((x, i) => {
       const b = E.selfTaxBill(p, proj, i);

@@ -115,6 +115,13 @@
     for (const x of people(p)) x.retireAge += years;
     for (const g of p.goals) if (g.type === 'retire') g.age += years;
   }
+  // One person only: their retirement age, and a retirement goal about them.
+  function moveOneRetirement(p, id, years) {
+    const x = people(p).find(y => y.id === id);
+    if (!x) return;
+    x.retireAge += years;
+    for (const g of p.goals) if (g.type === 'retire' && (g.owner || people(p)[0].id) === id) g.age += years;
+  }
 
   const DRIVERS = [
     { key: 'retireLater', kind: 'choice', label: 'Retire 2 years later', applies: p => working(p) && people(p).every(x => x.retireAge + 2 <= 80),
@@ -336,9 +343,11 @@
       ] },
     { id: 'retire-when', icon: 'retire', title: 'Retire earlier or later',
       applies: p => people(p).every(x => x.retireAge - 3 > x.age) || (working(p) && people(p).every(x => x.retireAge + 3 <= 80)),
-      text: 'Everyone stops work three years sooner, or three years later.',
+      text: p => (people(p).length > 1 ? 'Both stop work three years sooner or later, or one of you three years sooner. For one person at an exact age: “Can I retire at…?” under Situations.' : 'Stop work three years sooner, or three years later.'),
       options: p => [
-        people(p).every(x => x.retireAge - 3 > x.age) && { name: 'Retire 3 years earlier', text: people(p).map(x => `${x.name} at ${x.retireAge - 3}`).join(', '), apply: q => moveRetirement(q, -3) },
+        people(p).every(x => x.retireAge - 3 > x.age) && { name: people(p).length > 1 ? 'Both 3 years earlier' : 'Retire 3 years earlier', text: people(p).map(x => `${x.name} at ${x.retireAge - 3}`).join(', '), apply: q => moveRetirement(q, -3) },
+        // In a couple, each person on their own (the other carries on as planned).
+        ...(people(p).length > 1 ? people(p).filter(x => x.retireAge - 3 > x.age).map(x => ({ name: `${x.name} 3 years earlier`, text: people(p).map(y => `${y.name} at ${y === x ? y.retireAge - 3 : y.retireAge}`).join(', '), apply: q => moveOneRetirement(q, x.id, -3) })) : []),
         working(p) && people(p).every(x => x.retireAge + 3 <= 80) && { name: 'Work 3 years longer', text: people(p).map(x => `${x.name} at ${x.retireAge + 3}`).join(', '), apply: q => moveRetirement(q, 3) },
       ].filter(Boolean) },
     { id: 'markets', icon: 'trend', title: 'Weaker or stronger markets',

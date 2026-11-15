@@ -2064,6 +2064,38 @@
     };
   }
 
+  // Sums of money arriving in the next `upTo` years (an inheritance, a pension's lump sum, a sale),
+  // and for each one what paying a debt off with it would change against the plan (which saves it):
+  // interest over the plan and what is left at the end (today's money), the year everything is paid
+  // off, and the first year money runs short (0: never). The debt: the one the debt goal follows,
+  // else a mortgage, else the dearest.
+  function windfallTrial(plan, proj, upTo = 10, least = 5000) {
+    const { pre, rows, out } = proj, N = pre.N, list = [];
+    const sum = (q, f) => q.slice(0, N).reduce((acc, r) => acc + f(r) / r.deflator, 0);
+    const free = q => { const k = q.findIndex(r => r.debt < 1); return k < 0 ? 0 : q[k].year; };
+    const short = q => (q.slice(0, N).find(r => r.shortfall > 0.5) || {}).year || 0;
+    const goal = goalDebtId(plan);
+    for (let t = 0; t < Math.min(N, upTo + 1); t++) {
+      const v = pre.eventsIn[t];
+      if (!(v >= least * pre.price[t])) continue;
+      const year = plan.startYear + t;
+      const live = (out.debts || []).map(d => ({ d, a: plan.accounts.find(x => x.id === d.id) })).filter(z => z.a && z.d.bal[t] > 1);
+      const pick = live.find(z => z.a.id === goal) || live.find(z => isMortgage(plan, z.a)) || live.sort((x, y) => y.a.rate - x.a.rate)[0];
+      if (!pick) { list.push({ t, year, amount: v }); continue; }
+      const pay = Math.min(v, pick.d.bal[t]);
+      const trial = JSON.parse(JSON.stringify(plan));
+      trial.events.push({ name: 'Paid off with the money coming in', kind: 'overpay', debtId: pick.a.id, year, amount: pay / pre.price[t] });
+      const q = project(normalizePlan(trial)).rows;
+      list.push({
+        t, year, amount: v, debt: pick.a.name, debtId: pick.a.id, pay, all: pay >= pick.d.bal[t] - 1, fixed: pick.a.fixedUntil >= year ? pick.a.fixedUntil : 0,
+        interest: sum(q, r => r.debtInterest) - sum(rows, r => r.debtInterest),
+        end: q[N].netWorth / q[N].deflator - rows[N].netWorth / rows[N].deflator,
+        freeNow: free(rows), freeThen: free(q), short: short(q), shortNow: short(rows),
+      });
+    }
+    return list;
+  }
+
   // The tax a self-employed person pays HMRC themselves in the plan's first year (nothing comes off
   // their profit): Class 4 National Insurance on the profit, and the profit's share of their income
   // tax (tax on a salary alongside is taken by PAYE). null without self-employed profit.
@@ -2969,7 +3001,7 @@
     incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, isMortgage, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
-    waysThere, ownPensionTrial, goalDebtId, pensionStartTrial, selfTaxBill, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
+    waysThere, ownPensionTrial, goalDebtId, pensionStartTrial, selfTaxBill, windfallTrial, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,

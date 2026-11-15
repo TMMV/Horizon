@@ -2455,6 +2455,32 @@ test.describe('quick start', () => {
 });
 
 test.describe('the dossier', () => {
+  test('a lump sum coming in: save it or pay off the mortgage; and one of a couple stopping earlier', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const QS = window.QuickStart, a = QS.blank('ruk');
+      a.partner = true;
+      a.people[0] = { ...QS.person(), name: 'Pat', age: 57, pay: 'salary', amount: 52000, workPension: 'yes', scheme: 'set', retireAge: 58, fixedPension: 24000, fixedAge: 58, fixedLump: 95000 };
+      a.people[1] = { ...QS.person(), name: 'Sam', age: 56, pay: 'salary', amount: 24000, workPension: 'yes', pot: 45000, retireAge: 63 };
+      Object.assign(a, { cash: 18000, home: 'mortgage', homeValue: 300000, mortgage: 58000, mortgagePay: 640, mortgageRate: 3.2, mortgageFix: 2029, spending: 2400 });
+      window.__horizon.ws.scenarios[0].plan = QS.build(a, {});
+      window.__horizon.refresh();
+    });
+    const step = page.locator('#ovTodo li', { hasText: 'coming in: save it, or pay off the mortgage?' });
+    await expect(step).toContainText('the lump sum from Pat’s pension with a set amount');
+    await expect(step).toContainText(/Paying what is left on the mortgage \(about £[\d,]+\) with it instead: everything paid off by \d{4} instead of \d{4}, £[\d,]+ less interest over the plan/);
+    await expect(step).toContainText('most lenders charge for paying off more than 10% a year');
+    // Scenarios: each of them stopping three years sooner on their own.
+    await tab(page, 'scenarios');
+    await page.click('#cmpGrid [data-compare="retire-when"]');
+    const rows = page.locator('#cmpResult .cmp-table tbody tr');
+    // Pat stops next year, so only Sam can stop sooner: as now, Sam earlier, both later.
+    await expect(rows).toHaveCount(3, { timeout: 60000 });
+    await expect(rows.nth(1)).toContainText('Sam 3 years earlier');
+    await expect(rows.nth(1)).toContainText('Pat at 58, Sam at 60');
+    expect(problems).toEqual([]);
+  });
+
   test('a retired couple: when to start taking money from the pension pot, and what waiting would change', async ({ page }) => {
     const { problems } = await openApp(page);
     await page.evaluate(() => {

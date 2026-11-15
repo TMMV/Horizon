@@ -511,3 +511,42 @@ test('working for oneself: the tax paid to HMRC directly', () => {
   assert.ok(b.tax > 3000 && b.tax < 4200, String(b.tax));
   assert.equal(E.selfTaxBill(Q.build(renter(), ctx), E.project(Q.build({ ...renter(), spending: 900 }, ctx)), 0), null);
 });
+
+test('money coming in: saving it against paying the mortgage off with it', () => {
+  const a = Q.blank('ruk');
+  a.partner = true;
+  a.people[0] = { ...Q.person(), name: 'Pat', age: 57, pay: 'salary', amount: 52000, workPension: 'yes', scheme: 'set', retireAge: 58, fixedPension: 24000, fixedAge: 58, fixedLump: 95000 };
+  a.people[1] = { ...Q.person(), name: 'Sam', age: 56, pay: 'salary', amount: 24000, workPension: 'yes', pot: 45000, retireAge: 63 };
+  Object.assign(a, { cash: 18000, home: 'mortgage', homeValue: 300000, mortgage: 58000, mortgagePay: 640, mortgageRate: 3.2, mortgageFix: 2029, spending: 2400 });
+  const p = Q.build(a, ctx), proj = E.project(p);
+  const [w] = E.windfallTrial(p, proj);
+  // The pension's lump sum at 58 clears what is left on the mortgage then.
+  assert.deepEqual([w.year, w.debt, w.all, w.fixed], [2027, 'Mortgage', true, 2029]);
+  assert.ok(w.amount > 95000 && w.pay > 40000 && w.pay < 58000, JSON.stringify(w));
+  assert.ok(w.interest < -1000, String(w.interest));
+  assert.ok(w.freeThen === 2028 && w.freeNow > 2030, JSON.stringify([w.freeNow, w.freeThen]));
+  // No debt: only that it comes in.
+  const own = Q.build({ ...a, home: 'own', mortgage: 0, mortgagePay: 0, mortgageFix: 0 }, ctx);
+  const [v] = E.windfallTrial(own, E.project(own));
+  assert.deepEqual([v.year, v.debt], [2027, undefined]);
+  // Small sums are left alone.
+  const small = Q.build({ ...a, people: [{ ...a.people[0], fixedLump: 0 }, a.people[1]], big: [{ kind: 'money', name: 'Gift', amount: 3000, year: 2028 }] }, ctx);
+  assert.deepEqual(E.windfallTrial(small, E.project(small)), []);
+});
+
+test('a couple: retiring earlier compares both, and each on their own', () => {
+  const SI = require('../../src/scenario-ideas');
+  const a = Q.blank('ruk');
+  a.partner = true;
+  a.people[0] = { ...Q.person(), name: 'Pat', age: 50, pay: 'salary', amount: 52000, retireAge: 60 };
+  a.people[1] = { ...Q.person(), name: 'Sam', age: 48, pay: 'salary', amount: 24000, retireAge: 63 };
+  Object.assign(a, { cash: 18000, home: 'rent', rent: 900, spending: 2000 });
+  const p = Q.build(a, ctx);
+  const c = SI.comparisonsFor(p).find(x => x.id === 'retire-when');
+  const opts = SI.optionsOf(c, p);
+  assert.deepEqual(opts.map(o => o.name), ['Both 3 years earlier', 'Pat 3 years earlier', 'Sam 3 years earlier', 'Work 3 years longer']);
+  const q = JSON.parse(JSON.stringify(p));
+  opts[2].apply(q);
+  assert.deepEqual(q.household.people.map(x => x.retireAge), [60, 60]);
+  assert.deepEqual(q.goals.filter(g => g.type === 'retire').map(g => g.age), p.goals.filter(g => g.type === 'retire').map(g => g.age));   // the goal is Pat's
+});
