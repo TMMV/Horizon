@@ -234,7 +234,7 @@ test('a renter who clears a car loan is not told the mortgage ends; a home bough
   Object.assign(a.goals, { buy: true, buyPrice: 140000, buyYear: 2031 });
   const p = Q.build(a, ctx), proj = E.project(p);
   const ms = E.milestones(p, proj);
-  const loans = ms.find(m => m.label === 'Loans and cards paid off');
+  const loans = ms.find(m => m.label === 'Nothing owed on loans or cards');
   assert.ok(loans && loans.year < 2031, JSON.stringify(ms));
   // The only mortgage is the one that starts with the home, so "mortgage-free" cannot come before it.
   for (const m of ms.filter(x => x.label === 'Mortgage-free')) assert.ok(m.year > 2031, JSON.stringify(m));
@@ -568,4 +568,44 @@ test('police, fire and armed forces schemes: built up from the year joined, paid
   // The armed forces scheme costs members nothing.
   const f = Q.build({ ...a, people: [{ ...a.people[0], scheme: 'forces' }, a.people[1]] }, ctx);
   assert.deepEqual([f.income.find(i => i.kind === 'salary').employeePension, f.income.find(i => i.kind === 'dbpension').dbScheme], [0, 'forces']);
+});
+
+test('renting and moving to another rented home: the rent changes in that month', () => {
+  const a = renter();
+  Object.assign(a, { rent: 520, spending: 900, move: true, moveYear: 2028, moveMonth: 6, moveRent: 700 });
+  const ex = Q.build(a, ctx).expenses;
+  const now = ex.find(e => e.name === 'Rent'), next = ex.find(e => e.name === 'Rent after the move');
+  assert.deepEqual([now.toYear, now.toMonth, next.amount, next.fromYear, next.fromMonth], [2028, 5, 700, 2028, 6]);
+});
+
+test('a scheme paid in full at 60: stopping work then, unless an age is typed', () => {
+  const a = Q.blank('ruk');
+  a.people[0] = { ...Q.person(), name: 'Pat', age: 34, pay: 'salary', amount: 38500, workPension: 'yes', scheme: 'fire', joined: 2014 };
+  Object.assign(a, { cash: 7500, home: 'rent', rent: 900, spending: 2000 });
+  assert.equal(Q.build(a, ctx).household.people[0].retireAge, 60);
+  a.people[0].retireAge = 63;
+  assert.equal(Q.build(a, ctx).household.people[0].retireAge, 63);
+  a.people[0] = { ...a.people[0], retireAge: null, scheme: 'nhs' };   // an NHS pension follows the State Pension age
+  assert.equal(Q.build(a, ctx).household.people[0].retireAge, Q.spaOf(a.people[0], 2026));
+});
+
+test('a baby ahead in the quick start: set up for its year, as the button does', () => {
+  const a = Q.blank('ruk');
+  a.partner = true;
+  a.people[0] = { ...Q.person(), name: 'Tom', age: 29, pay: 'salary', amount: 48000 };
+  a.people[1] = { ...Q.person(), name: 'Pri', age: 28, pay: 'salary', amount: 38000 };
+  Object.assign(a, { cash: 11000, home: 'rent', rent: 1250, spending: 1800 });
+  a.big = [{ kind: 'baby', who: 1, year: 2030 }];
+  const p = Q.build(a, ctx);
+  const pri = p.income.filter(i => i.owner === 'p2' && i.kind === 'salary');
+  assert.deepEqual(pri.map(i => i.name), ['Pri’s pay', 'Pri’s pay: the year of leave', 'Pri’s pay: after the baby']);
+  assert.deepEqual([pri[0].endAge, pri[1].startAge, pri[2].startAge], [32, 32, 33]);   // 28 now, so 32 in 2030
+  const nursery = p.expenses.find(e => e.name === 'Baby: nursery');
+  assert.deepEqual([nursery.fromYear, nursery.toYear], [2031, 2034]);
+  assert.equal(p.income.find(i => i.name === 'Child Benefit').fromYear, 2030);
+  assert.ok(!p.events.length);
+  // A second baby: names stay plain.
+  a.big.push({ kind: 'baby', who: 1, year: 2033 });
+  const q = Q.build(a, ctx).income.filter(i => i.owner === 'p2' && i.kind === 'salary').map(i => i.name);
+  assert.ok(q.every(n => !/after the baby: /.test(n)), q.join(' | '));
 });

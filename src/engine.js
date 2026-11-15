@@ -2176,7 +2176,8 @@
       }
     };
     cleared(debts.filter(isMort), 'Mortgage-free');
-    cleared(debts.filter(d => !isMort(d) && !/:release$/.test(d.id)), 'Loans and cards paid off');
+    // The first year nothing is owed (the year pages say "paid off this year" the year before).
+    cleared(debts.filter(d => !isMort(d) && !/:release$/.test(d.id)), 'Nothing owed on loans or cards');
     for (const a of plan.accounts) {
       if (a.type === 'property' && !a.excluded && a.buyYear >= plan.startYear && inRange(a.buyYear)) list.push({ year: a.buyYear, label: `Buy ${a.name}`, kind: 'home' });
     }

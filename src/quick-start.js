@@ -6,6 +6,8 @@
 
 (function (root) {
   const E = typeof module !== 'undefined' && module.exports ? require('./engine.js') : root.Engine;
+  // Scenario ideas (for a baby), looked up when used: loaded before this file in the page.
+  const SIof = () => (typeof module !== 'undefined' && module.exports ? require('./scenario-ideas.js') : root.ScenarioIdeas);
   const R = typeof module !== 'undefined' && module.exports ? require('./uk-rules.js') : root.UKRules;
 
   // Kinds of debt, with a typical interest rate for someone who does not know theirs.
@@ -91,7 +93,8 @@
     const ps = peopleOf(a);
     const people = ps.map((x, i) => {
       const age = Math.min(100, Math.max(16, Math.round(x.age || 40)));
-      const stop = works(x) ? Math.min(80, Math.max(age + 1, Math.round(x.retireAge || spaOf(x, startYear)))) : age;
+      const schemeAge = (R.DB_SCHEMES[schemeOf(x)] || {}).age;
+      const stop = works(x) ? Math.min(80, Math.max(age + 1, Math.round(x.retireAge || (typeof schemeAge === 'number' ? schemeAge : spaOf(x, startYear))))) : age;
       // The plan chosen, or the one most likely from the age and where they live.
       const loan = x.loan ? (R.STUDENT_LOANS[x.loanKind] ? x.loanKind : loanPlanFor(age, a.region, startYear)) : '';
       return {
@@ -111,8 +114,9 @@
     const moveYear = a.move ? Math.min(startYear + 50, Math.max(startYear + 1, Math.round(a.moveYear || startYear + 10))) : 0;
     // Moving somewhere cheaper: this home is sold that year and the next one bought outright from the sale.
     const downsize = owner && moveYear && a.homeValue > 0 && a.movePrice > 0 ? moveYear : 0;
-    // Moving out to rent (unless the home to buy comes first): the keep stops that year and rent starts.
-    const moveOut = a.home === 'family' && moveYear && a.moveRent > 0 && !(buyYear && buyYear <= moveYear) ? moveYear : 0;
+    // Moving out to rent, or to another rented home (unless the home to buy comes first): the keep or
+    // the rent now stops that month and the new rent starts.
+    const moveOut = (a.home === 'family' || a.home === 'rent') && moveYear && a.moveRent > 0 && !(buyYear && buyYear <= moveYear) ? moveYear : 0;
     ps.forEach((x, i) => {
       const id = `p${i + 1}`, n = people[i].name, mine = n === 'You';
       const scheme = schemeOf(x);
@@ -209,7 +213,7 @@
     const outMonth = monthOf(a.moveMonth);
     const keepEnd = moveOut ? endBefore(moveOut, outMonth) : buyYear ? { endRef: 'year', toYear: buyYear } : {};
     if ((a.home === 'rent' || a.home === 'family') && a.rent > 0) expenses.push({ name: a.home === 'rent' ? 'Rent' : 'Keep paid to family', amount: a.rent, freq: 'month', inflationLinked: true, ...keepEnd });
-    if (moveOut) expenses.push({ name: 'Rent', amount: a.moveRent, freq: 'month', inflationLinked: true, ...startAt(moveOut, outMonth), ...(buyYear ? { endRef: 'year', toYear: buyYear } : {}) });
+    if (moveOut) expenses.push({ name: a.home === 'rent' ? 'Rent after the move' : 'Rent', amount: a.moveRent, freq: 'month', inflationLinked: true, ...startAt(moveOut, outMonth), ...(buyYear ? { endRef: 'year', toYear: buyYear } : {}) });
     if (buyYear) accounts.push({ name: 'First home', type: 'property', owner: 'joint', balance: g.buyPrice, rate: 3, buyYear, deposit: 10, mortRate: MORTGAGE_RATE, mortYears: 30 });
     for (const d of a.debts) {
       if (!(d.owed > 0)) continue;
@@ -229,12 +233,12 @@
     // Buying a home: the goal is the deposit, in savings by the year of the purchase.
     if (buyYear) goals.push({ type: 'netWorth', name: 'Deposit for the home', icon: 'home', measure: 'savings', basis: 'real', amount: Math.round(g.buyPrice * 0.1), year: buyYear, confidence: 80 });
     if (g.save && g.saveAmount > 0) goals.push({ type: 'netWorth', name: (g.saveName || 'Saving up').slice(0, 60), icon: 'piggy', measure: 'savings', basis: 'real', amount: g.saveAmount, year: Math.max(startYear + 1, Math.round(g.saveYear || startYear + 5)), confidence: 80 });
-    return E.normalizePlan({
+    const built = E.normalizePlan({
       startYear, asOf: opts.asOf || E.todayISO(),
       household: { region: a.region, people },
       accounts, income, expenses, goals,
       // One-off costs and money coming in, each in its year (today's money).
-      events: (a.big || []).filter(b => b.amount > 0 && b.kind !== 'pay').map(b => ({
+      events: (a.big || []).filter(b => b.amount > 0 && b.kind !== 'pay' && b.kind !== 'baby').map(b => ({
         name: String(b.name || '').trim().slice(0, 60) || (b.kind === 'money' ? 'Money coming in' : 'A one-off cost'),
         kind: b.kind === 'money' ? 'income' : 'expense', amount: b.amount,
         year: Math.min(startYear + 60, Math.max(startYear, Math.round(b.year || startYear + 1))),
@@ -245,6 +249,13 @@
       }] : []),
       strategy: { autoBuffer: true, cashReserve: 0 },
     });
+    // A baby ahead: the year of leave, the pay after it, nursery, everyday costs and Child Benefit,
+    // as the "A baby" button sets them up (typical amounts, to be corrected afterwards).
+    for (const b of (a.big || []).filter(x => x.kind === 'baby').sort((x, y) => (x.year || 0) - (y.year || 0))) {
+      const who = a.partner && b.who === 1 ? 'p2' : 'p1';
+      SIof().addBaby(built, { who, year: Math.min(startYear + 30, Math.max(startYear, Math.round(b.year || startYear + 1))) });
+    }
+    return E.normalizePlan(built);
   }
 
   // What is left each month this year after tax, pension, housing, debts and spending (negative:

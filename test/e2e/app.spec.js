@@ -187,6 +187,19 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#doc-do')).toContainText('Baby: everyday costs');
   });
 
+  test('a baby in a later year: everything set up for that year', async ({ page }) => {
+    await go(page, 'finances/income');
+    const year = page.locator('#sec-income input[aria-label="Year of the baby"]');
+    await year.fill('2030');
+    await year.blur();
+    await page.click('#sec-income button[data-baby="p2"]');
+    await expect(page.locator('#toast')).toContainText('A baby in 2030');
+    const got = await page.evaluate(() => { const H = window.__horizon, p = H.ws.scenarios.find(s => s.id === H.ws.activeId).plan;
+      return { costs: p.expenses.filter(e => /^Baby: /.test(e.name)).map(e => [e.name, e.fromYear, e.toYear]), sam: p.household.people[1].age, leave: p.income.find(i => / the year of leave$/.test(i.name)).startAge }; });
+    expect(got.costs).toEqual([['Baby: nursery', 2031, 2034], ['Baby: everyday costs', 2030, 2048]]);
+    expect(got.leave).toBe(got.sam + 4);
+  });
+
   test('the date your figures are as at can be changed on Your figures', async ({ page }) => {
     // The tab is named for what it is for, and Home leads with what you own, then the answers.
     await expect(page.locator('.tab-list button[data-tab^="finances/"]')).toHaveText('Your figures');
@@ -2752,10 +2765,6 @@ test.describe('the guide beside the page', () => {
     await fill('Money for children', 510);
     await fill('Maintenance you pay', 120);   // money going out for children is asked for on its own
     await fill('Age of the youngest child', 15);
-    // Childcare, to the last month it is paid.
-    await fill('Childcare a month', 300);
-    await body.locator('select[aria-label="Last month of childcare"]').selectOption('7');
-    await fill('Last year of childcare', 2028);
     await next();
     await pick('Renting');
     // The rent is asked for before going on: left out, the plan would look far better than it is.
@@ -2766,6 +2775,14 @@ test.describe('the guide beside the page', () => {
     await body.locator('.qs-check', { hasText: 'A student loan comes off my pay' }).click();
     await expect(body).toContainText('Plan 4');
     await next();
+    // Childcare, asked with spending, to the last month it is paid: what is left falls as it is typed.
+    const lead = body.locator('.qs-lead').first();
+    const before = await lead.textContent();
+    await fill('Childcare a month', 300);
+    await body.locator('select[aria-label="Last month of childcare"]').selectOption('7');
+    await fill('Last year of childcare', 2028);
+    await expect(lead).toContainText('childcare and pension');
+    expect(await lead.textContent()).not.toBe(before);
     await pick('what is left at the end');
     await fill('Left over a month', 100);
     await next();

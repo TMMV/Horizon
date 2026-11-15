@@ -72,8 +72,10 @@
       // Only pay that is being earned in the year of the birth is split.
       if (it.kind !== 'salary' || it.owner !== who || !(E.incomeAfterCosts(it, p, year - p.startYear) > 0.5)) { out.push(it); continue; }
       if (year > p.startYear) out.push({ ...it, endRef: 'age', endAge: A });
-      if (leave > 0) { const x = scaled(it, leave, { name: `${it.name}: the year of leave`, startRef: 'age', startAge: A, endRef: 'age', endAge: A + 1, note: `${Math.round(leave * 100)}% of the usual pay over the year` }); out.push(x); added.push(x.id); }
-      const y = scaled(it, back, { name: `${it.name}: after the baby`, startRef: 'age', startAge: A + 1, note: back < 1 ? `${Math.round(back * 100)}% of the usual pay` : 'Back on the usual pay: lower it here for fewer days a week' });
+      // A second baby: named from the pay itself, not "…: after the baby: the year of leave".
+      const base = it.name.replace(/: (the year of leave|after the baby)$/, '');
+      if (leave > 0) { const x = scaled(it, leave, { name: `${base}: the year of leave`, startRef: 'age', startAge: A, endRef: 'age', endAge: A + 1, note: `${Math.round(leave * 100)}% of the usual pay over the year` }); out.push(x); added.push(x.id); }
+      const y = scaled(it, back, { name: `${base}: after the baby`, startRef: 'age', startAge: A + 1, note: back < 1 ? `${Math.round(back * 100)}% of the usual pay` : 'Back on the usual pay: lower it here for fewer days a week' });
       out.push(y); added.push(y.id);
     }
     p.income = out;

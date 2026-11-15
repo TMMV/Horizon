@@ -399,6 +399,12 @@ dialog#quickDlg .qs-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; alig
 .qs-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .qs-debt { display: grid; grid-template-columns: 1.3fr 1fr 1fr 0.8fr auto; gap: 8px; align-items: end; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); }
 .qs-debt.qs-big { grid-template-columns: 1.5fr 1.4fr 1fr 0.7fr auto; }
+/* The year the baby buttons set up, beside them. */
+.baby-year { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--text-2); }
+.baby-year input { width: 84px; }
+/* A baby: kind, who takes the leave, year; what it adds below. */
+.qs-debt.qs-baby { grid-template-columns: 1.4fr 1.4fr 0.8fr auto; }
+.qs-debt.qs-baby .qs-hint { grid-column: 1 / -1; }
 /* A change in pay: kind, (whose), new pay, year, month. */
 .qs-debt.qs-pay { grid-template-columns: 1.7fr 1.4fr 0.8fr 1fr auto; }
 .qs-debt.qs-pay:has(select[aria-label="Whose pay"]) { grid-template-columns: 1.2fr 1fr 1.5fr 0.8fr 1.1fr auto; }
@@ -416,7 +422,7 @@ dialog#quickDlg .qs-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; alig
   .qs-body { flex: 1; padding: 14px 16px 18px; }
   .qs-body h2 { font-size: 1.3rem; }
   .qs-choices.two, .qs-row { grid-template-columns: 1fr; }
-  .qs-debt, .qs-debt.qs-big, .qs-debt.qs-pay, .qs-debt.qs-pay:has(select[aria-label="Whose pay"]) { grid-template-columns: 1fr 1fr; }
+  .qs-debt, .qs-debt.qs-big, .qs-debt.qs-pay, .qs-debt.qs-baby, .qs-debt.qs-pay:has(select[aria-label="Whose pay"]) { grid-template-columns: 1fr 1fr; }
   .qs-input { max-width: none; }
 }
 
