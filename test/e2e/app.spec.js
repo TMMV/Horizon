@@ -137,6 +137,19 @@ test.describe('Horizon app', () => {
     await expect(page.locator('#homePortfolio .delta')).toContainText('since your last update');
   });
 
+  test('a change of job: the pay stops in a month, a new one starts later, and the gap has no pay', async ({ page }) => {
+    await go(page, 'finances/income');
+    const before = await page.evaluate(() => window.__horizon.model.proj.rows[1].earnings);
+    await page.click('#sec-income button[data-jobchange="p1"]');
+    await expect(page.locator('#toast')).toContainText('now stops at the end of June 2027 and “New job” starts in October 2027');
+    const inc = await page.evaluate(() => { const H = window.__horizon; return H.ws.scenarios.find(s => s.id === H.ws.activeId).plan.income.filter(i => i.kind === 'salary' && i.owner === 'p1').map(i => [i.name, i.startRef, i.fromYear || 0, i.fromMonth || 0, i.endRef, i.toYear || 0, i.toMonth || 0]); });
+    expect(inc).toEqual([['Alex salary', 'now', inc[0][2], inc[0][3], 'year', 2027, 6], ['New job', 'year', 2027, 10, 'retire', inc[1][5], 0]]);
+    // Three months of 2027 have no pay; later years are as before.
+    await expect.poll(() => page.evaluate(() => window.__horizon.model.proj.rows[1].earnings)).toBeLessThan(before * 0.95);
+    // Both are open to be corrected: a lower pay in the new job.
+    await expect.poll(() => page.locator('#sec-income input').evaluateAll(els => els.filter(e => e.value === 'New job' || e.value === 'Alex salary').length)).toBe(2);
+  });
+
   test('the date your figures are as at can be changed on Your figures', async ({ page }) => {
     // The tab is named for what it is for, and Home leads with what you own, then the answers.
     await expect(page.locator('.tab-list button[data-tab^="finances/"]')).toHaveText('Your figures');
