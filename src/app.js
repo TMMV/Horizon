@@ -3995,7 +3995,7 @@
     const yearKey = which === 'start' ? 'fromYear' : 'toYear';
     const opts = which === 'start'
       ? [['now', 'Now'], ['retire', 'At retirement'], ['age', 'At age…'], ['year', 'In year…']]
-      : [['retire', 'At retirement'], ['end', 'End of plan'], ['age', 'At age…'], ['year', 'Stops in year…']];
+      : [['end', 'For good'], ['retire', 'Until retirement'], ['year', 'Until a year…'], ['age', 'Until an age…']];
     const sel = selectInput(opts, () => item[refKey], v => {
       item[refKey] = v;
       if (v === 'year' && !item[yearKey]) item[yearKey] = plan().startYear + (which === 'start' ? 1 : 5);
@@ -7362,7 +7362,7 @@
         return [
           sText('Everything you spend except the mortgage (that is with the accounts). Two ways:'),
           sAdds(h('button', { type: 'button', class: 'btn small primary', onclick: openWizard }, 'Spending check-up'), sAdd('+ Add one item', () => addExpenseItem())),
-          firstHome() && p.expenses.some(e => /rent/i.test(e.name) && e.endRef !== 'year') ? sTip(`Buying in ${firstHome().buyYear}? Open your rent and set Ends → In year… ${firstHome().buyYear}, so it stops when the mortgage starts.`) : null,
+          firstHome() && p.expenses.some(e => /rent/i.test(e.name) && e.endRef !== 'year') ? sTip(`Buying in ${firstHome().buyYear}? Open your rent and set Ends → Until a year… ${firstHome().buyYear}, so it stops when the mortgage starts.`) : null,
           stage() === 'retired' || stage() === 'nearing' ? sTip('In retirement, work costs (commuting, lunches) stop and the mortgage may be paid off, while travel and hobbies often rise. You can set one yearly figure for retirement later, under How you save.') : null,
           sFields(
             sField('Spending check-up', 'Goes through the usual categories (home, food, transport, children, holidays…) with typical UK amounts, so nothing is forgotten.'),
@@ -7581,6 +7581,7 @@
           x.pay === 'self' ? qsQ(`About how much ${qsDo(i)} make in a year, before tax?`, qsMoney(() => x.amount, v => { x.amount = v; }, 'Made in a year before tax', { suffix: 'a year' }), 'What is left after business costs. With your own company: the salary and the dividends taken in a year, added together. If it goes up and down, use a typical year. Horizon works out the tax as for self-employment, which is close for dividends but not exact.') : null,
           x.pay === 'takehome' ? qsQ('How much lands in the bank in a normal month?', qsMoney(() => x.amount, v => { x.amount = v; }, 'Take-home pay a month', { suffix: 'a month' }), 'Look at a recent bank statement or payslip (“net pay”). If it varies, use a typical month.') : null,
           x.pay === 'salary' ? qsQ('What is the yearly salary, before tax?', qsMoney(() => x.amount, v => { x.amount = v; }, 'Salary a year', { suffix: 'a year' }), 'Include regular overtime. Horizon works out the tax and National Insurance.') : null,
+          x.pay === 'salary' ? qsQ('A yearly bonus on top, if there is one', qsMoney(() => x.bonus, v => { x.bonus = v; }, i === 0 ? 'Bonus in a usual year' : 'Partner’s bonus in a usual year', { suffix: 'in a usual year' }), 'Before tax. It is taxed with the salary, and counted as going up and down from year to year. Leave empty if none.') : null,
           x.pay === 'hourly' ? h('div', { class: 'qs-row' },
             qsQ('Hourly rate', qsMoney(() => x.hourly, v => { x.hourly = v; }, 'Hourly rate', { suffix: 'an hour' })),
             qsQ('Hours in a normal week', qsNum(() => x.hours, v => { x.hours = v; }, 'Hours a week', { suffix: 'hours' }))) : null,

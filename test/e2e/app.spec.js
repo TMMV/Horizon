@@ -2689,6 +2689,7 @@ test.describe('the guide beside the page', () => {
     // Ash is in the NHS scheme: the year joined gives an estimate on the spot.
     await pick('A yearly salary');
     await fill('Salary a year', 41000);
+    await fill('Partner’s bonus in a usual year', 2500);   // a bonus is asked for with a salary
     await next();
     await pick('Yes');
     await pick('NHS');
@@ -2738,6 +2739,7 @@ test.describe('the guide beside the page', () => {
     expect(db.dbScheme).toBe('nhs');
     expect(db.amount).toBeGreaterThan(5000);
     expect(plan.income.find(i => i.kind === 'salary').pensionTo).toBe('db');
+    expect(plan.income.find(i => i.kind === 'salary').bonus).toBe(2500);
     expect(plan.household.people[1].niYears).toBe(14);
     expect(plan.income.find(i => i.kind === 'rental').amount).toBe(850);
     expect(plan.accounts.find(a => a.name === 'Mortgage on the rented-out property').rate).toBe(5.23);

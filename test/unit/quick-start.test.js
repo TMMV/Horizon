@@ -345,3 +345,19 @@ test('buying a home is a goal: the deposit in savings by the year of the purchas
   // No home to buy, no such goal.
   assert.equal(Q.build({ ...a, goals: { ...a.goals, buy: false } }, ctx).goals.some(x => x.name === 'Deposit for the home'), false);
 });
+
+test('a yearly bonus on a salary is counted, and taxed with it', () => {
+  const a = Q.blank('ruk');
+  Object.assign(a.people[0], { name: 'Noor', age: 43, pay: 'salary', amount: 118000, bonus: 15000, workPension: 'yes' });
+  a.cash = 14000; a.home = 'rent'; a.rent = 1500; a.spending = 3000;
+  const p = Q.build(a, ctx), q = Q.build({ ...a, people: [{ ...a.people[0], bonus: 0 }, a.people[1]] }, ctx);
+  assert.equal(p.income.find(i => i.kind === 'salary').bonus, 15000);
+  assert.equal(q.income.find(i => i.kind === 'salary').bonus, 0);
+  const x = E.project(p).rows[0], y = E.project(q).rows[0];
+  assert.ok(Math.abs((x.earnings - y.earnings) - 15000) < 1, `${x.earnings - y.earnings}`);
+  assert.ok(x.taxes - y.taxes > 6000, `${x.taxes - y.taxes}`);   // over £100,000: more than 40% goes in tax
+  // Take-home pay has no bonus box: it is already in what lands in the bank.
+  const c = renter();
+  c.people[0].bonus = 5000; c.spending = 900;
+  assert.equal(Q.build(c, ctx).income.find(i => i.kind === 'salary').bonus, 0);
+});
