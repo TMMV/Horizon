@@ -180,3 +180,16 @@ test('the short plan: the next ten years, then every fifth year', () => {
   assert.equal(D.build(plan, proj, null, [], { years: 10 }).years.length, 10);
   assert.equal(D.build(plan, proj, null, [], {}).years.length, N);
 });
+
+test('the action sheet covers the four years after next: what to set up and what is different', () => {
+  const E = require('../../src/engine.js');
+  const plan = E.defaultPlan(2026), proj = E.project(plan);
+  // Even when only one year is written out.
+  const d = D.build(plan, proj, null, [], { years: 1 });
+  assert.deepEqual(d.sheet.later.map(y => y.year), [2028, 2029, 2030, 2031]);
+  assert.deepEqual(d.sheet.later.map(y => y.t), [2, 3, 4, 5]);
+  assert.ok(d.sheet.later.every(y => Array.isArray(y.todo) && Array.isArray(y.changes)));
+  // The example's car, planned for 2029, is named in that year.
+  assert.ok(d.sheet.later[1].changes.some(c => /Replace car/.test(c)), JSON.stringify(d.sheet.later[1].changes));
+  assert.equal(d.years.length, 1);
+});

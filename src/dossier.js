@@ -346,8 +346,10 @@
         successRate: mc ? mc.successRate : null,
       },
       short: (goals || []).map(g => ({ id: g.goal.id, title: g.title, status: g.status, text: verdict(g) })),
-      // The short list to act on: now, before the tax year ends, and next year.
+      // The short list to act on: now, before the tax year ends, next year, and the four years after
+      // that (what to set up and what is different in each), so the first five years are in one place.
       sheet: {
+        later: (() => { const out = []; for (let t = 2; t <= Math.min(5, N - 1); t++) { const y = years.find(z => z.t === t) || yearBlock(plan, proj, mc, t, steps); out.push({ t, year: y.year, todo: y.todo, changes: y.changes }); } return out; })(),
         now: steps.filter(s => s.when === 'now' || s.when === plan.startYear).map(s => ({ title: s.title, text: s.text })),
         tax: steps.filter(s => s.when === 'tax').map(s => ({ title: s.title, text: s.text })),
         next: years[1] ? { year: years[1].year, todo: years[1].todo, changes: years[1].changes } : null,

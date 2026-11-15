@@ -2468,7 +2468,12 @@ test.describe('the dossier', () => {
     await expect(doc.locator('#doc-short .ways').first()).toContainText('What would get you there', { timeout: 20000 });
     const sheet = doc.locator('#doc-do');
     // The example's figures are as at 1 September, so each of its years runs from then: said once, and on each year.
-    await expect(sheet.locator('.doc-box h3')).toHaveText(['Now', 'Before the tax year ends', /^Next year \(2027: from 1 Sept? 2027\)$/, 'Every year']);
+    await expect(sheet.locator('.doc-box h3')).toHaveText(['Now', 'Before the tax year ends', /^Next year \(2027: from 1 Sept? 2027\)$/, /^2028 \(from 1 Sept? 2028\)$/, /^2029 /, /^2030 /, /^2031 /, 'Every year']);
+    // The four years after next are on the sheet too: what to set up, and what is different (the fix ending, the car).
+    await expect(sheet.locator('.doc-box.later')).toHaveCount(4);
+    await expect(sheet.locator('.doc-box.later').first()).toContainText('Mortgage: the fixed rate ends');
+    await expect(sheet.locator('.doc-box.later').nth(1)).toContainText(/What is different that year:.*Replace car: about £[\d,]+/s);
+    await expect(sheet.locator('h2')).toHaveText('What to do: now and the next five years');
     await expect(doc).toContainText(/Each year here starts on 1 Sept?\. Your figures are as at 1 Sept? 2026, so “2026” means 1 Sept? 2026 to 31 Aug 2027/);
     await expect(doc.locator('#doc-2026 h2 small')).toContainText(/^1 Sept? 2026 to 31 Aug 2027 · /);
     await expect(doc.locator('#doc-2026')).toContainText(/By 31 Aug 2027, net worth is about/);
@@ -2499,7 +2504,7 @@ test.describe('the dossier', () => {
     });
     await page.click('#docClose');
     await page.click('#tabDossier');
-    await expect(doc.locator('#doc-do .doc-box h3')).toHaveText(['Now', 'Before the tax year ends', 'Next year (2027)', 'Every year']);
+    await expect(doc.locator('#doc-do .doc-box h3')).toHaveText(['Now', 'Before the tax year ends', 'Next year (2027)', '2028', '2029', '2030', '2031', 'Every year']);
     await expect(doc.locator('#doc-2026 h2 small')).not.toContainText(' to ');
     await expect(doc.locator('#doc-2026')).toContainText('By the end of the year, net worth is about');
     await expect(doc.locator('#doc-2026 h3').last()).toHaveText('Where you should be at the end of the year');

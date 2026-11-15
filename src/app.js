@@ -1279,7 +1279,7 @@
     // Gilts and bonds that mature: the money is invested again.
     for (const a of p.accounts.filter(x => x.type === 'bonds' && !x.excluded && x.maturityYear >= year0 && x.maturityYear - year0 < N)) {
       const k = a.maturityYear - year0;
-      add(a.maturityYear, `${a.name} matures`, `It is repaid, so ${a.coupons === 'payout' ? `about ${money(a.balance)}` : `with the coupons along the way about ${money(a.balance * Math.pow(1 + a.rate / 100, k))}`} comes back ${a.inIsa ? 'as cash inside the ISA: invest it in the ISA’s funds (it uses no allowance)' : 'as cash: the plan invests it, into ISAs while there is allowance'}.`, null);
+      add(a.maturityYear, `${a.name}: repaid this year`, `It is repaid, so ${a.coupons === 'payout' ? `about ${money(a.balance)}` : `with the coupons along the way about ${money(a.balance * Math.pow(1 + a.rate / 100, k))}`} comes back ${a.inIsa ? 'as cash inside the ISA: invest it in the ISA’s funds (it uses no allowance)' : 'as cash: the plan invests it, into ISAs while there is allowance'}.`, null);
     }
     // The shares/bonds mix moves towards retirement: rebalance once a year.
     {
@@ -7773,7 +7773,7 @@
     if (setupStep !== null) closeSetup();
     const N = model.proj.rows.length - 1, ps = people();
     const toRetire = Math.max(...ps.map(x => x.retireAge - x.age), 0) + 5;
-    const opts = [[-2, 'The next ten years, then every fifth year'], [-1, 'Only what to do now and next year (a page or two)'], [0, `Every year, to ${plan().startYear + N - 1} (${N} years)`], [Math.min(N, Math.max(5, toRetire)), `Until five years after stopping work (${Math.min(N, Math.max(5, toRetire))} years)`], [Math.min(N, 10), 'The next ten years'], [Math.min(N, 5), 'The next five years']];
+    const opts = [[-2, 'The next ten years, then every fifth year'], [-1, 'Only what to do: now and the next five years (two or three pages)'], [0, `Every year, to ${plan().startYear + N - 1} (${N} years)`], [Math.min(N, Math.max(5, toRetire)), `Until five years after stopping work (${Math.min(N, Math.max(5, toRetire))} years)`], [Math.min(N, 10), 'The next ten years'], [Math.min(N, 5), 'The next five years']];
     const sel = $('#docYears');
     setKids(sel, opts.filter(([v], i, a) => a.findIndex(o => o[0] === v) === i).map(([v, label]) => h('option', { value: String(v) }, label)));
     sel.value = String(docYears);
@@ -7889,13 +7889,17 @@
     const only = docYears === -1;   // just the sheet to act on
     const doList = items => h('ul', {}, items.map(s => h('li', {}, h('strong', {}, s.title), s.text ? ` ${s.text}` : '')));
     const sh = d.sheet;
-    const sheet = h('section', { class: 'doc-section', id: 'doc-do' }, h('h2', {}, 'What to do: now and next year'),
+    const sheet = h('section', { class: 'doc-section', id: 'doc-do' }, h('h2', {}, 'What to do: now and the next five years'),
       h('p', { class: 'doc-sub' }, only ? 'The short version, to keep in sight. The full plan, with every year’s figures, is under “Years written out” at the top.' : 'The short version, to keep in sight. Each year’s page further on has the figures behind it.'),
       sh.now.length ? h('div', { class: 'doc-box todo' }, h('h3', {}, 'Now'), h('p', { class: 'doc-explain' }, 'Set these up this month; most then run by themselves.'), doList(sh.now)) : null,
       sh.tax.length ? h('div', { class: 'doc-box todo' }, h('h3', {}, 'Before the tax year ends'), doList(sh.tax)) : null,
       sh.next ? h('div', { class: 'doc-box todo' }, h('h3', {}, planYearSpan(d.meta.asOf, 1) ? `Next year (${sh.next.year}: from ${fmtDate(planYearSpan(d.meta.asOf, 1).from)})` : `Next year (${sh.next.year})`),
         sh.next.todo.length ? doList(sh.next.todo) : h('p', {}, 'Nothing new to set up: carry on as this year.'),
         sh.next.changes.length ? [h('p', { class: 'doc-explain' }, 'What is different next year:'), h('ul', {}, sh.next.changes.map(c => h('li', {}, c)))] : null) : null,
+      // The four years after that, each in a few lines: what to set up and what is different.
+      (sh.later || []).map(y => h('div', { class: 'doc-box later' }, h('h3', {}, planYearSpan(d.meta.asOf, y.t) ? `${y.year} (from ${fmtDate(planYearSpan(d.meta.asOf, y.t).from)})` : String(y.year)),
+        y.todo.length ? doList(y.todo) : h('p', {}, 'Nothing new to set up: carry on as the year before.'),
+        y.changes.length ? [h('p', { class: 'doc-explain' }, 'What is different that year:'), h('ul', {}, y.changes.map(c => h('li', {}, c)))] : null)),
       d.everyYear.length ? h('div', { class: 'doc-box new' }, h('h3', {}, 'Every year'), doList(d.everyYear)) : null);
     if (only) {
       setKids($('#docBody'),
@@ -7922,7 +7926,7 @@
         h('h3', {}, 'What is in here'),
         h('ol', { class: 'doc-toc' },
           h('li', {}, h('a', { href: '#doc-short' }, 'In short')),
-          h('li', {}, h('a', { href: '#doc-do' }, 'What to do: now and next year')),
+          h('li', {}, h('a', { href: '#doc-do' }, 'What to do: now and the next five years')),
           h('li', {}, h('a', { href: '#doc-pictures' }, 'The plan in pictures')),
           h('li', {}, h('a', { href: '#doc-read' }, 'How to read a year')),
           h('li', {}, h('a', { href: '#doc-assume' }, 'What the plan assumes')),

@@ -482,6 +482,7 @@ body.dossier-open > header, body.dossier-open > nav, body.dossier-open > main, b
 .doc-box h3 { margin: 0 0 4px; font-size: 0.92rem; }
 .doc-box ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
 .doc-box.new { background: var(--accent-soft); }
+.doc-box.later { border: 1px solid var(--border-strong); }
 .doc-box.todo { display: block; padding: 10px 14px; margin: 0 0 12px; background: color-mix(in srgb, var(--warn) 14%, var(--surface)); }
 .doc-explain { color: var(--text-2); font-size: 0.86rem; margin: 0 0 2px; }
 .doc-short { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
