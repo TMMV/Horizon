@@ -393,6 +393,7 @@ dialog#quickDlg::backdrop { background: rgba(0, 0, 0, 0.55); }
 .qs-person { display: grid; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); }
 .qs-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .qs-debt { display: grid; grid-template-columns: 1.3fr 1fr 1fr auto; gap: 8px; align-items: end; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); }
+.qs-debt.qs-big { grid-template-columns: 1.5fr 1.4fr 1fr 0.7fr auto; }
 .qs-debt label { display: grid; gap: 4px; font-size: 0.86rem; color: var(--text-2); }
 .qs-debt .qs-input, .qs-debt select { max-width: none; font-size: 1rem; padding: 8px 10px; }
 .qs-debt select { font: inherit; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }

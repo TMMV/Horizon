@@ -7699,6 +7699,21 @@
       check: () => (!qs.spendMode ? 'Please choose one of the two ways to answer.' : qs.spendMode === 'spend' && !(a.spending > 0) ? 'Please type roughly what you spend a month.' : ''),
     });
     out.push({
+      id: 'coming', title: 'Anything big coming up?',
+      render: () => [
+        h('p', { class: 'qs-lead' }, 'One-off things in the years ahead, so each lands in its own year of your plan. A cost: a wedding, a car, a new kitchen, help for a child. Money coming in: selling a business or a property, an inheritance, a redundancy payment. Nothing in sight? Just continue.'),
+        ...a.big.map((b, k) => h('div', { class: 'qs-debt qs-big' },
+          h('label', {}, 'Is it', (() => { const s = h('select', { 'aria-label': 'A cost or money coming in' }, h('option', { value: 'cost' }, 'A cost'), h('option', { value: 'money' }, 'Money coming in')); s.value = b.kind; s.addEventListener('change', () => { b.kind = s.value; renderQuick(true); }); return s; })()),
+          h('label', {}, 'What is it?', qsText(() => b.name, v => { b.name = v; }, 'What it is', b.kind === 'money' ? 'Sale of the business' : 'A new car')),
+          h('label', {}, 'How much', qsMoney(() => b.amount, v => { b.amount = v; }, 'About how much')),
+          h('label', {}, 'Year', qsNum(() => b.year, v => { b.year = v; }, 'In which year')),
+          h('button', { type: 'button', class: 'btn ghost icon-btn', 'aria-label': 'Remove this', onclick: () => { a.big.splice(k, 1); renderQuick(true); } }, '✕'))),
+        h('div', {}, h('button', { type: 'button', class: 'btn', id: 'qsAddBig', onclick: () => { a.big.push({ kind: 'cost', name: '', amount: 0, year: ctx.startYear + 2 }); renderQuick(true); } }, a.big.length ? '+ Add another' : '+ Add something coming up')),
+        qsNote('Amounts in today’s money: Horizon raises a cost with prices by its year. A new job on different pay, time off work or a baby cannot be answered here: add those afterwards under “Your figures”, where one-off things like these can also be changed.'),
+      ],
+      check: () => (a.big.some(b => b.amount > 0 && !(b.year >= ctx.startYear && b.year <= ctx.startYear + 60)) ? `Please type a year from ${ctx.startYear} on for each one.` : ''),
+    });
+    out.push({
       id: 'goals', title: 'What would you like to know?', last: true,
       render: () => {
         const g = a.goals, first = a.people[0];

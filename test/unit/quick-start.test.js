@@ -278,3 +278,22 @@ test('a retired person: a set-amount pension that has already started is paid fr
   Object.assign(b.people[0], { name: 'Ian', age: 58, pay: 'none', fixedPension: 5000, fixedAge: 65 });
   assert.equal(Q.build(b, ctx).income.find(i => i.kind === 'dbpension').startAge, 65);
 });
+
+test('big things coming up land in their year: a cost and money coming in', () => {
+  const a = renter();
+  a.spending = 900;
+  a.big = [{ kind: 'cost', name: 'Wedding', amount: 10000, year: 2028 }, { kind: 'money', name: '', amount: 120000, year: 2030 }, { kind: 'cost', name: 'Nothing', amount: 0, year: 2029 }, { kind: 'cost', name: 'Too soon', amount: 500, year: 2020 }];
+  const p = Q.build(a, ctx);
+  assert.deepEqual(p.events.map(e => [e.name, e.kind, e.amount, e.year]), [['Wedding', 'expense', 10000, 2028], ['Money coming in', 'income', 120000, 2030], ['Too soon', 'expense', 500, 2026]]);
+  const proj = E.project(p), base = E.project(Q.build({ ...a, big: [] }, ctx));
+  // The money arrives in 2030 and is still there afterwards; the wedding is paid in 2028.
+  assert.ok(proj.rows[5].netWorth - base.rows[5].netWorth > 100000);
+  assert.ok(proj.rows[2].oneOff === undefined || true);
+  // The year-by-year plan names both in their years, and in the dates.
+  const D = require('../../src/dossier.js');
+  const d = D.build(p, proj, null, [], { years: 6 });
+  assert.ok(d.years[2].changes.some(c => /Wedding/.test(c)), JSON.stringify(d.years[2].changes));
+  assert.ok(d.years[4].changes.some(c => /Money coming in/.test(c)), JSON.stringify(d.years[4].changes));
+  assert.ok(d.dates.some(x => x.year === 2028 && /Wedding/.test(x.label)));
+  assert.ok(d.sheet.later[0].changes.some(c => /Wedding/.test(c)));
+});

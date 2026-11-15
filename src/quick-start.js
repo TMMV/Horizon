@@ -45,6 +45,7 @@
       home: '', homeValue: 0, mortgage: 0, mortgagePay: 0, rent: 0,
       let: false, letValue: 0, letMortgage: 0, letPay: 0, letRent: 0,
       debts: [],
+      big: [],   // one-off things in the years ahead: { kind: 'cost' | 'money', name, amount, year }
       spending: 0,
       goals: { retire: true, emergency: true, save: false, saveName: 'A new car', saveAmount: 0, saveYear: 0, buy: false, buyPrice: 0, buyYear: 0 },
     };
@@ -163,7 +164,13 @@
     return E.normalizePlan({
       startYear, asOf: opts.asOf || E.todayISO(),
       household: { region: a.region, people },
-      accounts, income, expenses, events: [], goals,
+      accounts, income, expenses, goals,
+      // One-off costs and money coming in, each in its year (today's money).
+      events: (a.big || []).filter(b => b.amount > 0).map(b => ({
+        name: String(b.name || '').trim().slice(0, 60) || (b.kind === 'money' ? 'Money coming in' : 'A one-off cost'),
+        kind: b.kind === 'money' ? 'income' : 'expense', amount: b.amount,
+        year: Math.min(startYear + 60, Math.max(startYear, Math.round(b.year || startYear + 1))),
+      })),
       strategy: { autoBuffer: true, cashReserve: 0 },
     });
   }

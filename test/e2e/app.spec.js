@@ -2320,6 +2320,24 @@ test.describe('quick start', () => {
     await fill('Left over a month', 50);
     await expect(body.locator('#qsLeft')).toContainText('a month goes on everything else');
     await next();
+    // Anything big coming up: a one-off cost and money coming in, each in its year.
+    await expect(body).toContainText('Anything big coming up?');
+    await page.click('#qsAddBig');
+    await fill('What it is', 'A new car');
+    await fill('About how much', 6000);
+    await fill('In which year', 2020);
+    await next();
+    await expect(body.locator('.qs-err')).toContainText('Please type a year from');
+    await fill('In which year', 2029);
+    await page.click('#qsAddBig');
+    await body.locator('.qs-big').nth(1).locator('select').selectOption('money');
+    await body.locator('.qs-big').nth(1).locator('input[aria-label="About how much"]').fill('15000');
+    await body.locator('.qs-big').nth(1).locator('input[aria-label="In which year"]').fill('2031');
+    // Each one sits on a single row inside the dialog.
+    expect(await body.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    expect(await body.locator('.qs-big').first().evaluate(el => { const r = [...el.children].map(c => c.getBoundingClientRect()); return Math.max(...r.map(x => x.bottom)) - Math.min(...r.map(x => x.top)); })).toBeLessThan(90);
+    if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
+    await next();
     await expect(page.locator('#qsNext')).toHaveText('Show me my plan');
     await next();
     await expect(page.locator('#quickDlg')).toBeHidden();
@@ -2332,6 +2350,7 @@ test.describe('quick start', () => {
     await expect(short).toContainText('This month');
     const plan = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
     expect(plan.household.people.map(x => x.age)).toEqual([27]);
+    expect(plan.events.map(e => [e.name, e.kind, e.amount, e.year])).toEqual([['A new car', 'expense', 6000, 2029], ['Money coming in', 'income', 15000, 2031]]);
     expect(plan.income[0].amount).toBe(1850);
     expect(plan.expenses.map(e => e.name)).toEqual(['Rent', 'Everything else']);
     expect(plan.accounts.map(a => a.name).sort()).toEqual(['Bank and savings', 'My pension', 'Overdraft']);
@@ -2607,6 +2626,7 @@ test.describe('the guide beside the page', () => {
     await pick('what is left at the end');
     await fill('Left over a month', 100);
     await next();
+    await next();   // nothing big coming up
     await body.locator('.qs-check', { hasText: 'Could I buy a home?' }).click();
     await fill('Home price today', 130000);
     await next();
@@ -2678,6 +2698,7 @@ test.describe('the guide beside the page', () => {
     await fill('Spending a month', 3250);
     await expect(body.locator('#qsLeft')).toContainText('to save');
     await next();
+    await next();   // nothing big coming up
     await next();
     await expect(page.locator('#quickDlg')).toBeHidden();
     const plan = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
