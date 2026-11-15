@@ -2783,6 +2783,13 @@ test.describe('the guide beside the page', () => {
     await fill('Rent received a month', 850);
     await fill('Mortgage left on the rented-out property', 110000);
     await fill('Mortgage payment on the rented-out property', 480);
+    // Moving somewhere cheaper later: the year and the price are asked for.
+    await body.locator('.qs-check', { hasText: 'move somewhere cheaper' }).click();
+    await next();
+    await expect(body.locator('.qs-err')).toContainText('what the next home would cost');
+    await fill('Year of the move', 2045);
+    await fill('Price of the next home', 250000);
+    await expect(body).toContainText('still owed on the mortgage then is paid off from the sale');
     await next();
     await expect(body).toContainText('Not the mortgages: they are already in.');
     await next();
@@ -2806,6 +2813,9 @@ test.describe('the guide beside the page', () => {
     expect(plan.accounts.find(a => a.name === 'Mortgage on the rented-out property').rate).toBe(5.23);
     const mort = plan.accounts.find(a => a.name === 'Mortgage');
     expect([mort.rate, mort.fixedUntil]).toEqual([5.1, 2029]);
+    const home = plan.accounts.find(a => a.name === 'Home');
+    expect([home.sellYear, mort.soldWith]).toEqual([2045, home.id]);
+    expect(plan.accounts.find(a => a.name === 'Next home')).toMatchObject({ buyYear: 2045, deposit: 100, balance: 250000 });
     expect(plan.accounts.filter(a => a.type === 'isa').map(a => [a.name, a.owner, a.balance])).toEqual([['Ash’s ISAs and investments', 'p2', 6500]]);
     const lisa = plan.accounts.find(a => a.type === 'lisa');
     expect([lisa.name, lisa.owner, lisa.balance, lisa.contribution]).toEqual(['Cal’s Lifetime ISA', 'p1', 9000, 2400]);

@@ -94,6 +94,9 @@
     const home = p.accounts.find(a => a.id === homeId);
     if (!home) return null;
     home.sellYear = year;
+    // Its mortgage is paid off from the sale (when it is the only home owned now, that is any mortgage).
+    const homes = p.accounts.filter(a => a.type === 'property' && !a.excluded && !(a.buyYear >= p.startYear));
+    if (homes.length === 1) for (const d of p.accounts) if (E.isMortgage(p, d) && !d.soldWith) d.soldWith = home.id;
     const next = E.normalizePlan({ ...p, accounts: [{ name: 'Smaller home', type: 'property', owner: home.owner, balance: Math.round(price), rate: home.rate, buyYear: year, deposit: 100, mortRate: 4.5, mortYears: 10 }] }).accounts[0];
     p.accounts.push(next);
     const grow = Math.pow(1 + home.rate / 100, Math.max(0, year - p.startYear));

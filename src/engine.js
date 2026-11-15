@@ -413,6 +413,8 @@
         } : {}),
         // A loan written off in a year (e.g. family forgiving the rest when a home is bought).
         forgiveYear: type === 'debt' ? Math.round(num(a.forgiveYear, 0)) : 0,
+        // A mortgage on a home that is to be sold: what is still owed is paid off from the sale.
+        ...(type === 'debt' && a.soldWith ? { soldWith: String(a.soldWith) } : {}),
         note: note(a.note),
         // A balance read since the plan's figures date (e.g. from a banking app). It shows on
         // the home page and feeds the next yearly review; the projection keeps the figures.
@@ -1470,6 +1472,7 @@
           after: x.rateAfterFix === null ? x.rate / 100 : x.rateAfterFix / 100,
           keepTerm: x.afterFix === 'term',
           forgive: x.forgiveYear ? x.forgiveYear - plan.startYear : Infinity,
+          soldWith: x.soldWith || '',
         });
       }
     }
@@ -1572,7 +1575,7 @@
           b.bal = 0;
         }
       }
-      let gProperty = 0, propSold = 0, homeBuy = 0, propBought = 0, debtNew = 0, releaseIn = 0, releaseRepaid = 0;
+      let gProperty = 0, propSold = 0, homeBuy = 0, propBought = 0, debtNew = 0, releaseIn = 0, releaseRepaid = 0, saleRepaid = 0;
       for (const p of props) {
         if (!p.owned && t === p.buy) {
           // Bought at the start of the year, at that year's price.
@@ -1602,6 +1605,13 @@
           // Equity release is paid off from the sale first (never more than the home fetches).
           const owe = p.rel ? Math.min(p.rel.bal, p.val) : 0;
           if (owe > 0) { p.rel.bal -= owe; releaseRepaid += owe; }
+          // Its mortgage (one taken out to buy it, or one marked as on it) is paid off from the sale.
+          let left = p.val - owe;
+          for (const d of debts) {
+            if (!(d === p.mort || d.soldWith === p.id) || !(d.bal > 0) || left <= 0) continue;
+            const x = Math.min(d.bal, left);
+            d.bal -= x; left -= x; saleRepaid += x;
+          }
           propSold += p.val - owe;
           p.val = 0;
         }
@@ -1629,7 +1639,7 @@
       }
 
       // 3. Debts: anything written off, interest, regular payments, then any lump-sum overpayment
-      let debtRegular = 0, debtInterest = 0, lumpOverpay = 0, debtForgiven = 0;
+      let debtRegular = 0, debtInterest = 0, lumpOverpay = saleRepaid, debtForgiven = 0;
       for (const d of debts) if (t === d.forgive && d.bal > 0) { debtForgiven += d.bal; d.bal = 0; }
       const debtStart = debts.map(d => d.bal);
       debts.forEach((d, k) => {

@@ -44,6 +44,9 @@
       otherIncome: 0, childMoney: 0, childPaid: 0, youngest: null, cash: 0, investments: 0,
       home: '', homeValue: 0, mortgage: 0, mortgagePay: 0, mortgageRate: 0, mortgageFix: 0, rent: 0,
       investments2: 0,   // the partner's own ISAs and investments
+      // A move ahead: an owner selling to buy somewhere cheaper (the year and its price), or
+      // someone living with family moving out to rent (the year and the rent a month).
+      move: false, moveYear: 0, movePrice: 0, moveRent: 0,
       lisa: [0, 0], lisaPay: [0, 0],   // each person's Lifetime ISA: what is in it, and what goes in a month
       let: false, letValue: 0, letMortgage: 0, letPay: 0, letRent: 0,
       debts: [],
@@ -92,6 +95,12 @@
     const g = a.goals || {};
     // A home to buy later: rent or keep stops that year.
     const buyYear = g.buy && g.buyPrice > 0 && (a.home === 'rent' || a.home === 'family') ? Math.max(startYear + 1, Math.round(g.buyYear || startYear + 5)) : 0;
+    const owner = a.home === 'mortgage' || a.home === 'own';
+    const moveYear = a.move ? Math.min(startYear + 50, Math.max(startYear + 1, Math.round(a.moveYear || startYear + 10))) : 0;
+    // Moving somewhere cheaper: this home is sold that year and the next one bought outright from the sale.
+    const downsize = owner && moveYear && a.homeValue > 0 && a.movePrice > 0 ? moveYear : 0;
+    // Moving out to rent (unless the home to buy comes first): the keep stops that year and rent starts.
+    const moveOut = a.home === 'family' && moveYear && a.moveRent > 0 && !(buyYear && buyYear <= moveYear) ? moveYear : 0;
     ps.forEach((x, i) => {
       const id = `p${i + 1}`, n = people[i].name, mine = n === 'You';
       const scheme = schemeOf(x);
@@ -145,9 +154,12 @@
       if (!(bal > 0 || pay > 0)) return;
       accounts.push({ name: i === 0 && !a.partner ? 'Lifetime ISA' : `${nameOf(a.people[i], i)}’s Lifetime ISA`.replace(/^You’s/, 'My'), type: 'lisa', owner: i === 0 ? 'p1' : 'p2', balance: bal, contribution: Math.min(4000, pay * 12), purpose: buyYear ? 'home' : 'retirement' });
     });
-    if (a.home === 'mortgage' || a.home === 'own') {
-      if (a.homeValue > 0) accounts.push({ name: 'Home', type: 'property', owner: 'joint', balance: a.homeValue, rate: 3 });
-      if (a.home === 'mortgage' && a.mortgage > 0) accounts.push({ name: 'Mortgage', type: 'debt', owner: 'joint', balance: a.mortgage, rate: a.mortgageRate > 0 && a.mortgageRate < 20 ? a.mortgageRate : MORTGAGE_RATE, payment: a.mortgagePay > 0 ? a.mortgagePay : mortgagePayment(a.mortgage), ...(a.mortgageFix >= startYear ? { fixedUntil: Math.round(a.mortgageFix) } : {}) });
+    const homeId = E.uid();
+    if (owner) {
+      if (a.homeValue > 0) accounts.push({ id: homeId, name: 'Home', type: 'property', owner: 'joint', balance: a.homeValue, rate: 3, ...(downsize ? { sellYear: downsize } : {}) });
+      // The mortgage left when the home is sold is paid off from the sale.
+      if (a.home === 'mortgage' && a.mortgage > 0) accounts.push({ name: 'Mortgage', type: 'debt', owner: 'joint', balance: a.mortgage, rate: a.mortgageRate > 0 && a.mortgageRate < 20 ? a.mortgageRate : MORTGAGE_RATE, payment: a.mortgagePay > 0 ? a.mortgagePay : mortgagePayment(a.mortgage), ...(a.mortgageFix >= startYear ? { fixedUntil: Math.round(a.mortgageFix) } : {}), ...(downsize ? { soldWith: homeId } : {}) });
+      if (downsize) accounts.push({ name: 'Next home', type: 'property', owner: 'joint', balance: a.movePrice, rate: 3, buyYear: downsize, deposit: 100, mortRate: MORTGAGE_RATE, mortYears: 10 });
     }
     // A property that is rented out: its value, what is owed on it, and the rent.
     if (a.let && a.letValue > 0) {
@@ -161,7 +173,9 @@
       }
       if (a.letRent > 0) income.push({ name: 'Rent from the property', kind: 'rental', owner: 'joint', tax: 'uk', amount: a.letRent, freq: 'month', endRef: 'end', inflationLinked: true });
     }
-    if ((a.home === 'rent' || a.home === 'family') && a.rent > 0) expenses.push({ name: a.home === 'rent' ? 'Rent' : 'Keep paid to family', amount: a.rent, freq: 'month', inflationLinked: true, ...(buyYear ? { endRef: 'year', toYear: buyYear } : {}) });
+    const keepTo = moveOut || buyYear;
+    if ((a.home === 'rent' || a.home === 'family') && a.rent > 0) expenses.push({ name: a.home === 'rent' ? 'Rent' : 'Keep paid to family', amount: a.rent, freq: 'month', inflationLinked: true, ...(keepTo ? { endRef: 'year', toYear: keepTo } : {}) });
+    if (moveOut) expenses.push({ name: 'Rent', amount: a.moveRent, freq: 'month', inflationLinked: true, startRef: 'year', fromYear: moveOut, ...(buyYear ? { endRef: 'year', toYear: buyYear } : {}) });
     if (buyYear) accounts.push({ name: 'First home', type: 'property', owner: 'joint', balance: g.buyPrice, rate: 3, buyYear, deposit: 10, mortRate: MORTGAGE_RATE, mortYears: 30 });
     for (const d of a.debts) {
       if (!(d.owed > 0)) continue;
@@ -185,7 +199,11 @@
         name: String(b.name || '').trim().slice(0, 60) || (b.kind === 'money' ? 'Money coming in' : 'A one-off cost'),
         kind: b.kind === 'money' ? 'income' : 'expense', amount: b.amount,
         year: Math.min(startYear + 60, Math.max(startYear, Math.round(b.year || startYear + 1))),
-      })),
+      })).concat(downsize ? [{
+        // Stamp duty, the solicitor and the removal: about 5% of the next home's price then.
+        name: 'Moving: stamp duty and costs', kind: 'expense', year: downsize,
+        amount: Math.round(a.movePrice * Math.pow(1.03, downsize - startYear) * 0.05),
+      }] : []),
       strategy: { autoBuffer: true, cashReserve: 0 },
     });
   }

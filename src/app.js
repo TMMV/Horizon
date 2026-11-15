@@ -5405,7 +5405,7 @@
             toast(`Goal added: ${money(need)} in savings by the start of ${a.buyYear}, for the deposit. Its tab shows the chance and what moves it.`);
           } }, `+ Goal: the deposit by ${a.buyYear}`)));
         }
-        extra.push(field('Sell in year', numInput(...bind(a, 'sellYear'), { min: 0, max: 2100 }), '0 = keep. Sale money is saved or invested; to move, add the next home as “Buying it later” in the same year.'));
+        extra.push(field('Sell in year', numInput(...bind(a, 'sellYear'), { min: 0, max: 2100 }), '0 = keep. Sale money is saved or invested (its mortgage, if marked under the mortgage’s More options, is paid off first); to move, add the next home as “Buying it later” in the same year.'));
         if (!buying) {
           extra.push(h('div', { class: 'field-group pot-alongside equity-release' },
             h('h4', {}, 'Equity release (a lifetime mortgage)'),
@@ -5427,7 +5427,8 @@
                 SI.downsize(plan(), a.id, mv.year, mv.price);
                 delete moveDraft[a.id];
                 renderSection('accounts'); refresh();
-                toast(`Set up: ${a.name} is sold in ${mv.year} and a ${money(mv.price)} home (today’s price) bought outright. Change either under Accounts.`);
+                const paid = plan().accounts.filter(d => d.soldWith === a.id).map(d => d.name);
+                toast(`Set up: ${a.name} is sold in ${mv.year} and a ${money(mv.price)} home (today’s price) bought outright${paid.length ? `; what is still owed on ${paid.join(' and ')} is paid off from the sale` : ''}. Change either under Accounts.`);
               } }, 'Set up the move')))));
         }
       }
@@ -5444,6 +5445,11 @@
         const buy = p.accounts.find(x => x.type === 'property' && x.buyYear >= p.startYear);
         extra.push(field('Written off in', numInput(...bind(a, 'forgiveYear'), { min: 0, max: 2100, label: 'Year the loan is written off' }),
           `0 = paid back in full. E.g. family who will let you off what is left${buy ? ` when you buy ${buy.name} (${buy.buyYear})` : ''}: whatever is still owed then is cleared, at no cost to you.`));
+        const selling = p.accounts.filter(x => x.type === 'property' && x.sellYear > 0);
+        if (selling.length || a.soldWith) {
+          extra.push(field('Paid off when sold', selectInput([['', 'No: paid as usual'], ...selling.map(x => [x.id, `${x.name} (sold ${x.sellYear})`])], ...bind(a, 'soldWith'), { label: 'Paid off from the sale of', rerender: 'accounts' }),
+            'A mortgage on a home that is sold: what is still owed then is paid from the sale, and the rest is saved or invested.'));
+        }
         if (a.fixedUntil) {
           extra.push(field('Rate after the fix ends', optNumInput(...bind(a, 'rateAfterFix'), { placeholder: `Same (${a.rate}%)`, suffix: '%', step: 0.05, label: 'Rate after the fix ends' }),
             `Empty = the same rate.${MARKET ? ` Bank Rate is ${MARKET.series.bankRate.value}% (${MARKET.series.bankRate.date}).` : ''} Simulations also move it with inflation surprises.`));
@@ -7711,6 +7717,24 @@
           qsQ('Is the rate fixed? Until which year', qsNum(() => a.mortgageFix, v => { a.mortgageFix = v; }, 'Year the fixed rate ends'), 'The plan then reminds you to look for a new deal the year before. Leave empty if not fixed or not sure.')) : null,
         a.home === 'rent' ? qsQ('How much is the rent?', qsMoney(() => a.rent, v => { a.rent = v; }, 'Rent a month', { suffix: 'a month' }), 'Your share, if you split it.') : null,
         a.home === 'family' ? qsQ('Do you pay anything towards the house?', qsMoney(() => a.rent, v => { a.rent = v; }, 'Keep a month', { suffix: 'a month' }), 'Keep or digs. Leave empty if nothing.') : null,
+        // A move ahead: selling to buy somewhere cheaper, or moving out to rent.
+        a.home === 'mortgage' || a.home === 'own' || a.home === 'family' ? (() => {
+          const owns = a.home !== 'family';
+          const box = h('input', { type: 'checkbox', checked: !!a.move, id: 'qsMove' });
+          box.addEventListener('change', () => { a.move = box.checked; if (a.move && !a.moveYear) a.moveYear = ctx.startYear + (owns ? 10 : 2); renderQuick(true); });
+          return h('label', { class: 'qs-check' }, box, h('span', {},
+            h('strong', {}, owns ? `${a.partner ? 'We' : 'I'} plan to move somewhere cheaper` : `${a.partner ? 'We' : 'I'} plan to move out and rent`),
+            h('small', {}, owns ? 'Downsizing: this home is sold and the next one bought outright from the sale.' : 'What you pay the family stops that year and rent starts.')));
+        })() : null,
+        a.move && (a.home === 'mortgage' || a.home === 'own') ? h('div', { class: 'qs-person' },
+          h('div', { class: 'qs-row' },
+            qsQ('In which year?', qsNum(() => a.moveYear, v => { a.moveYear = v; }, 'Year of the move')),
+            qsQ('What would the next home cost?', qsMoney(() => a.movePrice, v => { a.movePrice = v; }, 'Price of the next home'), 'At today’s prices.')),
+          h('span', { class: 'qs-hint' }, `${a.home === 'mortgage' ? 'What is still owed on the mortgage then is paid off from the sale. ' : ''}About 5% of the next home’s price goes on stamp duty and moving; the rest of the sale is saved or invested.`)) : null,
+        a.move && a.home === 'family' ? h('div', { class: 'qs-person' },
+          h('div', { class: 'qs-row' },
+            qsQ('In which year?', qsNum(() => a.moveYear, v => { a.moveYear = v; }, 'Year of the move')),
+            qsQ('Rent a month', qsMoney(() => a.moveRent, v => { a.moveRent = v; }, 'Rent after moving out', { suffix: 'a month' }), 'Your share, at today’s prices.'))) : null,
         (() => {
           const box = h('input', { type: 'checkbox', checked: !!a.let, id: 'qsLet' });
           box.addEventListener('change', () => { a.let = box.checked; renderQuick(true); });
@@ -7725,7 +7749,12 @@
             qsQ('Its mortgage payment', qsMoney(() => a.letPay, v => { a.letPay = v; }, 'Mortgage payment on the rented-out property', { suffix: 'a month' }))),
           h('span', { class: 'qs-hint' }, 'Rent after the letting agent’s fee, if there is one. Leave the mortgage boxes empty if none. If the payment only covers the interest, Horizon keeps the amount owed level; tax on the rent is worked out for you.')) : null,
       ],
-      check: () => (!a.home ? 'Please choose one of the four options.' : a.home === 'mortgage' && a.mortgageFix > 0 && !(a.mortgageFix >= ctx.startYear && a.mortgageFix <= ctx.startYear + 15) ? `Please type the year the fixed rate ends, from ${ctx.startYear} on, or leave it empty.` : a.let && !(a.letValue > 0) ? 'Please type roughly what the rented-out property is worth, or untick that box.' : ''),
+      check: () => (!a.home ? 'Please choose one of the four options.' : a.home === 'mortgage' && a.mortgageFix > 0 && !(a.mortgageFix >= ctx.startYear && a.mortgageFix <= ctx.startYear + 15) ? `Please type the year the fixed rate ends, from ${ctx.startYear} on, or leave it empty.` : a.let && !(a.letValue > 0) ? 'Please type roughly what the rented-out property is worth, or untick that box.'
+        : a.move && (a.home === 'mortgage' || a.home === 'own' || a.home === 'family') && !(a.moveYear > ctx.startYear && a.moveYear <= ctx.startYear + 50) ? `Please type the year of the move, after ${ctx.startYear}, or untick that box.`
+          : a.move && a.home === 'family' && !(a.moveRent > 0) ? 'Please type roughly what the rent would be, or untick that box.'
+            : a.move && a.home !== 'family' && (a.home === 'mortgage' || a.home === 'own') && !(a.movePrice > 0) ? 'Please type roughly what the next home would cost, or untick that box.'
+              : a.move && (a.home === 'mortgage' || a.home === 'own') && !(a.homeValue > 0) ? 'Please type roughly what the home is worth first.'
+                : a.move && (a.home === 'mortgage' || a.home === 'own') && a.movePrice > a.homeValue ? 'This is for moving somewhere cheaper than the home now. A dearer home with a new mortgage can be added under Your figures afterwards.' : ''),
     });
     out.push({
       id: 'debts', title: 'Anything you owe',

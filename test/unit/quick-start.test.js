@@ -385,3 +385,34 @@ test('a student loan plan can be chosen; left alone, the likely one from age and
   const p = Q.build(a, ctx).household.people[0];
   assert.deepEqual([p.loanPlan, p.loanBalance], ['plan2', 41000]);
 });
+
+test('moving somewhere cheaper: the home is sold, its mortgage paid from the sale, the next one bought outright', () => {
+  const a = Q.blank('scotland');
+  Object.assign(a.people[0], { name: 'Moira', age: 60, pay: 'salary', amount: 40000 });
+  Object.assign(a, { home: 'mortgage', homeValue: 400000, mortgage: 100000, spending: 1500, move: true, moveYear: 2030, movePrice: 250000 });
+  const p = Q.build(a, ctx);
+  const home = p.accounts.find(x => x.name === 'Home'), mort = p.accounts.find(x => x.name === 'Mortgage');
+  const next = p.accounts.find(x => x.name === 'Next home');
+  assert.deepEqual([home.sellYear, mort.soldWith, next.buyYear, next.deposit], [2030, home.id, 2030, 100]);
+  assert.ok(p.events.some(e => e.year === 2030 && e.kind === 'expense' && e.amount > 12000), JSON.stringify(p.events));
+  const { rows } = E.project(p);
+  const y = rows.find(r => r.year === 2030);
+  // What was still owed is paid off from the sale, and nothing is owed afterwards.
+  assert.ok(y.propSold > 400000 && y.lumpOverpay > 80000, JSON.stringify([y.propSold, y.lumpOverpay]));
+  assert.ok(rows.find(r => r.year === 2031).debt < 1, String(rows.find(r => r.year === 2031).debt));
+  // Without the move, the same home is kept and the mortgage paid as usual.
+  const kept = Q.build({ ...a, move: false }, ctx);
+  assert.deepEqual([kept.accounts.find(x => x.name === 'Home').sellYear, kept.accounts.some(x => x.name === 'Next home')], [0, false]);
+});
+
+test('moving out to rent: what is paid to the family stops that year and rent starts', () => {
+  const a = renter();
+  Object.assign(a, { home: 'family', rent: 300, spending: 600, move: true, moveYear: 2028, moveRent: 800 });
+  const ex = Q.build(a, ctx).expenses;
+  const keep = ex.find(e => e.name === 'Keep paid to family'), rent = ex.find(e => e.name === 'Rent');
+  assert.deepEqual([keep.endRef, keep.toYear, rent.amount, rent.startRef, rent.fromYear, rent.endRef], ['year', 2028, 800, 'year', 2028, 'end']);
+  // Buying a home later ends the rent too.
+  a.goals.buy = true; a.goals.buyPrice = 180000; a.goals.buyYear = 2032;
+  const r2 = Q.build(a, ctx).expenses.find(e => e.name === 'Rent');
+  assert.deepEqual([r2.endRef, r2.toYear], ['year', 2032]);
+});
