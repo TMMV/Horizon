@@ -361,3 +361,16 @@ test('a yearly bonus on a salary is counted, and taxed with it', () => {
   c.people[0].bonus = 5000; c.spending = 900;
   assert.equal(Q.build(c, ctx).income.find(i => i.kind === 'salary').bonus, 0);
 });
+
+test('a scheme pension from the statement replaces the estimate, and is not counted twice', () => {
+  const a = Q.blank('scotland');
+  Object.assign(a.people[0], { name: 'Glen', age: 64, pay: 'salary', amount: 38000, workPension: 'yes', scheme: 'lgps', joined: 1988, schemeFigure: 11200, retireAge: 65 });
+  a.cash = 46000; a.home = 'own'; a.homeValue = 270000; a.spending = 2300;
+  const p = Q.build(a, ctx);
+  const db = p.income.filter(i => i.kind === 'dbpension');
+  assert.deepEqual(db.map(i => [i.dbScheme, i.amount, i.dbAccrual]), [['lgps', 11200, 0]]);
+  // Without the statement, the estimate from the year joined, as before.
+  const b = Q.build({ ...a, people: [{ ...a.people[0], schemeFigure: 0 }, a.people[1]] }, ctx);
+  const est = b.income.find(i => i.kind === 'dbpension');
+  assert.ok(est.amount > 11200 && est.dbAccrual > 0, JSON.stringify([est.amount, est.dbAccrual]));
+});

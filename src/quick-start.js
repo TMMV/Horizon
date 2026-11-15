@@ -28,7 +28,7 @@
   };
   const MORTGAGE_RATE = 4.5;
 
-  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, bonus: 0, retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, niYears: 0, loan: false, loanOwed: 0 });
+  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, bonus: 0, schemeFigure: 0, retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, niYears: 0, loan: false, loanOwed: 0 });
   // What a student loan is typically worth when the person does not know theirs.
   const LOAN_TYPICAL = { plan1: 8000, plan2: 45000, plan4: 15000, plan5: 30000 };
   // The plan most likely for someone of that age living there (it can be changed afterwards).
@@ -117,8 +117,11 @@
       if (scheme && grossOf(x, a.region) > 0) {
         const e = schemeEstimate(x, a.region, startYear);
         const from = Math.min(75, Math.max(55, age(x) + 1, Math.min(people[i].retireAge, e.pensionAge || spaOf(x, startYear))));
+        // The statement's own figure, when given, replaces the estimate: it already counts the years to come.
+        const told = x.schemeFigure > 0;
         income.push({ name: `${mine ? 'My' : `${n}’s`} ${SCHEMES[scheme].label.replace(/ \(.*/, '')} pension`, kind: 'dbpension', dbScheme: scheme, dbJoined: Math.round(x.joined || startYear), dbSalary: grossOf(x, a.region), owner: id, tax: 'uk',
-          amount: Math.round(e.builtUp), dbAccrual: Math.round(e.perYear), lumpMultiple: e.lumpMultiple, freq: 'year', startAge: from });
+          amount: told ? Math.round(x.schemeFigure) : Math.round(e.builtUp), dbAccrual: told ? 0 : Math.round(e.perYear), lumpMultiple: e.lumpMultiple, freq: 'year', startAge: from,
+          ...(told ? { note: 'The figure from the yearly statement' } : {}) });
       }
       // A pension that pays a set amount a year (an old job, council, NHS, teachers): used as the statement gives it.
       if (x.fixedPension > 0) {

@@ -728,11 +728,21 @@
 
   // [start, end) ages of the owner during which a stream is active.
   // Years are turned into the owner's age with the plan's first year (`startYear`).
-  function streamWindow(item, person, startYear) {
+  // A year alone means the plan year that starts in it. A month with it is a calendar month: plan
+  // years run from the figures date (`m0`, 1 = January, fractions for a day past the 1st), so with
+  // figures as at 1 September, "to the end of March 2027" is seven months into plan year 2026.
+  function streamWindow(item, person, startYear, m0 = 1) {
     const yearAge = y => person.age + y - (startYear || 0);
-    const start = item.startRef === 'now' ? -Infinity : item.startRef === 'retire' ? person.retireAge : item.startRef === 'year' ? yearAge(item.fromYear) : item.startAge;
-    const end = item.endRef === 'retire' ? person.retireAge : item.endRef === 'end' ? Infinity : item.endRef === 'year' ? (item.toYear ? yearAge(item.toYear) + (item.toMonth > 0 ? 1 : 0) : Infinity) : item.endAge;
+    const start = item.startRef === 'now' ? -Infinity : item.startRef === 'retire' ? person.retireAge
+      : item.startRef === 'year' ? yearAge(item.fromYear) + (item.fromMonth > 1 ? (item.fromMonth - m0) / 12 : 0) : item.startAge;
+    const end = item.endRef === 'retire' ? person.retireAge : item.endRef === 'end' ? Infinity
+      : item.endRef === 'year' ? (item.toYear ? yearAge(item.toYear) + (item.toMonth > 0 ? (item.toMonth + 1 - m0) / 12 : 0) : Infinity) : item.endAge;
     return [start, end];
+  }
+  // Where the plan year starts within the calendar year: 1 for figures as at 1 January.
+  function planMonth(plan) {
+    const d = plan && isDate(plan.asOf) ? plan.asOf : null;
+    return d ? +d.slice(5, 7) + (+d.slice(8, 10) - 1) / 31 : 1;
   }
 
   const annual = item => item.amount * (item.freq === 'month' ? 12 : 1);
@@ -744,8 +754,8 @@
   function isActive(item, plan, t) {
     const person = ownerOf(plan, item);
     const age = person.age + t;
-    const [start, end] = streamWindow(item, person, plan.startYear);
-    return age >= start && age < end;
+    const [start, end] = streamWindow(item, person, plan.startYear, planMonth(plan));
+    return start < age + 1 - 1e-9 && end > age + 1e-9;
   }
 
   // Growth multiplier of a stream between now and year t in a given economy.
@@ -822,10 +832,10 @@
   // Nominal amount of an income or expense stream in year t (expected economy by default).
   // The share of year t a stream is paid for, when it starts or stops part-way through a year.
   function partYear(item, plan, t) {
-    const y = plan.startYear + t;
-    const first = item.startRef === 'year' && y === item.fromYear && item.fromMonth > 1 ? item.fromMonth : 1;
-    const last = item.endRef === 'year' && item.toMonth > 0 && y === item.toYear ? item.toMonth : 12;
-    return first === 1 && last === 12 ? 1 : Math.max(0, last - first + 1) / 12;
+    if (!(item.startRef === 'year' && item.fromMonth > 1) && !(item.endRef === 'year' && item.toMonth > 0)) return 1;
+    const person = ownerOf(plan, item), age = person.age + t;
+    const [start, end] = streamWindow(item, person, plan.startYear, planMonth(plan));
+    return Math.max(0, Math.min(1, Math.min(end, age + 1) - Math.max(start, age)));
   }
 
   function streamAt(item, plan, t, econ) {

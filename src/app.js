@@ -4002,9 +4002,12 @@
     }, { rerender: sectionId, label: which === 'start' ? 'Starts' : 'Ends' });
     if (item[refKey] === 'year') {
       const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const cal = !planYearSpan(asOf());   // plan years are calendar years (figures as at 1 January)
+      // The start of the plan year that begins in year y ('' while a year is still being typed).
+      const yearFrom = y => (y >= 1900 && y <= 2200 ? ` (${y === item.fromYear && which === 'start' ? 'the plan year ' : ''}from ${fmtDate(planYearSpan(asOf(), y - plan().startYear).from)})` : '');
       const say = () => (which === 'start'
-        ? (item.fromMonth > 1 ? `First paid in ${MONTHS[item.fromMonth - 1]} ${item.fromYear}: ${13 - item.fromMonth} months that year.` : `First paid in ${item.fromYear}.`)
-        : (item.toMonth > 0 ? `Paid to the end of ${MONTHS[item.toMonth - 1]} ${item.toYear}: ${item.toMonth} month${item.toMonth === 1 ? '' : 's'} that year.` : `Not paid in ${item.toYear}: ${item.toYear - 1} is the last year.`));
+        ? (item.fromMonth > 1 ? `First paid in ${MONTHS[item.fromMonth - 1]} ${item.fromYear}${cal ? `: ${13 - item.fromMonth} months that year` : ''}.` : `First paid in ${item.fromYear}${cal ? '' : yearFrom(item.fromYear)}.`)
+        : (item.toMonth > 0 ? `Paid to the end of ${MONTHS[item.toMonth - 1]} ${item.toYear}${cal ? `: ${item.toMonth} month${item.toMonth === 1 ? '' : 's'} that year` : ''}.` : `Not paid in ${item.toYear}${cal ? '' : yearFrom(item.toYear)}: ${item.toYear - 1} is the last year.`));
       const note = h('small', { class: 'hint' }, say());
       const num = numInput(...bind(item, yearKey), { label: which === 'start' ? 'First year' : 'Year it stops', min: 1950, max: 2150, step: 1 });
       (num.tagName === 'INPUT' ? num : num.querySelector('input')).addEventListener('input', () => { note.textContent = say(); });
@@ -7639,6 +7642,7 @@
             };
             show();
             return [qsQ(`In which year did ${qsYou(i)} join it?`, qsNum(() => x.joined, v => { x.joined = v; }, 'Year joined the scheme', { placeholder: 'e.g. 2008', after: show }), null), est,
+              qsQ('Or, if you have the yearly statement: the pension it shows a year', qsMoney(() => x.schemeFigure, v => { x.schemeFigure = v; }, 'Scheme pension from the statement', { suffix: 'a year' }), 'The figure at the scheme’s pension age, before tax. It is used instead of Horizon’s estimate. Leave empty if you do not have it.'),
               qsNote(`Horizon assumes about ${QS.SCHEMES[x.scheme].member}% of pay comes off for it, and that the pension is taken when work stops (it is smaller if that is before the scheme’s pension age).`, 'good')];
           })() : null,
           QS.employed(x) && (x.workPension === 'unsure' || (x.workPension === 'yes' && !QS.SCHEMES[x.scheme])) ? h('div', { class: 'qs-row' },
@@ -7646,7 +7650,7 @@
             qsQ('The employer pays in', qsNum(() => (x.erPct === null ? QS.AUTO_ENROL.employer : x.erPct), v => { x.erPct = v; }, 'Employer pension contribution, % of pay', { suffix: '% of pay' }))) : null,
           QS.employed(x) && (x.workPension === 'unsure' || (x.workPension === 'yes' && !QS.SCHEMES[x.scheme])) ? h('span', { class: 'qs-hint' }, `On the payslip or the pension letter. Not sure? Leave them: ${QS.AUTO_ENROL.employee}% and ${QS.AUTO_ENROL.employer}% are the usual amounts.`) : null,
           qsQ(QS.schemeOf(x) ? `Roughly how much is in any other pension pots of ${i === 0 ? 'yours' : `${qsName(i)}’s`}?` : `Roughly how much is in ${qsYour(i)} pensions so far?`, qsMoney(() => x.pot, v => { x.pot = v; }, 'Pension pots so far'), 'All pension pots added together: this job and old ones. It is on the yearly statement or the provider’s app. Not sure? Leave it empty for now and add it when you find out; the answer will be on the cautious side.'),
-          qsQ(x.pay === 'none' ? `Any other pension that pays ${qsYou(i)} a set amount a year, now or later?` : `Any pension that will pay ${qsYou(i)} a set amount a year?`, qsMoney(() => x.fixedPension, v => { x.fixedPension = v; }, 'Pension paying a set amount', { suffix: 'a year' }), 'From an old job, or the council, NHS, teachers’ or civil service scheme: the letter or yearly statement says “£X a year from age Y”. Add them together if there is more than one. Leave empty if none, or if you have lost the paperwork (gov.uk/find-pension-contact-details can trace it).' + (x.pay === 'none' ? ' Do not repeat a pension you counted in the step before.' : '')),
+          qsQ(x.pay === 'none' ? `Any other pension that pays ${qsYou(i)} a set amount a year, now or later?` : QS.schemeOf(x) ? `Any other pension, from an earlier job, that will pay ${qsYou(i)} a set amount a year?` : `Any pension that will pay ${qsYou(i)} a set amount a year?`, qsMoney(() => x.fixedPension, v => { x.fixedPension = v; }, 'Pension paying a set amount', { suffix: 'a year' }), 'From an old job, or the council, NHS, teachers’ or civil service scheme: the letter or yearly statement says “£X a year from age Y”. Add them together if there is more than one. Leave empty if none, or if you have lost the paperwork (gov.uk/find-pension-contact-details can trace it).' + (x.pay === 'none' ? ' Do not repeat a pension you counted in the step before.' : '')),
           qsQ('If so, paid from what age?', qsNum(() => x.fixedAge || spa, v => { x.fixedAge = v; }, 'Age the set pension starts'), `As the letter says. If it is already being paid, type the age it started. Not sure? Leave it at ${spa}.`),
           (x.age || 0) < spa ? qsQ(`Years of National Insurance on ${qsYour(i)} State Pension forecast`, qsNum(() => x.niYears, v => { x.niYears = v; }, 'National Insurance years so far', { suffix: 'years' }), 'At gov.uk/check-state-pension (“full years”). 35 give a full State Pension; working years still to come are added. Leave empty if you do not know: Horizon then assumes a full one.') : null,
         ],

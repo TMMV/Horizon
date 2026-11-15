@@ -190,3 +190,31 @@ test('each ISA can have its own monthly amount, within each person’s allowance
   // Automatic again when no ISA has an amount.
   assert.equal(E.normalizePlan({ ...q, accounts: q.accounts.map(x => ({ ...x, monthly: null })) }).accounts.find(x => x.type === 'isa').monthly, null);
 });
+
+test('a month on a pay or cost line is a calendar month, whatever date the plan years start on', () => {
+  const mk = asOf => {
+    const p = E.defaultPlan(2026);
+    p.asOf = asOf;
+    const pay = p.income.find(i => i.kind === 'salary' && i.owner === 'p1');
+    Object.assign(pay, { endRef: 'year', toYear: 2027, toMonth: 3 });
+    const job = { ...pay, id: 'nj', name: 'New job', startRef: 'year', fromYear: 2027, fromMonth: 7, endRef: 'retire', toMonth: 0 };
+    p.income.push(job);
+    return E.normalizePlan(p);
+  };
+  const pick = (p, id) => p.income.find(i => i.kind === 'salary' && i.owner === 'p1' && (id === 'nj') === (i.name === 'New job'));
+  const share = (p, id, t) => E.incomeAfterCosts(pick(p, id), p, t) / E.incomeAfterCosts({ ...pick(p, id), startRef: 'now', endRef: 'end', fromMonth: 0, toMonth: 0 }, p, t);
+  // Figures as at 1 January: as before, three months of 2027 for the old pay and six of the new.
+  const jan = mk('2026-01-01'), id = 'old';
+  assert.deepEqual([0, 1, 2].map(t => Math.round(share(jan, id, t) * 12)), [12, 3, 0]);
+  assert.deepEqual([0, 1, 2].map(t => Math.round(share(jan, 'nj', t) * 12)), [0, 6, 12]);
+  // Figures as at 1 November: plan year 2026 runs to the end of October 2027, so both changes fall in it.
+  const nov = mk('2026-11-01');
+  assert.deepEqual([0, 1].map(t => Math.round(share(nov, id, t) * 12)), [5, 0]);   // November to March
+  assert.deepEqual([0, 1].map(t => Math.round(share(nov, 'nj', t) * 12)), [4, 12]);   // July to October, then all year
+  // A year without a month still means the plan year that starts in it.
+  const p = E.defaultPlan(2026); p.asOf = '2026-11-01';
+  const e = { ...p.expenses[0], endRef: 'year', toYear: 2028, toMonth: 0 };
+  p.expenses = [e];
+  const q = E.normalizePlan(p);
+  assert.deepEqual([0, 1, 2].map(t => E.streamAt(q.expenses[0], q, t) > 0), [true, true, false]);
+});

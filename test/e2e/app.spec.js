@@ -1749,7 +1749,7 @@ test.describe('fixes from the pretend-user tests', () => {
     await year.press('Control+a');
     await page.keyboard.type('2035', { delay: 30 });
     await expect(year).toHaveValue('2035');
-    await expect(page.locator('#sec-expenses [data-editing] .timing-year small')).toHaveText('Not paid in 2035: 2034 is the last year.');
+    await expect(page.locator('#sec-expenses [data-editing] .timing-year small')).toHaveText('Not paid in 2035 (from 1 Sept 2035): 2034 is the last year.');
     expect((await plan()).expenses[0].toYear).toBe(2035);
     // A defined benefit pension for someone whose pay has pot contributions: one click stops the double count.
     await go(page, 'finances/income');
@@ -2036,7 +2036,7 @@ test.describe('round 2 fixes', () => {
     const ex = page.locator('#sec-expenses [data-editing]');
     await ex.locator('select[aria-label="Ends"]').selectOption('year');
     await page.locator('#sec-expenses [data-editing] select[aria-label="Last month paid"]').selectOption('8');
-    await expect(page.locator('#sec-expenses [data-editing] .timing-year small')).toContainText(/Paid to the end of August \d{4}: 8 months that year/);
+    await expect(page.locator('#sec-expenses [data-editing] .timing-year small')).toHaveText(/^Paid to the end of August \d{4}\.$/);   // a calendar month: the plan years here start in September
     await page.locator('#sec-expenses [data-editing] .edit-done button.primary').click();
     // The home: equity release and a move.
     await go(page, 'finances/portfolio');
