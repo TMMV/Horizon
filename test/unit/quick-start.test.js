@@ -332,3 +332,16 @@ test('the quick start takes a mortgage rate and fix, a rate for a debt, a Lifeti
   const mm = Q.build(c, ctx).accounts.find(x => x.name === 'Mortgage');
   assert.deepEqual([mm.rate, mm.fixedUntil || 0], [Q.MORTGAGE_RATE, 0]);
 });
+
+test('buying a home is a goal: the deposit in savings by the year of the purchase', () => {
+  const a = renter();
+  a.spending = 900;
+  Object.assign(a.goals, { buy: true, buyPrice: 140000, buyYear: 2031 });
+  const p = Q.build(a, ctx);
+  const g = p.goals.find(x => x.name === 'Deposit for the home');
+  assert.deepEqual([g.type, g.measure, g.amount, g.year], ['netWorth', 'savings', 14000, 2031]);
+  const res = E.evaluateGoals(p, E.project(p), E.monteCarlo(p, 60, 1), { runs: 60, seed: 1 }).find(r => r.goal.id === g.id);
+  assert.ok(res.probability >= 0 && res.probability <= 1);
+  // No home to buy, no such goal.
+  assert.equal(Q.build({ ...a, goals: { ...a.goals, buy: false } }, ctx).goals.some(x => x.name === 'Deposit for the home'), false);
+});

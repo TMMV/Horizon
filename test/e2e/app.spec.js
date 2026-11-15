@@ -2640,11 +2640,18 @@ test.describe('the guide beside the page', () => {
     await fill('Left over a month', 100);
     await next();
     await next();   // nothing big coming up
+    // The box keeps its place and size when a tick opens more questions: Continue does not move.
+    const boxOf = () => page.evaluate(() => { const d = document.querySelector('#quickDlg').getBoundingClientRect(), n = document.querySelector('#qsNext').getBoundingClientRect(); return [Math.round(d.top), Math.round(d.height), Math.round(n.top)]; });
+    const boxBefore = await boxOf();
     await body.locator('.qs-check', { hasText: 'Could I buy a home?' }).click();
+    expect(await boxOf()).toEqual(boxBefore);
     await fill('Home price today', 130000);
     await next();
     await expect(page.locator('#quickDlg')).toBeHidden();
+    // Buying a home is a goal with its own tab: the deposit, by the year of the purchase.
+    await expect(page.locator('.tab-list')).toContainText('Deposit for the home');
     const plan = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
+    expect(plan.goals.filter(g => g.name === 'Deposit for the home').map(g => [g.type, g.amount, g.measure])).toEqual([['netWorth', 13000, 'savings']]);
     expect(plan.income.find(i => i.kind === 'dbpension').amount).toBe(3200);
     expect(plan.income.find(i => i.name === 'Money for the children').toYear).toBe(plan.startYear + 3);
     const paid = plan.expenses.find(e => e.name === 'Maintenance for the children');

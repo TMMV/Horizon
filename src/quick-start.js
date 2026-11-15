@@ -169,6 +169,8 @@
     if (a.spending > 0) expenses.push({ name: 'Everything else', amount: a.spending, freq: 'month', inflationLinked: true, note: 'One round figure from the quick start. The Spending check-up splits it into items.' });
     if (g.retire) goals.push({ type: 'retire', owner: 'p1', age: people[0].retireAge, confidence: 85 });
     if (g.emergency) goals.push({ type: 'emergency', months: 3, counts: 'cash', year: startYear + 2, confidence: 80 });
+    // Buying a home: the goal is the deposit, in savings by the year of the purchase.
+    if (buyYear) goals.push({ type: 'netWorth', name: 'Deposit for the home', icon: 'home', measure: 'savings', basis: 'real', amount: Math.round(g.buyPrice * 0.1), year: buyYear, confidence: 80 });
     if (g.save && g.saveAmount > 0) goals.push({ type: 'netWorth', name: (g.saveName || 'Saving up').slice(0, 60), icon: 'piggy', measure: 'savings', basis: 'real', amount: g.saveAmount, year: Math.max(startYear + 1, Math.round(g.saveYear || startYear + 5)), confidence: 80 });
     return E.normalizePlan({
       startYear, asOf: opts.asOf || E.todayISO(),

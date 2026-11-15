@@ -361,6 +361,11 @@ dialog#quickDlg {
   background: var(--surface); color: var(--text); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
 }
 dialog#quickDlg::backdrop { background: rgba(0, 0, 0, 0.55); }
+/* One height for every step: when an answer opens more questions the box does not grow and re-centre,
+   so nothing already on screen moves and Continue stays where it was. */
+dialog#quickDlg { height: min(780px, calc(100vh - 32px)); }
+dialog#quickDlg .quick { height: 100%; max-height: none; }
+dialog#quickDlg .qs-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; align-content: start; }
 .quick .wiz-head { align-items: center; padding-bottom: 6px; }
 .quick .wiz-step { margin: 0; }
 .qs-body { gap: 16px; padding: 18px 24px 22px; font-size: 1rem; line-height: 1.5; }
