@@ -320,6 +320,11 @@ test.describe('Horizon app', () => {
     await expect(added.locator('.edit-done button').last()).toHaveText('Remove');
     await added.locator('button[aria-label^="Remove"]').click();
     await expect(items).toHaveCount(n);
+    // Removed at once, with a moment to put it back.
+    await expect(page.locator('#toast')).toContainText('Removed “ISA”');
+    await page.locator('#toast button', { hasText: 'Undo' }).click();
+    await expect(items).toHaveCount(n + 1);
+    expect(await page.evaluate(() => window.__horizon.ws.scenarios[0].plan.accounts.filter(a => a.type === 'isa').length)).toBeGreaterThan(0);
   });
 
   test('each kind of account has its own fields, and no type to change', async ({ page }) => {

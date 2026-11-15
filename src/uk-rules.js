@@ -107,6 +107,11 @@
     teachers: { label: 'Teachers (2015 scheme)', accrual: 57, lump: 0, age: 'spa', early: PUBLIC_EARLY },
     nhs: { label: 'NHS (2015 scheme)', accrual: 54, lump: 0, age: 'spa', early: PUBLIC_EARLY },
     civil: { label: 'Civil Service (alpha)', accrual: 43, lump: 0, age: 'spa', early: PUBLIC_EARLY },
+    // The 2015 career-average schemes, paid in full from 60 (earlier final-salary sections differ:
+    // the yearly benefit statement has the figure).
+    police: { label: 'Police (2015 scheme)', accrual: 55.3, lump: 0, age: 60, early: PUBLIC_EARLY },
+    fire: { label: 'Firefighters (2015 scheme)', accrual: 59.7, lump: 0, age: 60, early: PUBLIC_EARLY },
+    forces: { label: 'Armed Forces (AFPS 15)', accrual: 47, lump: 0, age: 60, early: PUBLIC_EARLY },
     other: { label: 'Other', accrual: 60, lump: 0, age: 'spa', early: PUBLIC_EARLY },
   };
 

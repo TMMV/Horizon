@@ -25,9 +25,12 @@
     nhs: { label: 'NHS', member: 9.8 },
     lgps: { label: 'Council (local government)', member: 6.5 },
     civil: { label: 'Civil service', member: 5.45 },
+    police: { label: 'Police', member: 12.8 },
+    fire: { label: 'Fire and rescue', member: 12.5 },
+    forces: { label: 'Armed forces', member: 0 },   // free to members
   };
   const MORTGAGE_RATE = 4.5;
-  const OTHER_SCHEME_MEMBER = 12;   // roughly what comes off pay for police, fire or similar schemes (% of pay)
+  const OTHER_SCHEME_MEMBER = 8;   // a middle figure for another scheme with a set pension (% of pay)
 
   const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, bonus: 0, schemeFigure: 0, loanKind: '', retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, fixedLump: 0, niYears: 0, loan: false, loanOwed: 0 });
   // What a student loan is typically worth when the person does not know theirs.

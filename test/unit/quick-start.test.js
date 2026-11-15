@@ -550,3 +550,22 @@ test('a couple: retiring earlier compares both, and each on their own', () => {
   assert.deepEqual(q.household.people.map(x => x.retireAge), [60, 60]);
   assert.deepEqual(q.goals.filter(g => g.type === 'retire').map(g => g.age), p.goals.filter(g => g.type === 'retire').map(g => g.age));   // the goal is Pat's
 });
+
+test('police, fire and armed forces schemes: built up from the year joined, paid in full from 60', () => {
+  const a = Q.blank('ruk');
+  a.people[0] = { ...Q.person(), name: 'Pat', age: 45, pay: 'salary', amount: 52000, workPension: 'yes', scheme: 'police', joined: 2016, retireAge: 60 };
+  Object.assign(a, { cash: 18000, home: 'rent', rent: 900, spending: 2000 });
+  const p = Q.build(a, ctx);
+  const pay = p.income.find(i => i.kind === 'salary'), db = p.income.find(i => i.kind === 'dbpension');
+  assert.deepEqual([pay.employeePension, pay.pensionTo, db.dbScheme, db.startAge, db.name], [12.8, 'db', 'police', 60, 'Pat’s Police pension']);
+  assert.ok(Math.abs(db.dbAccrual - 52000 / 55.3) < 1, String(db.dbAccrual));
+  assert.ok(db.amount > 52000 / 55.3 * 9 && db.amount < 52000 / 55.3 * 10, String(db.amount));   // ten years, earlier pay a little lower
+  assert.ok(!p.accounts.some(x => x.type === 'pension'));
+  // Stopping at 58: two years before 60, so it is cut.
+  const early = Q.build({ ...a, people: [{ ...a.people[0], retireAge: 58 }, a.people[1]] }, ctx).income.find(i => i.kind === 'dbpension');
+  assert.equal(early.startAge, 58);
+  assert.ok(Math.abs(E.dbEarly(early, { age: 45, statePensionAge: 68 }).factor - 0.906) < 1e-9);
+  // The armed forces scheme costs members nothing.
+  const f = Q.build({ ...a, people: [{ ...a.people[0], scheme: 'forces' }, a.people[1]] }, ctx);
+  assert.deepEqual([f.income.find(i => i.kind === 'salary').employeePension, f.income.find(i => i.kind === 'dbpension').dbScheme], [0, 'forces']);
+});

@@ -4073,11 +4073,19 @@
     return h('button', { type: 'button', class: 'btn ghost icon-btn small', 'aria-label': label, title: label, onclick }, '✕');
   }
 
+  // Removed at once (no question asked), with a moment to put it back where it was.
   function removeFrom(list, item, sectionId) {
     const i = list.indexOf(item);
     if (i >= 0) list.splice(i, 1);
     renderSection(sectionId);
     refresh();
+    if (i < 0) return;
+    toast(`Removed “${item.name || 'it'}”.`, { label: 'Undo', run: () => {
+      if (list.includes(item)) return;
+      list.splice(Math.min(i, list.length), 0, item);
+      renderSection(sectionId);
+      refresh();
+    } });
   }
 
   // Money coming in and going out, year by year (expected path, nominal; D() for the view).
@@ -7723,9 +7731,9 @@
           QS.employed(x) && x.workPension === 'yes' ? h('div', { class: 'qs-q' }, h('span', { class: 'qs-label' }, 'What kind of pension is it?'),
             qsChoices([['', 'An ordinary workplace pension', 'A pot of money with a company such as Nest, Aviva or Scottish Widows. Most jobs.']], x.scheme || '', v => { x.scheme = v; }),
             h('span', { class: 'qs-hint' }, 'Or one of these, which build a yearly pension for life and not a pot:'),
-            qsChoices([...Object.entries(QS.SCHEMES).map(([k, s]) => [k, s.label]), ['set', 'Police, fire, armed forces or another']], x.scheme || '', v => { x.scheme = v; }, true)) : null,
+            qsChoices([...Object.entries(QS.SCHEMES).map(([k, s]) => [k, s.label]), ['set', 'Another that pays a set amount']], x.scheme || '', v => { x.scheme = v; }, true)) : null,
           QS.employed(x) && x.workPension === 'yes' && x.scheme === 'set' ? [
-            qsQ(i === 0 ? 'About how much of your pay goes into it?' : `About how much of ${qsName(i)}’s pay goes into it?`, qsNum(() => (x.eePct === null ? QS.OTHER_SCHEME_MEMBER : x.eePct), v => { x.eePct = v; }, 'Own pension contribution, % of pay', { suffix: '% of pay' }), `On the payslip. Not sure? Leave it: ${QS.OTHER_SCHEME_MEMBER}% is about right for the police and fire schemes.`),
+            qsQ(i === 0 ? 'About how much of your pay goes into it?' : `About how much of ${qsName(i)}’s pay goes into it?`, qsNum(() => (x.eePct === null ? QS.OTHER_SCHEME_MEMBER : x.eePct), v => { x.eePct = v; }, 'Own pension contribution, % of pay', { suffix: '% of pay' }), `On the payslip. Not sure? Leave it at ${QS.OTHER_SCHEME_MEMBER}%, a middle figure.`),
             qsNote('Then type the pension from the yearly statement, and any tax-free lump sum, in the questions below about a pension that pays a set amount.', 'good')] : null,
           QS.employed(x) && x.workPension === 'yes' && QS.SCHEMES[x.scheme] ? (() => {
             const est = h('span', { class: 'qs-hint' });
@@ -7737,7 +7745,7 @@
             show();
             return [qsQ(`In which year did ${qsYou(i)} join it?`, qsNum(() => x.joined, v => { x.joined = v; }, 'Year joined the scheme', { placeholder: 'e.g. 2008', after: show }), null), est,
               qsQ('Or, if you have the yearly statement: the pension it shows a year', qsMoney(() => x.schemeFigure, v => { x.schemeFigure = v; }, 'Scheme pension from the statement', { suffix: 'a year' }), 'The figure at the scheme’s pension age, before tax. It is used instead of Horizon’s estimate. Leave empty if you do not have it.'),
-              qsNote(`Horizon assumes about ${QS.SCHEMES[x.scheme].member}% of pay comes off for it, and that the pension is taken when work stops (it is smaller if that is before the scheme’s pension age).`, 'good')];
+              qsNote(`${QS.SCHEMES[x.scheme].member > 0 ? `Horizon assumes about ${QS.SCHEMES[x.scheme].member}% of pay comes off for it` : 'Nothing comes off pay for it'}, and that the pension is taken when work stops (it is smaller if that is before the scheme’s pension age${R.DB_SCHEMES[x.scheme] && R.DB_SCHEMES[x.scheme].age !== 'spa' ? `, ${R.DB_SCHEMES[x.scheme].age}` : ''}).${['police', 'fire', 'forces'].includes(x.scheme) ? ' Years in the older final-salary scheme count differently: the statement’s figure is the one to use.' : ''}`, 'good')];
           })() : null,
           QS.employed(x) && (x.workPension === 'unsure' || (x.workPension === 'yes' && !QS.SCHEMES[x.scheme] && x.scheme !== 'set')) ? h('div', { class: 'qs-row' },
             qsQ(i === 0 ? 'You pay in' : `${qsName(i)} pays in`, qsNum(() => (x.eePct === null ? QS.AUTO_ENROL.employee : x.eePct), v => { x.eePct = v; }, 'Own pension contribution, % of pay', { suffix: '% of pay' })),
