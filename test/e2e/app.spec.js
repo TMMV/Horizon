@@ -2200,7 +2200,7 @@ test.describe('review of 13 November', () => {
     await expect(page.locator('#view-home')).not.toContainText('Can you retire earlier?');
     await expect(page.locator('#view-home')).not.toContainText('What will retirement cost?');
     // The steps say what to take from savings now, though nobody is about to retire.
-    await expect(page.locator('#ovTodo')).toContainText(/Take about .* a month from savings|Savings no longer needed/);
+    await expect(page.locator('#ovTodo')).toContainText(/Take about .* a month from (savings|pensions)|Savings no longer needed/);
     // The retirement goal: no "what retiring then means", the pension is being paid.
     await openGoal(page, 'money lasts to');
     await expect(page.locator('#view-goal')).toContainText('has retired; the money is to last to');
@@ -2455,6 +2455,26 @@ test.describe('quick start', () => {
 });
 
 test.describe('the dossier', () => {
+  test('a retired couple: when to start taking money from the pension pot, and what waiting would change', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const QS = window.QuickStart, a = QS.blank('scotland');
+      a.partner = true;
+      a.people[0] = { ...QS.person(), name: 'Bren', age: 66, pay: 'retired', fixedPension: 6400, fixedAge: 60 };
+      a.people[1] = { ...QS.person(), name: 'Kenny', age: 68, pay: 'retired', pot: 180000 };
+      Object.assign(a, { cash: 8000, investments: 22000, home: 'mortgage', homeValue: 230000, mortgage: 38000, mortgagePay: 410, spending: 2400 });
+      window.__horizon.ws.scenarios[0].plan = QS.build(a, {});
+      window.__horizon.refresh();
+    });
+    const step = page.locator('#ovTodo li', { hasText: 'Kenny: start taking money from the pension' });
+    await expect(step).toContainText(/The plan takes about £[\d,]+ a month from Kenny’s pension/);
+    await expect(step).toContainText(/Waiting instead, with savings paying the way meanwhile \(today’s money\): from \d+ \(\d{4}\)/);
+    // The age it can be drawn from is the setting to try another.
+    await step.locator('button', { hasText: 'Try another age' }).click();
+    await expect(page.locator('#sec-household .people .item').nth(1).locator('label.field:has-text("Draws pension pots from")')).toHaveCount(1);
+    expect(problems).toEqual([]);
+  });
+
   test('the contents links move within the plan and leave the page behind it alone', async ({ page }) => {
     const { problems } = await openApp(page, 'finances/income');
     await page.click('#tabDossier');

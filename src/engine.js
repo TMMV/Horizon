@@ -2064,6 +2064,39 @@
     };
   }
 
+  // When the plan starts drawing on someone's pension pots, against waiting `later` years more
+  // (the pots stay invested and savings pay the way meanwhile): income tax over the plan, what is
+  // left at the end (today's money), and the first year money runs short (0: never). For someone within five years of
+  // the age their pots can be drawn, or past it, with something in them; null otherwise.
+  function pensionStartTrial(plan, proj, i, later = [3, 6]) {
+    const p = plan.household.people[i], rows = proj.rows, N = proj.pre.N;
+    if (!p || !rows[0].persons || !rows[0].persons[i]) return null;
+    const pots = plan.accounts.filter(a => a.type === 'pension' && a.owner === p.id && !a.excluded && !a.inherited);
+    if (!pots.length || !(rows[0].persons[i].pension > 500) || p.age + 5 < p.pensionAccessAge) return null;
+    const first = rows.findIndex((r, t) => t < N && r.persons[i].pensionDrawn > 0.5);
+    const sum = (q, f) => q.slice(0, N).reduce((acc, r) => acc + f(r) / r.deflator, 0);
+    const measure = q => ({
+      tax: sum(q, r => r.persons.reduce((acc, x) => acc + Math.max(0, x.incomeTax), 0)),
+      end: q[N].netWorth / q[N].deflator,
+      short: (q.slice(0, N).find(r => r.shortfall > 0.5) || {}).year || 0,   // the first year money runs short
+    });
+    const base = measure(rows);
+    const from = first < 0 ? null : p.age + first;
+    const options = (from === null ? [] : later).map(k => {
+      const age = Math.min(75, from + k);
+      if (age <= from) return null;
+      const trial = JSON.parse(JSON.stringify(plan));
+      trial.household.people[i].pensionAccessAge = age;
+      const m = measure(project(normalizePlan(trial)).rows);
+      return { age, year: plan.startYear + age - p.age, tax: m.tax - base.tax, end: m.end - base.end, short: m.short };
+    }).filter((o, k, a) => o && a.findIndex(z => z && z.age === o.age) === k);
+    return {
+      first, from, year: first < 0 ? null : rows[first].year,
+      monthly: first < 0 ? 0 : rows[first].persons[i].pensionDrawn / 12,
+      pot: rows[Math.max(0, first)].persons[i].pension, short: base.short, options,
+    };
+  }
+
   // A debt that is a mortgage: called one, or a large debt in a household that owns a home now.
   function isMortgage(plan, a) {
     if (!a || a.type !== 'debt' || a.excluded) return false;
@@ -2923,7 +2956,7 @@
     incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, isMortgage, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
-    waysThere, ownPensionTrial, goalDebtId, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
+    waysThere, ownPensionTrial, goalDebtId, pensionStartTrial, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,

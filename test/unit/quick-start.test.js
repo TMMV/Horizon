@@ -454,3 +454,29 @@ test('a change in pay ahead: the pay so far stops the month before and the new p
   const q = Q.build(a, ctx).income.filter(i => i.kind === 'salary');
   assert.deepEqual(q.map(i => [i.name, i.toYear, i.toMonth]), [['My pay', 2027, 3], ['My pay from April 2027', 2028, 12], ['My pay from January 2029', 0, 0]]);
 });
+
+test('when to start taking money from a pension pot: the plan’s year, and what waiting would change', () => {
+  const a = Q.blank('scotland');
+  a.partner = true;
+  a.people[0] = { ...Q.person(), name: 'Bren', age: 66, pay: 'retired', fixedPension: 6400, fixedAge: 60 };
+  a.people[1] = { ...Q.person(), name: 'Kenny', age: 68, pay: 'retired', pot: 180000 };
+  Object.assign(a, { cash: 8000, investments: 22000, home: 'mortgage', homeValue: 230000, mortgage: 38000, mortgagePay: 410, spending: 2400 });
+  a.big = [{ kind: 'cost', name: 'Car', amount: 15000, year: 2027 }];
+  const p = Q.build(a, ctx), proj = E.project(p);
+  const s = E.pensionStartTrial(p, proj, 1);
+  assert.deepEqual([s.year, s.from], [2027, 69]);
+  assert.ok(s.monthly > 300, String(s.monthly));
+  assert.deepEqual(s.options.map(o => o.age), [72, 75]);
+  // Each option is a projection with the pots out of reach until then.
+  for (const o of s.options) assert.ok(Number.isFinite(o.tax) && Number.isFinite(o.end), JSON.stringify(o));
+  // No pot: nothing to say. Spending covered without it: the plan never draws it.
+  assert.equal(E.pensionStartTrial(p, proj, 0), null);
+  const low = Q.build({ ...a, spending: 1500, big: [] }, ctx);
+  const n = E.pensionStartTrial(low, E.project(low), 1);
+  assert.deepEqual([n.from, n.options.length], [null, 0]);
+  // Far from pension age: nothing either.
+  const young = renter();
+  young.people[0].pot = 30000; young.spending = 900;
+  const y = Q.build(young, ctx);
+  assert.equal(E.pensionStartTrial(y, E.project(y), 0), null);
+});

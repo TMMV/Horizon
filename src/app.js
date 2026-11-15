@@ -1331,6 +1331,23 @@
         if (k > 0 && k < N) add(rows[k].year, `${x.name}: claim the ${db.dbScheme === 'uss' ? 'USS' : 'workplace'} pension`, `From ${db.startAge}: about ${money(E.incomeAfterCosts(db, p, k) / 12)} a month${db.lumpMultiple > 0 ? `, plus a tax-free lump sum of about ${money(E.incomeAfterCosts(db, p, k) * db.lumpMultiple)}` : ''}. Tell the scheme a few months before.`, null);
       }
     });
+    // When to start taking money from pension pots: what the plan does, and what waiting would change.
+    ps.forEach((x, i) => {
+      const s = E.pensionStartTrial(p, proj, i);
+      if (!s) return;
+      const whose = `${x.name === 'You' ? 'your' : `${x.name}’s`} pension`;
+      const how = `How: ask the pension provider for flexi-access drawdown, or to take it as lump sums; each payment is a quarter tax-free and the rest taxed as income. To plan with another age, change “Draws pension pots from” under More options for ${x.name} (Your figures → Assumptions).`;
+      if (s.from === null) {
+        add('now', `${x.name}: the pension pot is not needed yet`,
+          `Pay, pensions and savings cover the spending in every year of the plan, so it leaves ${whose} (about ${money(s.pot)}) invested. It can be drawn on any time from ${x.pensionAccessAge}, for something big or to help family. From April 2027, what is left in a pension at death counts towards inheritance tax.`,
+          go('Assumptions', 'finances/assumptions'));
+        return;
+      }
+      const opts = s.options.map(o => `from ${o.age} (${o.year}): ${o.short && (!s.short || o.short < s.short) ? `money runs short from ${o.short}` : `${money(Math.abs(o.tax))} ${o.tax <= 0 ? 'less' : 'more'} income tax over the plan and ${money(Math.abs(o.end))} ${o.end >= 0 ? 'more' : 'less'} left at the end`}`);
+      add(s.first === 0 ? 'now' : s.year, `${x.name}: start taking money from the pension${s.first === 0 ? '' : ` in ${s.year} (at ${s.from})`}`,
+        `The plan takes about ${money(s.monthly)} a month from ${whose}${s.first === 0 ? ' this year' : ` from ${s.year}`}, when other income and savings stop covering the spending, keeping it within the lower tax bands where it can.${opts.length ? ` Waiting instead, with savings paying the way meanwhile (today’s money): ${opts.join('; ')}.` : ''} ${how}`,
+        go('Try another age', 'finances/assumptions'));
+    });
     // Working for oneself with nothing going into a pension: what paying in would cost and build.
     ps.forEach((x, i) => {
       const o = E.ownPensionTrial(p, proj, i);
@@ -1356,7 +1373,7 @@
       const r = rows[t];
       const parts = [[r.wPension, 'pensions (a quarter tax-free)'], [r.wIsa, 'ISAs'], [r.wGia, 'the general account'], [r.wCash, 'cash'], [r.wLisa, 'Lifetime ISAs']].filter(x => x[0] > 600);
       if (r.withdrawals < 600) add(t === 0 ? 'now' : r.year, 'Savings no longer needed to live on', 'Pensions and other income cover spending; what is left over is saved again.', null);
-      else add(t === 0 ? 'now' : r.year, `Take about ${m(r.withdrawals)} a month from savings`, `To cover spending of ${m(r.spending)} a month (in ${r.year} pounds) on top of other income: ${parts.map(([v, l]) => `${m(v)} from ${l}`).join(', ')}. In this order, tax stays low.`, null);
+      else add(t === 0 ? 'now' : r.year, `Take about ${m(r.withdrawals)} a month from ${r.wPension > 600 ? (parts.length > 1 ? 'savings and pensions' : 'pensions') : 'savings'}`, `To cover spending of ${m(r.spending)} a month (in ${r.year} pounds) on top of other income: ${parts.map(([v, l]) => `${m(v)} from ${l}`).join(', ')}. In this order, tax stays low.`, null);
     }
 
     // Every year.
@@ -4729,7 +4746,7 @@
           field('State Pension (today)', statePensionInput(p), `Full new State Pension is ${money(R.STATE_PENSION_FULL)} a year (${money(R.STATE_PENSION_FULL / 52)} a week). Type either: your letter or forecast at gov.uk/check-state-pension gives it a week.`),
           field('State Pension age', numInput(...bind(p, 'statePensionAge'), { min: 60, max: 75 }), `Born ${plan().startYear - p.age}: ${R.statePensionAge(plan().startYear - p.age)} under current law.`),
           field('Put off the State Pension', numInput(...bind(p, 'spDefer'), { min: 0, max: 10, suffix: 'years', label: 'Years to put off the State Pension', rerender: 'household' }), spDeferText(p)),
-          field('Can access pension from', numInput(...bind(p, 'pensionAccessAge'), { min: 50, max: 75 }), 'Minimum pension age is 57 from April 2028.'),
+          field('Draws pension pots from', numInput(...bind(p, 'pensionAccessAge'), { min: 50, max: 75, label: 'Draws pension pots from' }), `The earliest age money can come out (${R.MIN_PENSION_AGE} from April 2028, 55 before). A later age leaves the pots invested longer, with savings paying the way meanwhile; the plan’s steps compare it.`),
           field('Student loan', selectInput([['', 'None'], ...Object.entries(R.STUDENT_LOANS).map(([k, v]) => [k, v.label])], () => p.loanPlan, v => {
             p.loanPlan = v;
             if (v && !p.loanEndYear) p.loanEndYear = plan().startYear + Math.max(1, R.STUDENT_LOANS[v].writeOff - Math.max(0, p.age - 22));
