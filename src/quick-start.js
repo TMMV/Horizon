@@ -27,8 +27,9 @@
     civil: { label: 'Civil service', member: 5.45 },
   };
   const MORTGAGE_RATE = 4.5;
+  const OTHER_SCHEME_MEMBER = 12;   // roughly what comes off pay for police, fire or similar schemes (% of pay)
 
-  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, bonus: 0, schemeFigure: 0, loanKind: '', retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, niYears: 0, loan: false, loanOwed: 0 });
+  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, bonus: 0, schemeFigure: 0, loanKind: '', retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, fixedLump: 0, niYears: 0, loan: false, loanOwed: 0 });
   // What a student loan is typically worth when the person does not know theirs.
   const LOAN_TYPICAL = { plan1: 8000, plan2: 45000, plan4: 15000, plan5: 30000 };
   // The plan most likely for someone of that age living there (it can be changed afterwards).
@@ -41,7 +42,8 @@
   function blank(region) {
     return {
       region: region === 'ruk' ? 'ruk' : 'scotland', partner: false, people: [person(), person()],
-      otherIncome: 0, childMoney: 0, childPaid: 0, youngest: null, cash: 0, investments: 0,
+      otherIncome: 0, childMoney: 0, childPaid: 0, youngest: null,
+      childcare: 0, childcareYear: 0, childcareMonth: 0,   // nursery or a childminder a month, last paid in that month and year cash: 0, investments: 0,
       home: '', homeValue: 0, mortgage: 0, mortgagePay: 0, mortgageRate: 0, mortgageFix: 0, rent: 0,
       investments2: 0,   // the partner's own ISAs and investments
       // A move ahead: an owner selling to buy somewhere cheaper (the year and its price), or
@@ -54,7 +56,7 @@
       // in pay { kind: 'pay', who: 0 | 1, amount (the new pay, in that person's way of giving it), year, month }.
       big: [],
       spending: 0,
-      goals: { retire: true, emergency: true, save: false, saveName: 'A new car', saveAmount: 0, saveYear: 0, buy: false, buyPrice: 0, buyYear: 0 },
+      goals: { retire: true, emergency: true, save: false, saveName: '', saveAmount: 0, saveYear: 0, buy: false, buyPrice: 0, buyYear: 0 },
     };
   }
 
@@ -119,6 +121,8 @@
         const pct = (v, d) => (v === null || v === undefined || v === '' || !Number.isFinite(+v) ? d : Math.min(60, Math.max(0, +v)));
         const pension = x.workPension === 'no' ? { employeePension: 0, employerPension: 0 }
           : scheme ? { employeePension: SCHEMES[scheme].member, employerPension: 0, pensionTo: 'db' }
+            // Another scheme with a set pension (police, fire, armed forces): what comes off pay goes to it, not a pot.
+            : x.workPension === 'yes' && x.scheme === 'set' ? { employeePension: pct(x.eePct, OTHER_SCHEME_MEMBER), employerPension: 0, pensionTo: 'db' }
             : { employeePension: pct(x.eePct, AUTO_ENROL.employee), employerPension: pct(x.erPct, AUTO_ENROL.employer) };
         if (gross > 0) {
           income.push({
@@ -145,9 +149,11 @@
         // One that has already started is being paid now, from the age given; one still to come starts next year at the earliest.
         const given = Math.round(x.fixedAge || spaOf(x, startYear));
         const from = given <= age(x) ? Math.max(40, given) : Math.min(75, Math.max(Math.max(50, age(x) + 1), given));
-        income.push({ name: mine ? 'My pension with a set amount' : `${n}’s pension with a set amount`, kind: 'dbpension', dbScheme: 'other', owner: id, tax: 'uk', amount: x.fixedPension, freq: 'year', startAge: from, dbAccrual: 0, lumpMultiple: 0 });
+        // A tax-free lump sum taken with it (from the statement) is a multiple of the pension, paid in its first year.
+        const lump = from > age(x) && x.fixedLump > 0 ? Math.min(30, x.fixedLump / x.fixedPension) : 0;
+        income.push({ name: mine ? 'My pension with a set amount' : `${n}’s pension with a set amount`, kind: 'dbpension', dbScheme: 'other', owner: id, tax: 'uk', amount: x.fixedPension, freq: 'year', startAge: from, dbAccrual: 0, lumpMultiple: Math.round(lump * 1000) / 1000 });
       }
-      if (x.pot > 0 || (x.pay === 'self' && x.ownPension > 0) || (employed(x) && x.workPension !== 'no' && !scheme)) accounts.push({ name: mine ? 'My pension' : `${n}’s pension`, type: 'pension', owner: id, balance: x.pot || 0 });
+      if (x.pot > 0 || (x.pay === 'self' && x.ownPension > 0) || (employed(x) && x.workPension !== 'no' && !scheme && !(x.workPension === 'yes' && x.scheme === 'set'))) accounts.push({ name: mine ? 'My pension' : `${n}’s pension`, type: 'pension', owner: id, balance: x.pot || 0 });
     });
     // A change in pay ahead (a rise, a new job, fewer days): the pay so far stops the month before and
     // the new pay follows on, as typed for that year (it then rises as pay does).
@@ -181,7 +187,7 @@
     if (owner) {
       if (a.homeValue > 0) accounts.push({ id: homeId, name: 'Home', type: 'property', owner: 'joint', balance: a.homeValue, rate: 3, ...(downsize ? { sellYear: downsize } : {}) });
       // The mortgage left when the home is sold is paid off from the sale.
-      if (a.home === 'mortgage' && a.mortgage > 0) accounts.push({ name: 'Mortgage', type: 'debt', owner: 'joint', balance: a.mortgage, rate: a.mortgageRate > 0 && a.mortgageRate < 20 ? a.mortgageRate : MORTGAGE_RATE, payment: a.mortgagePay > 0 ? a.mortgagePay : mortgagePayment(a.mortgage), ...(a.mortgageFix >= startYear ? { fixedUntil: Math.round(a.mortgageFix) } : {}), ...(downsize ? { soldWith: homeId } : {}) });
+      if (a.home === 'mortgage' && a.mortgage > 0) accounts.push({ name: 'Mortgage', type: 'debt', owner: 'joint', balance: a.mortgage, rate: a.mortgageRate > 0 && a.mortgageRate < 20 ? a.mortgageRate : MORTGAGE_RATE, payment: a.mortgagePay > 0 ? a.mortgagePay : mortgagePayment(a.mortgage), ...(a.mortgageFix >= startYear ? { fixedUntil: Math.round(a.mortgageFix), rateAfterFix: MORTGAGE_RATE } : {}), ...(downsize ? { soldWith: homeId } : {}) });
       if (downsize) accounts.push({ name: 'Next home', type: 'property', owner: 'joint', balance: a.movePrice, rate: 3, buyYear: downsize, deposit: 100, mortRate: MORTGAGE_RATE, mortYears: 10 });
     }
     // A property that is rented out: its value, what is owed on it, and the rent.
@@ -206,6 +212,11 @@
       if (!(d.owed > 0)) continue;
       const k = DEBTS[d.kind] || DEBTS.loan;
       accounts.push({ name: k.label, type: 'debt', owner: 'joint', balance: d.owed, rate: d.rate > 0 && d.rate < 100 ? d.rate : k.rate, payment: d.pay || 0 });
+    }
+    // Childcare: nursery, a childminder or after-school club, to the end of the month given.
+    if (a.childcare > 0) {
+      const y = Math.min(startYear + 18, Math.max(startYear, Math.round(a.childcareYear || startYear + 1)));
+      expenses.push({ name: 'Childcare', amount: a.childcare, freq: 'month', inflationLinked: true, endRef: 'year', toYear: y, toMonth: monthOf(a.childcareMonth || 8) });
     }
     // Maintenance paid for children who live elsewhere is spending, until the youngest is 18.
     if (a.childPaid > 0) expenses.push({ name: 'Maintenance for the children', amount: a.childPaid, freq: 'month', inflationLinked: true, endRef: 'year', toYear: startYear + Math.max(1, 18 - Math.min(17, Math.max(0, Math.round(a.youngest || 0)))) });
@@ -245,7 +256,7 @@
     return Math.max(0, Math.round((leftover(build({ ...a, spending: 0 }, opts)) - (saved || 0)) / 10) * 10);
   }
 
-  const api = { MONTHS, DEBTS, AUTO_ENROL, SCHEMES, schemeOf, schemeEstimate, grossOf, employed, MORTGAGE_RATE, LOAN_TYPICAL, loanPlanFor, blank, person, peopleOf, works, nameOf, spaOf, mortgagePayment, build, leftover, spendingFor };
+  const api = { MONTHS, OTHER_SCHEME_MEMBER, DEBTS, AUTO_ENROL, SCHEMES, schemeOf, schemeEstimate, grossOf, employed, MORTGAGE_RATE, LOAN_TYPICAL, loanPlanFor, blank, person, peopleOf, works, nameOf, spaOf, mortgagePayment, build, leftover, spendingFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.QuickStart = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

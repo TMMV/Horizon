@@ -329,7 +329,7 @@ test.describe('Horizon app', () => {
     const added = page.locator('#sec-accounts .item').last();
     await expect(added).toContainText('Interest rate');
     await expect(added).toContainText('Monthly payment');
-    await expect(added.locator('.item-head .tag').first()).toHaveText('Mortgage or loan');
+    await expect(added.locator('.item-head .tag').first()).toHaveText('Mortgage');   // a debt's tag says what it is
     await expect(page.locator('#sec-accounts select[aria-label="Type"]')).toHaveCount(0);
   });
 
@@ -893,7 +893,7 @@ test.describe('Horizon app', () => {
   test('mortgage: rate after the fix and keeping the end date', async ({ page }) => {
     await go(page, 'finances/portfolio');
     await editAll(page, 'accounts');
-    const item = page.locator('#sec-accounts .item').filter({ has: page.locator('.item-head .tag', { hasText: /^Mortgage or loan$/ }) });
+    const item = page.locator('#sec-accounts .item').filter({ has: page.locator('.item-head .tag', { hasText: /^Mortgage$/ }) });
     await item.locator('details.more summary').click();
     await item.locator('input[aria-label="Rate after the fix ends"]').fill('6');
     await item.locator('select[aria-label="When the fix ends"]').selectOption('term');
@@ -2721,8 +2721,15 @@ test.describe('the guide beside the page', () => {
     await fill('Money for children', 510);
     await fill('Maintenance you pay', 120);   // money going out for children is asked for on its own
     await fill('Age of the youngest child', 15);
+    // Childcare, to the last month it is paid.
+    await fill('Childcare a month', 300);
+    await body.locator('select[aria-label="Last month of childcare"]').selectOption('7');
+    await fill('Last year of childcare', 2028);
     await next();
     await pick('Renting');
+    // The rent is asked for before going on: left out, the plan would look far better than it is.
+    await next();
+    await expect(body.locator('.qs-err')).toContainText('the rent a month');
     await fill('Rent a month', 520);
     await next();
     await body.locator('.qs-check', { hasText: 'A student loan comes off my pay' }).click();
@@ -2758,6 +2765,8 @@ test.describe('the guide beside the page', () => {
     const home = plan.accounts.find(a => a.type === 'property');
     expect(home.buyYear).toBe(plan.startYear + 5);
     expect(plan.expenses.find(e => e.name === 'Rent').toYear).toBe(home.buyYear);
+    const care = plan.expenses.find(e => e.name === 'Childcare');
+    expect([care.amount, care.toYear, care.toMonth]).toEqual([300, 2028, 7]);
     const pay = plan.income.filter(i => i.kind === 'salary');
     expect(pay.map(i => [i.name, i.toYear, i.toMonth, i.fromYear, i.fromMonth, !!i.fromJanuary])).toEqual([['My pay', 2027, 12, 0, 1, false], ['My pay from January 2028', 0, 0, 2028, 1, true]]);
     expect(problems).toEqual([]);

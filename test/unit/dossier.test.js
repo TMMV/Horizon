@@ -208,3 +208,17 @@ test('a year that buys a home names the deposit instead of a monthly draw', () =
   // The years either side are the usual monthly amounts.
   assert.equal(D.yearBlock(p, proj, null, 4, []).todo.find(s => s.auto).title, 'Set the monthly amounts for the year');
 });
+
+test('a change in pay is said as a change, not as pay that stops', () => {
+  const a = Q.blank('ruk');
+  a.partner = true;
+  a.people[0] = { ...Q.person(), name: 'Ola', age: 41, pay: 'salary', amount: 58000 };
+  a.people[1] = { ...Q.person(), name: 'Han', age: 39, pay: 'salary', amount: 21000 };
+  Object.assign(a, { cash: 9000, home: 'rent', rent: 1100, spending: 2600 });
+  a.big = [{ kind: 'pay', who: 1, amount: 34000, year: 2027, month: 9 }];
+  const plan = Q.build(a, { startYear: 2026, asOf: '2026-11-15' });
+  const { d } = doc(plan);
+  const y = d.years.find(x => x.year === 2027);
+  assert.ok(y.changes.some(c => /^Han’s pay has given way to Han’s pay from September 2027: about £[\d,]+ this year\.$/.test(c)), y.changes.join(' | '));
+  assert.ok(!y.changes.some(c => /Han’s pay stops/.test(c)), y.changes.join(' | '));
+});

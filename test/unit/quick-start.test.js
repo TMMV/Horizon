@@ -480,3 +480,34 @@ test('when to start taking money from a pension pot: the plan’s year, and what
   const y = Q.build(young, ctx);
   assert.equal(E.pensionStartTrial(y, E.project(y), 0), null);
 });
+
+test('a fix ends on a typical new rate; childcare to a month; another scheme with a set pension and its lump sum', () => {
+  const a = Q.blank('ruk');
+  a.partner = true;
+  a.people[0] = { ...Q.person(), name: 'Pat', age: 57, pay: 'salary', amount: 52000, workPension: 'yes', scheme: 'set', retireAge: 58, fixedPension: 24000, fixedAge: 58, fixedLump: 95000 };
+  a.people[1] = { ...Q.person(), name: 'Sam', age: 56, pay: 'salary', amount: 24000, workPension: 'yes', pot: 45000, retireAge: 63 };
+  Object.assign(a, { cash: 18000, home: 'mortgage', homeValue: 300000, mortgage: 58000, mortgagePay: 640, mortgageRate: 2.1, mortgageFix: 2029, spending: 2400, childcare: 780, childcareYear: 2027, childcareMonth: 8 });
+  const p = Q.build(a, ctx);
+  const m = p.accounts.find(x => x.name === 'Mortgage');
+  assert.deepEqual([m.rate, m.fixedUntil, m.rateAfterFix], [2.1, 2029, Q.MORTGAGE_RATE]);
+  const c = p.expenses.find(e => e.name === 'Childcare');
+  assert.deepEqual([c.amount, c.endRef, c.toYear, c.toMonth], [780, 'year', 2027, 8]);
+  // Pay into the scheme, not a pot; its pension and lump sum from the statement.
+  const pay = p.income.find(i => i.name === 'Pat’s pay');
+  assert.deepEqual([pay.employeePension, pay.employerPension, pay.pensionTo], [Q.OTHER_SCHEME_MEMBER, 0, 'db']);
+  assert.ok(!p.accounts.some(x => x.name === 'Pat’s pension'));
+  const set = p.income.find(i => i.name === 'Pat’s pension with a set amount');
+  assert.ok(Math.abs(set.lumpMultiple * 24000 - 95000) < 50, String(set.lumpMultiple));
+  const proj = E.project(p);
+  assert.ok(proj.pre.eventsIn[1] > 95000, String(proj.pre.eventsIn[1]));   // paid at 58, in 2027, risen with prices
+});
+
+test('working for oneself: the tax paid to HMRC directly', () => {
+  const a = Q.blank('scotland');
+  a.people[0] = { ...Q.person(), name: 'Shon', age: 50, pay: 'self', amount: 31000, pot: 9000, retireAge: 66 };
+  Object.assign(a, { cash: 14500, home: 'rent', rent: 750, spending: 1500 });
+  const p = Q.build(a, ctx), b = E.selfTaxBill(p, E.project(p), 0);
+  assert.ok(Math.abs(b.ni - (31000 - 12570) * 0.06) < 2, String(b.ni));
+  assert.ok(b.tax > 3000 && b.tax < 4200, String(b.tax));
+  assert.equal(E.selfTaxBill(Q.build(renter(), ctx), E.project(Q.build({ ...renter(), spending: 900 }, ctx)), 0), null);
+});

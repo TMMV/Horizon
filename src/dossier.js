@@ -145,7 +145,11 @@
       if (t > 0 && v > 0.5 && was <= 0.5) changes.push(`${item.name} starts: about ${gbp(v)} this year.`);
       const owner = ps.findIndex(x => x.id === item.owner);
       const retiring = item.kind === 'salary' && owner >= 0 && r.ages[owner] === ps[owner].retireAge;
-      if (t > 0 && v <= 0.5 && was > 0.5 && !retiring) changes.push(`${item.name} stops (it paid ${gbp(was)} last year).`);
+      // Pay that carries on as another line (a rise, fewer days, a new job) changes; it does not stop.
+      const next = t > 0 && v <= 0.5 && was > 0.5 && (item.kind === 'salary' || item.kind === 'self')
+        ? plan.income.find(o => o !== item && o.owner === item.owner && o.kind === item.kind && E.incomeAfterCosts(o, plan, t) > 0.5) : null;
+      if (next) changes.push(`${item.name} has given way to ${next.name}: about ${gbp(E.incomeAfterCosts(next, plan, t))} this year.`);
+      else if (t > 0 && v <= 0.5 && was > 0.5 && !retiring) changes.push(`${item.name} stops (it paid ${gbp(was)} last year).`);
       if (v <= 0.5) continue;
       const rise = was > 0.5 ? v / was - 1 : 0;
       const kind = item.kind === 'salary' ? (item.tax === 'none' ? 'take-home pay' : 'pay before tax') : item.kind === 'dbpension' ? 'pension, before tax' : item.kind === 'rental' ? 'rent, after costs' : item.tax === 'none' ? 'no tax due' : 'before tax';

@@ -2064,6 +2064,19 @@
     };
   }
 
+  // The tax a self-employed person pays HMRC themselves in the plan's first year (nothing comes off
+  // their profit): Class 4 National Insurance on the profit, and the profit's share of their income
+  // tax (tax on a salary alongside is taken by PAYE). null without self-employed profit.
+  function selfTaxBill(plan, proj, i) {
+    const P = proj.pre.people[i], r = proj.rows[0];
+    if (!P || !r.persons || !(P.selfProfit[0] > 1000)) return null;
+    const o = r.persons[i], g = proj.pre.g[0], T = taxRules(plan);
+    const share = Math.min(1, P.selfProfit[0] / Math.max(P.selfProfit[0], o.taxable));
+    const ni = plan.household.people[i].age < plan.household.people[i].statePensionAge ? T.selfEmployedNI(P.selfProfit[0], g) : 0;
+    const tax = Math.max(0, o.incomeTax) * share;
+    return { profit: P.selfProfit[0], tax, ni, total: tax + ni };
+  }
+
   // When the plan starts drawing on someone's pension pots, against waiting `later` years more
   // (the pots stay invested and savings pay the way meanwhile): income tax over the plan, what is
   // left at the end (today's money), and the first year money runs short (0: never). For someone within five years of
@@ -2956,7 +2969,7 @@
     incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, isMortgage, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
-    waysThere, ownPensionTrial, goalDebtId, pensionStartTrial, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
+    waysThere, ownPensionTrial, goalDebtId, pensionStartTrial, selfTaxBill, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,
     goalValue, goalTarget, goalYear, debtFreeYear, goalTitle, autoTitle, evaluateGoals, statusOf, assignGoalColours, GOAL_ICONS, crashAt,
     monteCarlo, successRate, streamBands, historicalEcon, historicalRuns,

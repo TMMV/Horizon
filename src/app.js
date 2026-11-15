@@ -1291,7 +1291,7 @@
       }
     }
     const dEnd = rows.findIndex((r, t) => t > 0 && t < N && rows[0].debt > 0.5 && r.debt <= 0.5);
-    if (dEnd > 0) add(rows[dEnd].year, `No more ${debtWord() === 'mortgage' ? 'mortgage' : 'loan or card'} payments`, `The last one was paid during ${rows[dEnd].year - 1}. The payments become savings: the plan then puts ${where(rows[dEnd])} (in ${rows[dEnd].year} pounds).`, go('Set amounts', 'finances/saving'));
+    if (dEnd > 0) add(rows[dEnd].year, `No more ${debtWord() === 'mortgage' ? 'mortgage' : 'loan or card'} payments`, `The last one was paid during ${rows[dEnd].year - 1}. ${where(rows[dEnd]) ? `The payments become savings: the plan then puts ${where(rows[dEnd])} (in ${rows[dEnd].year} pounds).` : 'That money stays in the budget: with more going out than coming in, it makes the gap smaller rather than going into savings.'}`, go('Set amounts', 'finances/saving'));
     const giaStart = rows.findIndex((r, t) => t > 0 && t < N && r.toGia > 100);
     const fromSale = giaStart > 0 && (rows[giaStart].propSold || 0) > 0.5;
     if (fromSale) add(rows[giaStart].year, `The sale puts ${money(rows[giaStart].propSold)} into savings`, `Up to ${money(p.strategy.isaAllowance * ps.length)} of it can go into ISAs that year; the rest goes into a general investment account, where gains are taxed. Each April after, move ${money(p.strategy.isaAllowance * ps.length)} of it into ISAs (“Bed and ISA”).`, go('Saving & investing', 'finances/saving'));
@@ -1330,6 +1330,14 @@
         const k = db.startAge - x.age;
         if (k > 0 && k < N) add(rows[k].year, `${x.name}: claim the ${db.dbScheme === 'uss' ? 'USS' : 'workplace'} pension`, `From ${db.startAge}: about ${money(E.incomeAfterCosts(db, p, k) / 12)} a month${db.lumpMultiple > 0 ? `, plus a tax-free lump sum of about ${money(E.incomeAfterCosts(db, p, k) * db.lumpMultiple)}` : ''}. Tell the scheme a few months before.`, null);
       }
+    });
+    // Working for oneself: the tax is paid to HMRC twice a year, so put it aside as the money comes in.
+    ps.forEach((x, i) => {
+      const b = E.selfTaxBill(p, proj, i);
+      if (!b || b.total < 600) return;
+      add('now', `${x.name}: put aside about ${money(b.total / 12)} a month for the tax bill`,
+        `Working for ${x.name === 'You' ? 'yourself' : 'themselves'}, nothing comes off the profit: at about ${money(b.profit)} a year, the income tax and National Insurance on it are about ${money(b.total)} a year (${money(b.tax)} tax, ${money(b.ni)} NI). Self Assessment collects it on 31 January and 31 July: once a bill is over £1,000, each of those dates takes a payment on account towards the current year, half of the last year’s bill, and anything still owed is paid the next 31 January. Moving about ${money(b.total / 12)} a month into a separate savings account as the money comes in keeps the bills covered. The first time payments on account start, the January bill can be one and a half years’ tax at once.`,
+        go('Cash flow & tax', 'finances/cashflow'));
     });
     // When to start taking money from pension pots: what the plan does, and what waiting would change.
     ps.forEach((x, i) => {
@@ -4556,11 +4564,12 @@
     const isaRoom = s.isaAllowance * people().length;
     add(`${out.length + 1}. Stocks & shares ISAs`, `up to ${money(isaRoom / 12)} a month`, `${money(s.isaAllowance)} each a year (a Lifetime ISA counts within it), tax-free for good and available any time${em.investments ? '; your emergency fund counts them too' : ''}. This year the plan puts in ${money(m.isa + m.lisa)} a month.`);
     if (m.gia > 0.5 || r0.gia > 0.5) add(`${out.length + 1}. General investment account`, `${money(m.gia)} a month now`, 'Only once ISAs are full: gains above the allowance are taxed when you sell. Move it into ISAs each April ("Bed and ISA").');
-    const debt = p.accounts.find(a => a.type === 'debt' && a.balance > 0 && !a.excluded);
+    // The dearest debt: a mortgage, a loan or a card, called what it is.
+    const debt = p.accounts.filter(a => a.type === 'debt' && a.balance > 0 && !a.excluded).sort((x, y) => y.rate - x.rate)[0];
     if (debt) {
       const ret = model.proj.pre.econ.ret[0] * 100;
-      add('Mortgage', debt.rate >= ret - 1 ? 'Worth overpaying' : 'Invest first',
-        debt.rate >= ret - 1 ? `Overpaying earns a sure ${debt.rate}%, close to the ${ret.toFixed(1)}% expected from investing.` : `Investing is expected to earn ${ret.toFixed(1)}% against the ${debt.rate}% the mortgage costs. Overpaying is the safer choice.`,
+      add(debt.name, debt.rate >= ret - 1 ? 'Worth overpaying' : 'Invest first',
+        debt.rate >= ret - 1 ? `Overpaying earns a sure ${debt.rate}%, ${debt.rate > ret + 1 ? 'more than' : 'close to'} the ${ret.toFixed(1)}% expected from investing.` : `Investing is expected to earn ${ret.toFixed(1)}% against the ${debt.rate}% ${debt.name} costs. Overpaying is the safer choice.`,
         ['Compare', () => openComparison('overpay-invest')]);
     }
     return out;
@@ -5348,6 +5357,14 @@
     const months = i > 0 ? -Math.log(1 - (i * a.balance) / m) / Math.log(1 + i) : a.balance / m;
     const end = Math.round(plan().startYear + months / 12);
     let out = `At this payment it’s paid off in about ${end} (${Math.round(months / 12)} years, at ${a.rate}%).`;
+    // A fix that ends with a different rate after it: month by month, the same payment.
+    if (a.fixedUntil >= plan().startYear && a.rateAfterFix !== null && a.rateAfterFix !== undefined && Math.abs(a.rateAfterFix - a.rate) > 0.001 && a.afterFix !== 'term') {
+      const fixMonths = (a.fixedUntil - plan().startYear + 1) * 12;
+      let bal = a.balance, k = 0;
+      for (; bal > 0.5 && k < 600; k++) bal = bal * (1 + (k < fixMonths ? i : a.rateAfterFix / 100 / 12)) - m;
+      out = k >= 600 ? `At ${a.rateAfterFix}% after the fix ends, this payment doesn’t cover the interest: the payment will need to rise.`
+        : `At this payment it’s paid off in about ${Math.round(plan().startYear + k / 12)} (${Math.round(k / 12)} years: ${a.rate}% until the fix ends, then ${a.rateAfterFix}%).`;
+    }
     if (a.termYears > 0 && Math.abs(months / 12 - a.termYears) >= 1.5) {
       const n = a.termYears * 12, need = i > 0 ? (a.balance * i) / (1 - Math.pow(1 + i, -n)) : a.balance / n;
       out += ` To clear it in ${a.termYears} years the payment would be about ${money(need)} a month: check the balance, rate and payment on the statement.`;
@@ -5488,7 +5505,7 @@
       }, () => h('div', { class: 'item' + (a.excluded ? ' excluded' : ''), style: `--item-color:${cssVar(TYPE_COLOR[a.type])}` },
         h('div', { class: 'item-head' },
           h('input', { type: 'text', class: 'name', value: a.name, 'aria-label': 'Account name', oninput: e => { a.name = e.target.value; schedule(); } }),
-          h('span', { class: 'tag' }, a.excluded ? 'Not counted' : ACCOUNT_LABELS[a.type]),
+          h('span', { class: 'tag' }, a.excluded ? 'Not counted' : a.type === 'debt' ? (E.isMortgage(plan(), a) ? 'Mortgage' : 'Loan or card') : ACCOUNT_LABELS[a.type]),
           h('span', { class: 'tag est', 'data-est': a.id, title: 'Estimated value today, moved on from this figure the way the plan expects' }),
           deleteButton(`Remove ${a.name}`, () => removeFrom(p.accounts, a, 'accounts'))),
         h('div', { class: 'fields' }, main),
@@ -7685,7 +7702,10 @@
           QS.employed(x) && x.workPension === 'yes' ? h('div', { class: 'qs-q' }, h('span', { class: 'qs-label' }, 'What kind of pension is it?'),
             qsChoices([['', 'An ordinary workplace pension', 'A pot of money with a company such as Nest, Aviva or Scottish Widows. Most jobs.']], x.scheme || '', v => { x.scheme = v; }),
             h('span', { class: 'qs-hint' }, 'Or one of these, which build a yearly pension for life and not a pot:'),
-            qsChoices(Object.entries(QS.SCHEMES).map(([k, s]) => [k, s.label]), x.scheme || '', v => { x.scheme = v; }, true)) : null,
+            qsChoices([...Object.entries(QS.SCHEMES).map(([k, s]) => [k, s.label]), ['set', 'Police, fire, armed forces or another']], x.scheme || '', v => { x.scheme = v; }, true)) : null,
+          QS.employed(x) && x.workPension === 'yes' && x.scheme === 'set' ? [
+            qsQ(i === 0 ? 'About how much of your pay goes into it?' : `About how much of ${qsName(i)}’s pay goes into it?`, qsNum(() => (x.eePct === null ? QS.OTHER_SCHEME_MEMBER : x.eePct), v => { x.eePct = v; }, 'Own pension contribution, % of pay', { suffix: '% of pay' }), `On the payslip. Not sure? Leave it: ${QS.OTHER_SCHEME_MEMBER}% is about right for the police and fire schemes.`),
+            qsNote('Then type the pension from the yearly statement, and any tax-free lump sum, in the questions below about a pension that pays a set amount.', 'good')] : null,
           QS.employed(x) && x.workPension === 'yes' && QS.SCHEMES[x.scheme] ? (() => {
             const est = h('span', { class: 'qs-hint' });
             const show = () => {
@@ -7698,13 +7718,15 @@
               qsQ('Or, if you have the yearly statement: the pension it shows a year', qsMoney(() => x.schemeFigure, v => { x.schemeFigure = v; }, 'Scheme pension from the statement', { suffix: 'a year' }), 'The figure at the scheme’s pension age, before tax. It is used instead of Horizon’s estimate. Leave empty if you do not have it.'),
               qsNote(`Horizon assumes about ${QS.SCHEMES[x.scheme].member}% of pay comes off for it, and that the pension is taken when work stops (it is smaller if that is before the scheme’s pension age).`, 'good')];
           })() : null,
-          QS.employed(x) && (x.workPension === 'unsure' || (x.workPension === 'yes' && !QS.SCHEMES[x.scheme])) ? h('div', { class: 'qs-row' },
+          QS.employed(x) && (x.workPension === 'unsure' || (x.workPension === 'yes' && !QS.SCHEMES[x.scheme] && x.scheme !== 'set')) ? h('div', { class: 'qs-row' },
             qsQ(i === 0 ? 'You pay in' : `${qsName(i)} pays in`, qsNum(() => (x.eePct === null ? QS.AUTO_ENROL.employee : x.eePct), v => { x.eePct = v; }, 'Own pension contribution, % of pay', { suffix: '% of pay' })),
             qsQ('The employer pays in', qsNum(() => (x.erPct === null ? QS.AUTO_ENROL.employer : x.erPct), v => { x.erPct = v; }, 'Employer pension contribution, % of pay', { suffix: '% of pay' }))) : null,
-          QS.employed(x) && (x.workPension === 'unsure' || (x.workPension === 'yes' && !QS.SCHEMES[x.scheme])) ? h('span', { class: 'qs-hint' }, `On the payslip or the pension letter. Not sure? Leave them: ${QS.AUTO_ENROL.employee}% and ${QS.AUTO_ENROL.employer}% are the usual amounts.`) : null,
+          QS.employed(x) && (x.workPension === 'unsure' || (x.workPension === 'yes' && !QS.SCHEMES[x.scheme] && x.scheme !== 'set')) ? h('span', { class: 'qs-hint' }, `On the payslip or the pension letter. Not sure? Leave them: ${QS.AUTO_ENROL.employee}% and ${QS.AUTO_ENROL.employer}% are the usual amounts.`) : null,
           qsQ(QS.schemeOf(x) ? `Roughly how much is in any other pension pots of ${i === 0 ? 'yours' : `${qsName(i)}’s`}?` : `Roughly how much is in ${qsYour(i)} pensions so far?`, qsMoney(() => x.pot, v => { x.pot = v; }, 'Pension pots so far'), 'All pension pots added together: this job and old ones. It is on the yearly statement or the provider’s app. Not sure? Leave it empty for now and add it when you find out; the answer will be on the cautious side.'),
-          qsQ(x.pay === 'none' ? `Any other pension that pays ${qsYou(i)} a set amount a year, now or later?` : QS.schemeOf(x) ? `Any other pension, from an earlier job, that will pay ${qsYou(i)} a set amount a year?` : `Any pension that will pay ${qsYou(i)} a set amount a year?`, qsMoney(() => x.fixedPension, v => { x.fixedPension = v; }, 'Pension paying a set amount', { suffix: 'a year' }), 'From an old job, or the council, NHS, teachers’ or civil service scheme: the letter or yearly statement says “£X a year from age Y”. Add them together if there is more than one. Leave empty if none, or if you have lost the paperwork (gov.uk/find-pension-contact-details can trace it).' + (x.pay === 'none' ? ' Do not repeat a pension you counted in the step before.' : '')),
-          qsQ('If so, paid from what age?', qsNum(() => x.fixedAge || spa, v => { x.fixedAge = v; }, 'Age the set pension starts'), `As the letter says. If it is already being paid, type the age it started. Not sure? Leave it at ${spa}.`),
+          qsQ(x.pay === 'none' ? `Any other pension that pays ${qsYou(i)} a set amount a year, now or later?` : QS.schemeOf(x) ? `Any other pension, from an earlier job, that will pay ${qsYou(i)} a set amount a year?` : `Any pension that will pay ${qsYou(i)} a set amount a year?`, qsMoney(() => x.fixedPension, v => { x.fixedPension = v; }, 'Pension paying a set amount', { suffix: 'a year' }), 'From an old job, or a public-service scheme (council, NHS, teachers, civil service, police, fire, armed forces): the letter or yearly statement says “£X a year from age Y”. Add them together if there is more than one. Leave empty if none, or if you have lost the paperwork (gov.uk/find-pension-contact-details can trace it).' + (x.pay === 'none' ? ' Do not repeat a pension you counted in the step before.' : '')),
+          h('div', { class: 'qs-row' },
+            qsQ('If so, paid from what age?', qsNum(() => x.fixedAge || spa, v => { x.fixedAge = v; }, 'Age the set pension starts'), `As the letter says. If it is already being paid, type the age it started. Not sure? Leave it at ${spa}.`),
+            qsQ('And a tax-free lump sum then?', qsMoney(() => x.fixedLump, v => { x.fixedLump = v; }, 'Lump sum with the set pension'), 'If the statement shows one, paid when the pension starts. Leave empty if none, or if it has already been paid.')),
           (x.age || 0) < spa ? qsQ(`Years of National Insurance on ${qsYour(i)} State Pension forecast`, qsNum(() => x.niYears, v => { x.niYears = v; }, 'National Insurance years so far', { suffix: 'years' }), 'At gov.uk/check-state-pension (“full years”). 35 give a full State Pension; working years still to come are added. Leave empty if you do not know: Horizon then assumes a full one.') : null,
         ],
         check: () => (QS.employed(x) && !x.workPension ? 'Please choose Yes, No or Not sure.'
@@ -7714,14 +7736,17 @@
     out.push({
       id: 'savings', title: 'Savings, and other money coming in',
       render: () => [
-        qsQ('How much is in bank and savings accounts?', qsMoney(() => a.cash, v => { a.cash = v; }, 'Bank and savings'), 'All accounts added together, including Premium Bonds. If you are usually overdrawn, leave this empty: the overdraft goes in with debts.'),
-        qsQ(a.partner ? `Anything in ${qsName(0) === 'You' ? 'your own' : `${qsName(0)}’s`} ISAs or other investments?` : 'Anything in ISAs or other investments?', qsMoney(() => a.investments, v => { a.investments = v; }, 'ISAs and investments'), 'Stocks and shares ISAs, funds, shares. Not a Lifetime ISA: that is asked next. Leave empty if none or not sure what this is.'),
+        qsQ('How much is in bank and savings accounts?', qsMoney(() => a.cash, v => { a.cash = v; }, 'Bank and savings'), 'All accounts added together, including cash ISAs and Premium Bonds. If you are usually overdrawn, leave this empty: the overdraft goes in with debts.'),
+        qsQ(a.partner ? `Anything in ${qsName(0) === 'You' ? 'your own' : `${qsName(0)}’s`} ISAs or other investments?` : 'Anything in ISAs or other investments?', qsMoney(() => a.investments, v => { a.investments = v; }, 'ISAs and investments'), 'Stocks and shares ISAs, funds, shares. A cash ISA goes in the box above, with the savings. Not a Lifetime ISA: that is asked next. Leave empty if none or not sure what this is.'),
         a.partner ? qsQ(`And in ${qsName(1)}’s?`, qsMoney(() => a.investments2, v => { a.investments2 = v; }, 'Partner’s ISAs and investments'), 'An ISA belongs to one person, so each person’s is kept apart. Leave empty if none.') : null,
         ...qsWho().map((x, i) => ((x.age || 0) < 50 ? h('div', { class: 'qs-row' },
           qsQ(i === 0 ? 'Anything in a Lifetime ISA?' : `Anything in ${qsName(i)}’s Lifetime ISA?`, qsMoney(() => a.lisa[i], v => { a.lisa[i] = v; }, i === 0 ? 'Lifetime ISA' : 'Partner’s Lifetime ISA'), i === 0 ? 'The ISA for a first home or for after 60, with 25% added by the government. Leave empty if none.' : 'Leave empty if none.'),
           qsQ('Paid into it', qsMoney(() => a.lisaPay[i], v => { a.lisaPay[i] = v; }, i === 0 ? 'Paid into the Lifetime ISA a month' : 'Paid into the partner’s Lifetime ISA a month', { suffix: 'a month' }), 'Up to £333 a month gets the 25%.')) : null)),
         qsQ('Any money coming in each month because of children?', qsMoney(() => a.childMoney, v => { a.childMoney = v; }, 'Money for children', { suffix: 'a month' }), 'Child Benefit, maintenance from the other parent, the child part of Universal Credit. Leave empty if none. Maintenance you pay goes in the next box.'),
         qsQ('Do you pay maintenance for children each month?', qsMoney(() => a.childPaid, v => { a.childPaid = v; }, 'Maintenance you pay', { suffix: 'a month' }), 'Money you pay to the other parent for children who live with them. It is counted as spending. Leave empty if none.'),
+        h('div', { class: 'qs-row' },
+          qsQ('Do you pay for childcare?', qsMoney(() => a.childcare, v => { a.childcare = v; }, 'Childcare a month', { suffix: 'a month' }), 'Nursery, a childminder or after-school club, after any free hours or Tax-Free Childcare. Leave empty if none.'),
+          qsQ('Paid until', h('div', { class: 'qs-money' }, qsMonth(() => a.childcareMonth || 8, v => { a.childcareMonth = v; }, 'Last month of childcare'), qsNum(() => a.childcareYear || ctx.startYear + 1, v => { a.childcareYear = v; }, 'Last year of childcare')), 'The last month it is paid, e.g. August before school starts.')),
         qsQ('If either, how old is the youngest child?', qsNum(() => a.youngest, v => { a.youngest = v; }, 'Age of the youngest child'), 'That money, coming in or going out, is counted until the youngest turns 18, then it stops.'),
         qsQ('Any other money coming in each month?', qsMoney(() => a.otherIncome, v => { a.otherIncome = v; }, 'Other money coming in', { suffix: 'a month' }), 'The rest of Universal Credit, money from a lodger or a grown-up child, help from family. Counted for good; you can give it an end date afterwards. Leave empty if none.'),
       ],
@@ -7740,7 +7765,7 @@
         a.home === 'mortgage' ? qsQ('What is the mortgage payment?', qsMoney(() => a.mortgagePay, v => { a.mortgagePay = v; }, 'Mortgage payment a month', { suffix: 'a month' }), 'On the bank statement or the lender’s app.') : null,
         a.home === 'mortgage' ? h('div', { class: 'qs-row' },
           qsQ('Its interest rate, if you know it', qsNum(() => a.mortgageRate, v => { a.mortgageRate = v; }, 'Mortgage interest rate', { suffix: '%' }), `Not sure? Leave it empty: Horizon uses ${QS.MORTGAGE_RATE}%.`),
-          qsQ('Is the rate fixed? Until which year', qsNum(() => a.mortgageFix, v => { a.mortgageFix = v; }, 'Year the fixed rate ends'), 'The plan then reminds you to look for a new deal the year before. Leave empty if not fixed or not sure.')) : null,
+          qsQ('Is the rate fixed? Until which year', qsNum(() => a.mortgageFix, v => { a.mortgageFix = v; }, 'Year the fixed rate ends'), `The plan then reminds you to look for a new deal the year before, and assumes about ${QS.MORTGAGE_RATE}% after it (a typical new deal now; change it afterwards). Leave empty if not fixed or not sure.`)) : null,
         a.home === 'rent' ? qsQ('How much is the rent?', qsMoney(() => a.rent, v => { a.rent = v; }, 'Rent a month', { suffix: 'a month' }), 'Your share, if you split it.') : null,
         a.home === 'family' ? qsQ('Do you pay anything towards the house?', qsMoney(() => a.rent, v => { a.rent = v; }, 'Keep a month', { suffix: 'a month' }), 'Keep or digs. Leave empty if nothing.') : null,
         // A move ahead: selling to buy somewhere cheaper, or moving out to rent.
@@ -7778,6 +7803,7 @@
       ],
       check: () => (!a.home ? 'Please choose one of the four options.'
         : (a.home === 'mortgage' || a.home === 'own') && !(a.homeValue > 0) ? 'Please type roughly what the home is worth: what similar homes nearby have sold for.'
+          : a.home === 'rent' && !(a.rent > 0) ? 'Please type the rent a month (your share, if you split it).'
           : a.home === 'mortgage' && !(a.mortgage > 0) ? 'Please type roughly how much is left on the mortgage. Paid off? Choose “A home I own outright”.'
             : a.home === 'mortgage' && a.mortgageFix > 0 && !(a.mortgageFix >= ctx.startYear && a.mortgageFix <= ctx.startYear + 15) ? `Please type the year the fixed rate ends, from ${ctx.startYear} on, or leave it empty.` : a.let && !(a.letValue > 0) ? 'Please type roughly what the rented-out property is worth, or untick that box.'
         : a.move && (a.home === 'mortgage' || a.home === 'own' || a.home === 'family') && !(a.moveYear > ctx.startYear && a.moveYear <= ctx.startYear + 50) ? `Please type the year of the move, after ${ctx.startYear}, or untick that box.`
@@ -7814,7 +7840,7 @@
       render: () => {
         const base = Math.round(QS.leftover(QS.build({ ...a, spending: 0 }, ctx)));
         const housing = a.home === 'mortgage' ? 'the mortgage' : a.home === 'rent' ? 'rent' : a.home === 'family' && a.rent > 0 ? 'keep' : '';
-        const counted = [housing, a.debts.some(d => d.pay > 0) ? 'debt payments' : ''].filter(Boolean).join(' and ');
+        const counted = [housing, a.debts.some(d => d.pay > 0) ? 'debt payments' : '', a.childcare > 0 ? 'childcare' : ''].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1');
         const result = h('div', { id: 'qsLeft' });
         const show = () => {
           if (qs.spendMode === 'saved') a.spending = Math.max(0, Math.round((base - (qs.saved || 0)) / 10) * 10);
@@ -7893,9 +7919,12 @@
             h('div', { class: 'qs-row' },
               qsQ('What does that kind of home cost today?', qsMoney(() => g.buyPrice, v => { g.buyPrice = v; }, 'Home price today'), 'Look at what similar homes nearby sell for. Horizon assumes a 10% deposit and a 30-year mortgage.'),
               qsQ('In which year?', qsNum(() => g.buyYear || ctx.startYear + 5, v => { g.buyYear = v; }, 'Year to buy')))) : null,
-          check('save', 'Can I save up for something big?', 'A car, a wedding, a trip.'),
+          check('save', 'Can I save up for something big?', (() => {
+            const costs = a.big.filter(b => b.kind === 'cost' && b.amount > 0);
+            return costs.length ? `Something else than ${costs.map(b => `${(b.name || 'the cost').trim()} (${b.year})`).join(', ')}: ${costs.length > 1 ? 'those are' : 'that is'} already in the plan, paid in ${costs.length > 1 ? 'their' : 'its'} year.` : 'A car, a wedding, a trip.';
+          })()),
           g.save ? h('div', { class: 'qs-person' },
-            qsQ('What for?', qsText(() => g.saveName, v => { g.saveName = v; }, 'Saving for')),
+            qsQ('What for?', qsText(() => g.saveName, v => { g.saveName = v; }, 'Saving for', 'A new car')),
             h('div', { class: 'qs-row' },
               qsQ('How much?', qsMoney(() => g.saveAmount, v => { g.saveAmount = v; }, 'Amount to save'), 'In today’s prices. A first-home deposit is often 10% of the price.'),
               qsQ('By which year?', qsNum(() => g.saveYear || ctx.startYear + 5, v => { g.saveYear = v; }, 'Year')))) : null,
