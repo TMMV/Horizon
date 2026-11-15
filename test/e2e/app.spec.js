@@ -150,6 +150,20 @@ test.describe('Horizon app', () => {
     await expect.poll(() => page.locator('#sec-income input').evaluateAll(els => els.filter(e => e.value === 'New job' || e.value === 'Alex salary').length)).toBe(2);
   });
 
+  test('a baby: leave on reduced pay, the pay afterwards, nursery, everyday costs and Child Benefit in one click', async ({ page }) => {
+    await go(page, 'finances/income');
+    await page.click('#sec-income button[data-baby="p2"]');
+    await expect(page.locator('#toast')).toContainText('A baby in 2027: Sam’s pay is halved for that year of leave');
+    const got = await page.evaluate(() => { const H = window.__horizon, p = H.ws.scenarios.find(s => s.id === H.ws.activeId).plan;
+      return { pay: p.income.filter(i => i.kind === 'salary' && i.owner === 'p2').map(i => i.name), costs: p.expenses.filter(e => /^Baby: /.test(e.name)).map(e => [e.name, e.fromYear, e.toYear]), benefit: p.income.filter(i => /Child Benefit/.test(i.name)).length }; });
+    expect(got.pay).toEqual(['Sam take-home pay', 'Sam take-home pay: the year of leave', 'Sam take-home pay: after the baby']);
+    expect(got.costs).toEqual([['Baby: nursery', 2028, 2031], ['Baby: everyday costs', 2027, 2045]]);
+    expect(got.benefit).toBeGreaterThan(0);
+    // The plan's five-year sheet says what is different in the year of the baby.
+    await page.click('#tabDossier');
+    await expect(page.locator('#doc-do')).toContainText('Baby: everyday costs');
+  });
+
   test('the date your figures are as at can be changed on Your figures', async ({ page }) => {
     // The tab is named for what it is for, and Home leads with what you own, then the answers.
     await expect(page.locator('.tab-list button[data-tab^="finances/"]')).toHaveText('Your figures');
@@ -2372,6 +2386,30 @@ test.describe('quick start', () => {
     // "Make it more exact" opens the full guide.
     await short.getByRole('button', { name: 'Make it more exact' }).click();
     await expect(page.locator('#setupPanel')).toBeVisible();
+    expect(problems).toEqual([]);
+  });
+
+  test('the quick start carries on after a reload, with the answers so far; closing it forgets them', async ({ page }) => {
+    const { problems } = await openApp(page, '', { quick: true });
+    const body = page.locator('#qsBody');
+    const fill = (label, v) => body.locator(`input[aria-label="${label}"]`).fill(String(v));
+    await page.click('#qsStart');
+    await body.locator('.qs-choice', { hasText: 'Just me' }).first().click();
+    await fill('Your first name', 'Bea');
+    await fill('Your age', 41);
+    await page.click('#qsNext');
+    await expect(page.locator('#qsStep')).toHaveText(/^Step 2 of/);
+    await page.reload();
+    await expect(page.locator('#quickDlg')).toBeVisible();
+    await expect(page.locator('#qsStep')).toHaveText(/^Step 2 of/);
+    await expect(page.locator('#toast')).toContainText('Carrying on where you left off');
+    await page.click('#qsBack');
+    await expect(body.locator('input[aria-label="Your first name"]')).toHaveValue('Bea');
+    await expect(body.locator('input[aria-label="Your age"]')).toHaveValue('41');
+    // Closed on purpose: the next visit starts afresh.
+    await page.click('#qsClose');
+    await page.reload();
+    await expect(page.locator('#quickDlg')).toBeHidden();
     expect(problems).toEqual([]);
   });
 

@@ -5122,7 +5122,8 @@
         refresh();
       } }, `+ ${kind === 'dbpension' ? 'Defined benefit pension' : label}`)),
         // A change of job or a redundancy, for whoever has pay that runs to retirement.
-        people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && i.endRef === 'retire')).map(x => h('button', { type: 'button', class: 'btn small', 'data-jobchange': x.id, title: 'The pay stops in a month you choose and a new one starts later, with a gap between if there is one', onclick: () => jobChange(x.id) }, people().length > 1 ? `${x.name}: a change of job` : 'A change of job'))),
+        people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && i.endRef === 'retire')).map(x => h('button', { type: 'button', class: 'btn small', 'data-jobchange': x.id, title: 'The pay stops in a month you choose and a new one starts later, with a gap between if there is one', onclick: () => jobChange(x.id) }, people().length > 1 ? `${x.name}: a change of job` : 'A change of job')),
+        people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 1) > 0.5)).map(x => h('button', { type: 'button', class: 'btn small', 'data-baby': x.id, title: 'A year of leave on reduced pay, the pay afterwards, nursery, everyday costs and Child Benefit', onclick: () => babyChange(x.id) }, people().length > 1 ? `A baby: ${x.name} takes the leave` : 'A baby'))),
     ];
   }
 
@@ -7082,6 +7083,18 @@
   // Adding a one-off event, an expense or other items already filled in, then opened to check.
   const addEventOf = extra => { const ev = addEventItem(); Object.assign(ev, extra); renderSection('events'); refresh(); return ev; };
   const addCostOf = extra => addExpenseItem(extra);
+  // A baby next year: a year of leave on half pay for `pid`, the pay afterwards as its own line,
+  // nursery, everyday costs and Child Benefit, all opened or named so they can be corrected.
+  function babyChange(pid) {
+    const p = plan(), who = people()[E.personIndex(p, pid)];
+    if (!p.income.some(i => i.kind === 'salary' && i.owner === pid && E.incomeAfterCosts(i, p, 1) > 0.5)) { toast(`Add ${who.name === 'You' ? 'your' : `${who.name}’s`} pay first (Your figures → Income), then come back to this.`); return null; }
+    const r = SI.addBaby(p, { who: pid });
+    for (const id of r.added) editing.add(id);
+    renderPlan();
+    refresh();
+    toast(`A baby in ${r.year}: ${who.name === 'You' ? 'your' : `${who.name}’s`} pay is halved for that year of leave and has its own line for afterwards (lower it for fewer days a week). Nursery, everyday costs and Child Benefit are added under Spending and Income. Change the year, the pay and the costs to yours.`);
+    return r;
+  }
   // A change of job (or a redundancy): the person's pay stops part-way through next year and a copy
   // of it, "New job", starts a few months later, both opened for the dates and the new pay to be typed.
   function jobChange(pid) {
@@ -7127,6 +7140,8 @@
         }]] },
       { title: 'Another adult at home', how: 'Horizon plans for one or two people. An adult child or a parent living with you fits as money in and out: what they pay you towards the house is other income with no tax, and what you pay for them is spending, each until a year. Their own savings and pensions stay out of your plan.',
         add: [['They pay towards the house', () => { goIncome(); addIncomeOf('other', { owner: 'joint', name: 'Keep from family at home', tax: 'none', endRef: 'year', toYear: yearsFrom(3) }); }], ['We pay for them', () => { goSpend(); addCostOf({ name: 'Costs for family at home', amount: 0, freq: 'month', endRef: 'year', toYear: yearsFrom(3) }); }]] },
+      { title: 'A baby on the way, or planned', how: 'Four things change: the pay of whoever takes the leave (a year on about half is typical once statutory pay runs out), the pay after it (fewer days a week?), nursery until school, and everyday costs to 18. Child Benefit comes in too. The button sets all of them up for next year, for you to correct.',
+        add: people().map(x => [people().length > 1 ? `${x.name} takes the leave` : 'Set up the baby', () => { goIncome(); babyChange(x.id); }]) },
       { title: 'A child’s savings you look after', how: 'A Junior ISA or savings in a child’s name are theirs, so list them without counting them: add the account and, under More options, turn off “Count this account”.',
         add: [['Child’s savings (not counted)', () => { goAccounts(); addAccountOf('cash', { name: 'Child’s savings', excluded: true, note: 'In the child’s name' }); }]] },
       { title: 'An inheritance you may get', how: 'A one-off amount received in a year, in today’s money (after any inheritance tax). Because it is uncertain, most people leave it out of their plan and try it in a copy (Scenarios → Duplicate).',
@@ -7494,13 +7509,26 @@
   const isExamplePlan = () => people().some(x => x.name === 'Alex') && plan().accounts.some(a => /^Alex /.test(a.name));
   const hasOwnPlan = () => !isExamplePlan() && (plan().accounts.length > 0 || plan().income.length > 0 || plan().expenses.length > 0);
 
-  function openQuickStart() {
-    qs = { step: 0, a: QS.blank(plan().household.region), err: '', saved: null, spendMode: '' };
+  // The answers so far are kept in this browser as they are typed, so a reload or a closed tab
+  // carries on where it was. Finishing, or closing the quick start on purpose, forgets them.
+  const QS_DRAFT = 'horizon-quick-draft';
+  const saveQuickDraft = () => { if (!qs) return; try { localStorage.setItem(QS_DRAFT, JSON.stringify({ step: qs.step, a: qs.a, spendMode: qs.spendMode || '' })); } catch { /* ignore */ } };
+  const forgetQuickDraft = () => { try { localStorage.removeItem(QS_DRAFT); } catch { /* ignore */ } };
+  const quickDraft = () => {
+    try {
+      const d = JSON.parse(localStorage.getItem(QS_DRAFT) || 'null');
+      return d && d.a && Array.isArray(d.a.people) && d.step > 0 ? { ...d, a: { ...QS.blank(d.a.region), ...d.a } } : null;
+    } catch { return null; }
+  };
+
+  function openQuickStart(draft) {
+    qs = draft && draft.a ? { step: draft.step, a: draft.a, err: '', saved: null, spendMode: draft.spendMode || '' }
+      : { step: 0, a: QS.blank(plan().household.region), err: '', saved: null, spendMode: '' };
     const dlg = $('#quickDlg');
     if (!dlg.open) dlg.showModal();
     renderQuick();
   }
-  function closeQuickStart() { const dlg = $('#quickDlg'); if (dlg.open) dlg.close(); qs = null; }
+  function closeQuickStart() { const dlg = $('#quickDlg'); if (dlg.open) dlg.close(); qs = null; forgetQuickDraft(); }
 
   const qsCtx = () => ({ startYear: E.currentYear(), asOf: today() });
   const qsWho = () => QS.peopleOf(qs.a);
@@ -7739,7 +7767,7 @@
           h('label', {}, 'Year', qsNum(() => b.year, v => { b.year = v; }, 'In which year')),
           h('button', { type: 'button', class: 'btn ghost icon-btn', 'aria-label': 'Remove this', onclick: () => { a.big.splice(k, 1); renderQuick(true); } }, '✕'))),
         h('div', {}, h('button', { type: 'button', class: 'btn', id: 'qsAddBig', onclick: () => { a.big.push({ kind: 'cost', name: '', amount: 0, year: ctx.startYear + 2 }); renderQuick(true); } }, a.big.length ? '+ Add another' : '+ Add something coming up')),
-        qsNote('Amounts in today’s money: Horizon raises a cost with prices by its year. A new job on different pay, time off work or a baby cannot be answered here: add those afterwards under “Your figures”, where one-off things like these can also be changed.'),
+        qsNote('Amounts in today’s money: Horizon raises a cost with prices by its year. A new job on different pay or a baby cannot be answered here: afterwards, “Your figures” → Income has a button for each (“A change of job”, “A baby”), and one-off things like these can be changed there too.'),
       ],
       check: () => (a.big.some(b => b.amount > 0 && !(b.year >= ctx.startYear && b.year <= ctx.startYear + 60)) ? `Please type a year from ${ctx.startYear} on for each one.` : ''),
     });
@@ -7779,6 +7807,7 @@
     $('#qsStep').textContent = s.bare ? '' : `Step ${qs.step} of ${steps.length - 1}`;
     $('#qsBar').style.width = `${Math.round((qs.step / (steps.length - 1)) * 100)}%`;
     setKids(body, h('h2', { id: 'qsTitle' }, s.title), qs.err ? h('p', { class: 'qs-err', role: 'alert' }, qs.err) : null, s.render());
+    saveQuickDraft();
     $('#qsFoot').hidden = !!s.bare;
     $('#qsNext').textContent = s.last ? 'Show me my plan' : 'Continue';
     body.scrollTop = keepScroll ? top : 0;
@@ -8190,7 +8219,10 @@
     $('#qsClose').addEventListener('click', closeQuickStart);
     $('#qsBack').addEventListener('click', () => { qs.err = ''; qs.step -= 1; renderQuick(); });
     $('#qsNext').addEventListener('click', quickNext);
-    $('#quickDlg').addEventListener('close', () => { qs = null; });
+    $('#quickDlg').addEventListener('close', () => { if (qs) forgetQuickDraft(); qs = null; });
+    // Each answer is kept as it is typed (a reload carries on from it).
+    $('#qsBody').addEventListener('input', saveQuickDraft);
+    $('#qsBody').addEventListener('change', saveQuickDraft);
     // Enter moves on (a form's default would close the dialog).
     $('#qsForm').addEventListener('submit', e => { e.preventDefault(); if (qs && !$('#qsFoot').hidden) quickNext(); });
     // Scrolling the page with the pointer over a number box must not change the number in it.
@@ -8264,8 +8296,10 @@
   // The first time Horizon opens in this browser: offer the guide to set up your own plan.
   // First visit, or the guide was open when the page was left (a reload carries on where it was).
   const guideWasOpen = ws.guides.setup && ws.guides.setup.answers && ws.guides.setup.answers.open === 'yes';
+  // A quick start left part-way (a reload, a closed tab) opens again where it was, with its answers.
+  const draft = quickDraft();
   // A first visit starts with the few plain questions; the full guide reopens where it was left.
-  if (!/[?&]nosetup\b/.test(location.search)) { if (firstVisit) openQuickStart(); else if (guideWasOpen) openSetup(); }
+  if (!/[?&]nosetup\b/.test(location.search)) { if (draft) { openQuickStart(draft); toast('Carrying on where you left off: your answers so far are kept.'); } else if (firstVisit) openQuickStart(); else if (guideWasOpen) openSetup(); }
 
   // Exposed for automated tests only.
   window.__horizon = { get ws() { return ws; }, get model() { return model; }, get route() { return route; }, refresh, showTab, navigate, openReview, openUpdate, openSetup, openDossier, closeDossier };

@@ -53,6 +53,38 @@
     return p;
   }
 
+  // A baby in `year`: `who` takes a year of leave on `leavePct` of pay, then goes back on `backPct`
+  // (its own line, so the pay after can be corrected); nursery from the year after for three years,
+  // everyday costs to 18, and Child Benefit to 16. Amounts a month, in today's money.
+  function addBaby(p, opts = {}) {
+    const who = opts.who || 'p1', year = Math.max(p.startYear, Math.round(opts.year || p.startYear + 1));
+    const leave = opts.leavePct === undefined ? 0.5 : opts.leavePct, back = opts.backPct === undefined ? 1 : opts.backPct;
+    const person = people(p)[E.personIndex(p, who)];
+    const A = person.age + (year - p.startYear);
+    const scaled = (it, f, extra) => {
+      const x = { ...it, id: E.uid(), amount: it.amount * f, bonus: (it.bonus || 0) * f, shares: (it.shares || 0) * f, ...extra };
+      if (it.pensionMode === 'fixed') { x.employeePension = it.employeePension * f; x.employerPension = it.employerPension * f; }
+      if (it.potMode === 'fixed') { x.potEmployee = (it.potEmployee || 0) * f; x.potEmployer = (it.potEmployer || 0) * f; }
+      return x;
+    };
+    const out = [], added = [];
+    for (const it of p.income) {
+      // Only pay that is being earned in the year of the birth is split.
+      if (it.kind !== 'salary' || it.owner !== who || !(E.incomeAfterCosts(it, p, year - p.startYear) > 0.5)) { out.push(it); continue; }
+      if (year > p.startYear) out.push({ ...it, endRef: 'age', endAge: A });
+      if (leave > 0) { const x = scaled(it, leave, { name: `${it.name}: the year of leave`, startRef: 'age', startAge: A, endRef: 'age', endAge: A + 1, note: `${Math.round(leave * 100)}% of the usual pay over the year` }); out.push(x); added.push(x.id); }
+      const y = scaled(it, back, { name: `${it.name}: after the baby`, startRef: 'age', startAge: A + 1, note: back < 1 ? `${Math.round(back * 100)}% of the usual pay` : 'Back on the usual pay: lower it here for fewer days a week' });
+      out.push(y); added.push(y.id);
+    }
+    p.income = out;
+    addExpense(p, { name: 'Baby: nursery', amount: opts.nursery === undefined ? 1100 : opts.nursery, startRef: 'year', fromYear: year + 1, endRef: 'year', toYear: year + 4, category: 'Children', note: 'From the end of the leave until school' });
+    addExpense(p, { name: 'Baby: everyday costs', amount: opts.everyday === undefined ? 350 : opts.everyday, startRef: 'year', fromYear: year, endRef: 'year', toYear: year + 18, category: 'Children' });
+    const R = typeof module !== 'undefined' && module.exports ? require('./uk-rules.js') : root.UKRules;
+    const first = !p.income.some(i => /child benefit/i.test(i.name || ''));
+    p.income.push(E.normalizePlan({ ...p, income: [{ name: first ? 'Child Benefit' : 'Child Benefit for the baby', kind: 'other', owner: 'joint', tax: 'none', amount: Math.round(first ? R.CHILD_BENEFIT.eldest : R.CHILD_BENEFIT.additional), freq: 'year', startRef: 'year', fromYear: year, endRef: 'year', toYear: year + 16, inflationLinked: true }] }).income[0]);
+    return { year, added };
+  }
+
   const childName = p => { const c = ((p.life && p.life.children) || []).filter(x => x.age < 30).sort((a, b) => b.age - a.age)[0]; return c && c.name ? c.name : 'your eldest'; };
 
   // Move to a smaller home in `year`: the home is sold then, the next one (`price` in today's
@@ -362,7 +394,7 @@
     };
   }
 
-  const api = { DRIVERS, IDEAS, COMPARISONS, driversFor, ideasFor, comparisonsFor, optionsOf, variantOf, textOf, driverImpacts, changeSalary, sacrificeMore, downsize, retirementSpending, grossForTakeHome, takeHome };
+  const api = { DRIVERS, IDEAS, COMPARISONS, driversFor, ideasFor, comparisonsFor, optionsOf, variantOf, textOf, driverImpacts, changeSalary, addBaby, sacrificeMore, downsize, retirementSpending, grossForTakeHome, takeHome };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ScenarioIdeas = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

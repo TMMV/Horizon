@@ -233,3 +233,32 @@ test('gilt coupons: reinvested in the gilt, or paid into the ISA', () => {
   const ws = E.normalizeWorkspace({ scenarios: [{ plan: base }], guides: { questions: { date: '2026-11-06', answers: { mix: 'growth', 'pension-amounts-p1': { employeePension: 1000, employerPension: '110', bad: 'x' } } } } });
   assert.deepEqual(ws.guides.questions.answers, { mix: 'growth', 'pension-amounts-p1': { employeePension: 1000, employerPension: 110 } });
 });
+
+test('a baby: a year of leave on reduced pay, the pay afterwards on its own line, nursery, everyday costs and Child Benefit', () => {
+  const SI2 = require('../../src/scenario-ideas.js'), E2 = require('../../src/engine.js'), R2 = require('../../src/uk-rules.js');
+  const p = E2.defaultPlan(2026);
+  for (const i of p.income) if (/child benefit/i.test(i.name)) i.name = 'Other';
+  const who = p.household.people[1], before = E2.project(JSON.parse(JSON.stringify(p)));
+  const r = SI2.addBaby(p, { who: who.id, year: 2029, leavePct: 0.5, backPct: 0.8 });
+  assert.equal(r.year, 2029);
+  const q = E2.normalizePlan(p), proj = E2.project(q);
+  const pay = t => q.income.filter(i => i.kind === 'salary' && i.owner === who.id).reduce((a, i) => a + E2.incomeAfterCosts(i, q, t), 0);
+  const was = t => before.pre.people[1].gross[t] + before.pre.people[1].netPay[t];
+  // The usual pay until the baby, half in the year of leave, four-fifths afterwards.
+  assert.ok(Math.abs(pay(2) - was(2)) < 1, `${pay(2)} ${was(2)}`);
+  assert.ok(Math.abs(pay(3) - was(3) * 0.5) < 1, `${pay(3)} ${was(3)}`);
+  assert.ok(Math.abs(pay(4) - was(4) * 0.8) < 1, `${pay(4)} ${was(4)}`);
+  assert.ok(Math.abs(pay(10) - was(10) * 0.8) < 1);
+  assert.equal(q.income.filter(i => /after the baby/.test(i.name)).length, 1);
+  // Nursery for the three years after the leave; everyday costs for eighteen; Child Benefit for sixteen.
+  const cost = (name, t) => E2.streamAt(q.expenses.find(e => e.name === name), q, t);
+  assert.deepEqual([2, 3, 4, 6, 7].map(t => cost('Baby: nursery', t) > 0), [false, false, true, true, false]);
+  assert.deepEqual([2, 3, 20, 21].map(t => cost('Baby: everyday costs', t) > 0), [false, true, true, false]);
+  const cb = q.income.find(i => i.name === 'Child Benefit');
+  assert.deepEqual([cb.amount, cb.fromYear, cb.toYear], [Math.round(R2.CHILD_BENEFIT.eldest), 2029, 2045]);
+  assert.ok(proj.rows[4].netWorth < before.rows[4].netWorth);
+  // A second child gets the lower rate; the other parent's pay is left alone.
+  SI2.addBaby(p, { who: who.id, year: 2031 });
+  assert.ok(p.income.some(i => i.name === 'Child Benefit for the baby' && i.amount === Math.round(R2.CHILD_BENEFIT.additional)));
+  assert.equal(p.income.filter(i => i.kind === 'salary' && i.owner === p.household.people[0].id).length, 1);
+});
