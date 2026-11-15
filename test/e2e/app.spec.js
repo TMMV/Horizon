@@ -141,7 +141,11 @@ test.describe('Horizon app', () => {
     await go(page, 'finances/income');
     const before = await page.evaluate(() => window.__horizon.model.proj.rows[1].earnings);
     await page.click('#sec-income button[data-jobchange="p1"]');
-    await expect(page.locator('#toast')).toContainText('now stops at the end of June 2027 and “New job” starts in October 2027');
+    // A short form first: nothing changes until it is set up.
+    await expect(page.locator('#sec-income [data-jobdraft="p1"]')).toBeVisible();
+    expect(await page.evaluate(() => window.__horizon.model.proj.rows[1].earnings)).toBe(before);
+    await page.click('#sec-income button[data-jobset="p1"]');
+    await expect(page.locator('#toast')).toContainText('now runs to the end of June 2027, and “New job” starts in October 2027, on the same pay, with no pay between');
     const inc = await page.evaluate(() => { const H = window.__horizon; return H.ws.scenarios.find(s => s.id === H.ws.activeId).plan.income.filter(i => i.kind === 'salary' && i.owner === 'p1').map(i => [i.name, i.startRef, i.fromYear || 0, i.fromMonth || 0, i.endRef, i.toYear || 0, i.toMonth || 0]); });
     expect(inc).toEqual([['Alex salary', 'now', inc[0][2], inc[0][3], 'year', 2027, 6], ['New job', 'year', 2027, 10, 'retire', inc[1][5], 0]]);
     // Three months of 2027 have no pay; later years are as before.
@@ -154,11 +158,33 @@ test.describe('Horizon app', () => {
     await go(page, 'finances/income');
     const before = await page.evaluate(() => window.__horizon.model.proj.rows[1].earnings);
     await page.click('#sec-income button[data-paychange="p1"]');
-    await expect(page.locator('#toast')).toContainText('runs to the end of August 2027 and “New pay” follows straight on from September 2027');
+    await page.click('#sec-income button[data-jobset="p1"]');
+    await expect(page.locator('#toast')).toContainText('runs to the end of August 2027, and “New pay” starts in September 2027, on the same pay.');
     const inc = await page.evaluate(() => { const H = window.__horizon; return H.ws.scenarios.find(s => s.id === H.ws.activeId).plan.income.filter(i => i.kind === 'salary' && i.owner === 'p1').map(i => [i.name, i.toYear || 0, i.toMonth || 0, i.fromYear || 0, i.fromMonth || 0]); });
     expect(inc).toEqual([['Alex salary', 2027, 8, inc[0][3], inc[0][4]], ['New pay', inc[1][1], 0, 2027, 9]]);
     // At the same pay for now, nothing is lost: every year earns what it did.
     await expect.poll(() => page.evaluate(() => window.__horizon.model.proj.rows[1].earnings)).toBeCloseTo(before, 0);
+  });
+
+  test('a change of job with the months and the new pay typed: one entry, one figure', async ({ page }) => {
+    await go(page, 'finances/income');
+    await page.click('#sec-income button[data-jobchange="p1"]');
+    const form = page.locator('#sec-income [data-jobdraft="p1"]');
+    await form.locator('select[aria-label="Last month of the pay now"]').selectOption('10');
+    await form.locator('select[aria-label="First month of the new pay"]').selectOption('11');
+    await form.locator('input[aria-label="New pay a year"]').fill('38000');
+    await page.click('#sec-income button[data-jobset="p1"]');
+    await expect(page.locator('#toast')).toContainText('runs to the end of October 2027, and “New job” starts in November 2027 at £38,000 a year.');
+    const job = await page.evaluate(() => { const H = window.__horizon, p = H.ws.scenarios.find(s => s.id === H.ws.activeId).plan; const j = p.income.find(i => i.name === 'New job'); return [j.fromYear, j.fromMonth, j.amount, j.growth || 0, p.startYear]; });
+    // Held in today's money: £38,000 in 2027, less a year of the pay's own rise.
+    expect(Math.abs(job[2] * Math.pow(1 + job[3] / 100, 2027 - job[4]) - 38000)).toBeLessThan(2);
+    expect(job.slice(0, 2)).toEqual([2027, 11]);
+    // A start before the end is refused.
+    await page.click('#sec-income button[data-jobchange="p2"]');
+    const f2 = page.locator('#sec-income [data-jobdraft="p2"]');
+    await f2.locator('select[aria-label="First month of the new pay"]').selectOption('3');
+    await page.click('#sec-income button[data-jobset="p2"]');
+    await expect(page.locator('#toast')).toContainText('The new pay starts after the last month of the pay now.');
   });
 
   test('money paid once, typed as other income, can be made a one-off amount', async ({ page }) => {
@@ -579,7 +605,7 @@ test.describe('Horizon app', () => {
     await editAll(page, 'accounts');
     const home = page.locator('#sec-accounts .item').nth(7); // Home
     await home.locator('details.more summary').click();
-    await home.locator('input[role="switch"]').uncheck();
+    await home.getByRole('switch', { name: 'Count this account' }).uncheck();
     await settle(page);
     const after = await page.evaluate(() => window.__horizon.model.proj.rows[0].netWorth);
     expect(before - after).toBe(320000);
@@ -2519,6 +2545,32 @@ test.describe('the dossier', () => {
     expect(problems).toEqual([]);
   });
 
+  test('spending more than comes in while working, a dear card, and the £100k top-up by 5 April', async ({ page }) => {
+    const { problems } = await openApp(page);
+    await page.evaluate(() => {
+      const QS = window.QuickStart, a = QS.blank('ruk');
+      a.people[0] = { ...QS.person(), name: 'Femi', age: 58, pay: 'salary', amount: 24500, workPension: 'yes', eePct: 5, erPct: 3, pot: 18000 };
+      Object.assign(a, { cash: 3500, home: 'rent', rent: 640, spending: 1300, family: 150, debts: [{ kind: 'card', owed: 1200, pay: 0, rate: 22 }] });
+      window.__horizon.ws.scenarios[0].plan = QS.build(a, {});
+      window.__horizon.refresh();
+    });
+    const todo = page.locator('#ovTodo');
+    await expect(todo.locator('li', { hasText: /Spending is about £[\d,]+ a month more than comes in/ })).toHaveCount(1);
+    await expect(todo.locator('li', { hasText: 'Pay off Credit card from savings' })).toContainText('The £3,500 in savings would clear it');
+    await expect(todo.locator('li', { hasText: 'Femi: start taking money from the pension' })).toContainText('money purchase annual allowance');
+    await page.evaluate(() => {
+      const QS = window.QuickStart, a = QS.blank('scotland');
+      a.people[0] = { ...QS.person(), name: 'Stu', age: 47, pay: 'salary', amount: 112000, bonus: 15000, workPension: 'yes', eePct: 8, erPct: 10, pot: 310000, retireAge: 57 };
+      Object.assign(a, { cash: 12000, home: 'rent', rent: 1200, spending: 3800 });
+      window.__horizon.ws.scenarios[0].plan = QS.build(a, {});
+      window.__horizon.refresh();
+    });
+    const top = page.locator('#ovTodo li', { hasText: 'decide on a pension top-up' });
+    await expect(top).toContainText(/Stu: income is about £[\d,]+ this year, so about £[\d,]+ more into the pension before 5 April brings it back to £100,000/);
+    await expect(top).toContainText('bonus sacrifice');
+    expect(problems).toEqual([]);
+  });
+
   test('the contents links move within the plan and leave the page behind it alone', async ({ page }) => {
     const { problems } = await openApp(page, 'finances/income');
     await page.click('#tabDossier');
@@ -2764,6 +2816,9 @@ test.describe('the guide beside the page', () => {
     await next();
     await fill('Money for children', 510);
     await fill('Maintenance you pay', 120);   // money going out for children is asked for on its own
+    // Without the youngest child's age it would run for 18 years: asked for before going on.
+    await next();
+    await expect(body.locator('.qs-err')).toContainText('how old the youngest child is');
     await fill('Age of the youngest child', 15);
     await next();
     await pick('Renting');
@@ -2783,6 +2838,12 @@ test.describe('the guide beside the page', () => {
     await fill('Last year of childcare', 2028);
     await expect(lead).toContainText('childcare and pension');
     expect(await lead.textContent()).not.toBe(before);
+    // Money to family: its end shows only once there is an amount.
+    await expect(body.locator('input[aria-label="Last year of money to family"]')).toBeHidden();
+    await fill('Money to family a month', 250);
+    await body.locator('select[aria-label="Last month of money to family"]').selectOption('6');
+    await fill('Last year of money to family', 2028);
+    await expect(lead).toContainText('money to family');
     await pick('what is left at the end');
     await fill('Left over a month', 100);
     await next();
@@ -2815,6 +2876,8 @@ test.describe('the guide beside the page', () => {
     expect(plan.expenses.find(e => e.name === 'Rent').toYear).toBe(home.buyYear);
     const care = plan.expenses.find(e => e.name === 'Childcare');
     expect([care.amount, care.toYear, care.toMonth]).toEqual([300, 2028, 7]);
+    const fam = plan.expenses.find(e => e.name === 'Money to family');
+    expect([fam.amount, fam.toYear, fam.toMonth]).toEqual([250, 2028, 6]);
     const pay = plan.income.filter(i => i.kind === 'salary');
     expect(pay.map(i => [i.name, i.toYear, i.toMonth, i.fromYear, i.fromMonth, !!i.fromJanuary])).toEqual([['My pay', 2027, 12, 0, 1, false], ['My pay from January 2028', 0, 0, 2028, 1, true]]);
     expect(problems).toEqual([]);

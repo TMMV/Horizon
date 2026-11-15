@@ -50,6 +50,7 @@
   const PENSION_TAX_FREE_SHARE = 0.25;
   const MIN_PENSION_AGE = 57;               // from April 2028
   const PENSION_ANNUAL_ALLOWANCE = 60000;
+  const MPAA = 10000;                       // money purchase annual allowance, once a pot is drawn flexibly
   const FREEZE_UNTIL = 2031;                // income tax & NI thresholds frozen until April 2031
   // From April 2029 only the first £2,000 a year of salary-sacrificed pension
   // contributions is free of National Insurance (Autumn Budget 2025, confirmed 2026).
@@ -202,7 +203,7 @@
   const api = {
     TAX_YEAR, PERSONAL_ALLOWANCE, PA_TAPER_START, INCOME_TAX, NI, CGT, IHT,
     ISA_ALLOWANCE, STATE_PENSION_FULL, NI_YEARS, LUMP_SUM_ALLOWANCE, PENSION_TAX_FREE_SHARE,
-    MIN_PENSION_AGE, PENSION_ANNUAL_ALLOWANCE, FREEZE_UNTIL, SACRIFICE_NI_CAP, SACRIFICE_NI_CAP_FROM,
+    MIN_PENSION_AGE, PENSION_ANNUAL_ALLOWANCE, MPAA, FREEZE_UNTIL, SACRIFICE_NI_CAP, SACRIFICE_NI_CAP_FROM,
     CHILD_BENEFIT, TAX_FREE_CHILDCARE, JUNIOR_ISA_ALLOWANCE, ATTENDANCE_ALLOWANCE, DB_SCHEMES, USS_EARLY, LISA, CLASS4, STUDENT_LOANS, selfEmployedNI, SP_DEFER_PER_YEAR,
     statePensionAge, grossFromTakeHome, personalAllowance, incomeTax, marginalRate, nationalInsurance,
     capitalGainsTax, bandTable,

@@ -34,7 +34,7 @@
   const MORTGAGE_RATE = 4.5;
   const OTHER_SCHEME_MEMBER = 8;   // a middle figure for another scheme with a set pension (% of pay)
 
-  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, bonus: 0, schemeFigure: 0, loanKind: '', retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, fixedLump: 0, niYears: 0, loan: false, loanOwed: 0 });
+  const person = () => ({ name: '', age: null, pay: '', amount: 0, hourly: 0, hours: 0, pensionNow: 0, bonus: 0, schemeFigure: 0, schemeAge: 0, schemeLump: 0, loanKind: '', retireAge: null, workPension: '', scheme: '', joined: 0, eePct: null, erPct: null, ownPension: 0, pot: 0, fixedPension: 0, fixedAge: null, fixedLump: 0, niYears: 0, loan: false, loanOwed: 0 });
   // What a student loan is typically worth when the person does not know theirs.
   const LOAN_TYPICAL = { plan1: 8000, plan2: 45000, plan4: 15000, plan5: 30000 };
   // The plan most likely for someone of that age living there (it can be changed afterwards).
@@ -48,20 +48,20 @@
     return {
       region: region === 'ruk' ? 'ruk' : 'scotland', partner: false, people: [person(), person()],
       otherIncome: 0, childMoney: 0, childPaid: 0, youngest: null,
-      childcare: 0, childcareYear: 0, childcareMonth: 0,   // nursery or a childminder a month, last paid in that month and year cash: 0, investments: 0,
-      home: '', homeValue: 0, mortgage: 0, mortgagePay: 0, mortgageRate: 0, mortgageFix: 0, rent: 0,
+      childcare: 0, childcareYear: 0, childcareMonth: 0, family: 0, familyYear: 0, familyMonth: 0,   // nursery or a childminder a month, last paid in that month and year cash: 0, investments: 0,
+      home: '', homeValue: 0, mortgage: 0, mortgagePay: 0, mortgageRate: 0, mortgageFix: 0, mortgageNewRate: 0, mortgageTerm: 0, rent: 0,
       investments2: 0,   // the partner's own ISAs and investments
       // A move ahead: an owner selling to buy somewhere cheaper (the year and its price), or
       // someone living with family moving out to rent (the year and the rent a month).
       move: false, moveYear: 0, moveMonth: 0, movePrice: 0, moveRent: 0,
       lisa: [0, 0], lisaPay: [0, 0],   // each person's Lifetime ISA: what is in it, and what goes in a month
-      let: false, letValue: 0, letMortgage: 0, letPay: 0, letRent: 0,
+      let: false, letValue: 0, letMortgage: 0, letPay: 0, letRent: 0, letSell: 0, letBought: 0,
       debts: [],
       // Things in the years ahead: one-offs { kind: 'cost' | 'money', name, amount, year }, and changes
       // in pay { kind: 'pay', who: 0 | 1, amount (the new pay, in that person's way of giving it), year, month }.
       big: [],
       spending: 0,
-      goals: { retire: true, emergency: true, save: false, saveName: '', saveAmount: 0, saveYear: 0, buy: false, buyPrice: 0, buyYear: 0 },
+      goals: { retire: true, retire2: true, emergency: true, save: false, saveName: '', saveAmount: 0, saveYear: 0, buy: false, buyPrice: 0, buyYear: 0 },
     };
   }
 
@@ -144,11 +144,17 @@
       // (cut for being early, as the scheme does), since few can live on nothing until then.
       if (scheme && grossOf(x, a.region) > 0) {
         const e = schemeEstimate(x, a.region, startYear);
-        const from = Math.min(75, Math.max(55, age(x) + 1, Math.min(people[i].retireAge, e.pensionAge || spaOf(x, startYear))));
         // The statement's own figure, when given, replaces the estimate: it already counts the years to come.
+        // With it, the age it is paid from and its lump sum, as the statement gives them (forces pensions
+        // are often paid from leaving, long before work stops).
         const told = x.schemeFigure > 0;
+        const fromAuto = Math.min(75, Math.max(55, age(x) + 1, Math.min(people[i].retireAge, e.pensionAge || spaOf(x, startYear))));
+        const from = told && x.schemeAge > 0 ? Math.min(75, Math.max(40, age(x) + 1, Math.round(x.schemeAge))) : fromAuto;
+        const lumpMultiple = told && x.schemeLump > 0 ? Math.round(Math.min(30, x.schemeLump / x.schemeFigure) * 1000) / 1000 : e.lumpMultiple;
         income.push({ name: `${mine ? 'My' : `${n}’s`} ${SCHEMES[scheme].label.replace(/ \(.*/, '')} pension`, kind: 'dbpension', dbScheme: scheme, dbJoined: Math.round(x.joined || startYear), dbSalary: grossOf(x, a.region), owner: id, tax: 'uk',
-          amount: told ? Math.round(x.schemeFigure) : Math.round(e.builtUp), dbAccrual: told ? 0 : Math.round(e.perYear), lumpMultiple: e.lumpMultiple, freq: 'year', startAge: from,
+          amount: told ? Math.round(x.schemeFigure) : Math.round(e.builtUp), dbAccrual: told ? 0 : Math.round(e.perYear), lumpMultiple, freq: 'year', startAge: from,
+          // The statement's figure for the age it gives is already that age's amount: not cut again for being early.
+          ...(told && x.schemeAge > 0 ? { dbNpa: from } : {}),
           ...(told ? { note: 'The figure from the yearly statement' } : {}) });
       }
       // A pension that pays a set amount a year (an old job, council, NHS, teachers): used as the statement gives it.
@@ -194,20 +200,24 @@
     if (owner) {
       if (a.homeValue > 0) accounts.push({ id: homeId, name: 'Home', type: 'property', owner: 'joint', balance: a.homeValue, rate: 3, ...(downsize ? { sellYear: downsize } : {}) });
       // The mortgage left when the home is sold is paid off from the sale.
-      if (a.home === 'mortgage' && a.mortgage > 0) accounts.push({ name: 'Mortgage', type: 'debt', owner: 'joint', balance: a.mortgage, rate: a.mortgageRate > 0 && a.mortgageRate < 20 ? a.mortgageRate : MORTGAGE_RATE, payment: a.mortgagePay > 0 ? a.mortgagePay : mortgagePayment(a.mortgage), ...(a.mortgageFix >= startYear ? { fixedUntil: Math.round(a.mortgageFix), rateAfterFix: MORTGAGE_RATE } : {}), ...(downsize ? { soldWith: homeId } : {}) });
+      if (a.home === 'mortgage' && a.mortgage > 0) accounts.push({ name: 'Mortgage', type: 'debt', owner: 'joint', balance: a.mortgage, rate: a.mortgageRate > 0 && a.mortgageRate < 20 ? a.mortgageRate : MORTGAGE_RATE, payment: a.mortgagePay > 0 ? a.mortgagePay : mortgagePayment(a.mortgage), ...(a.mortgageFix >= startYear ? { fixedUntil: Math.round(a.mortgageFix), rateAfterFix: a.mortgageNewRate > 0 && a.mortgageNewRate < 20 ? a.mortgageNewRate : MORTGAGE_RATE, afterFix: 'term', ...(a.mortgageTerm > 0 ? { termAfterFix: Math.min(40, Math.round(a.mortgageTerm)) } : {}) } : {}), ...(downsize ? { soldWith: homeId } : {}) });
       if (downsize) accounts.push({ name: 'Next home', type: 'property', owner: 'joint', balance: a.movePrice, rate: 3, buyYear: downsize, deposit: 100, mortRate: MORTGAGE_RATE, mortYears: 10 });
     }
     // A property that is rented out: its value, what is owed on it, and the rent.
     if (a.let && a.letValue > 0) {
-      accounts.push({ name: 'Rented-out property', type: 'property', owner: 'joint', balance: a.letValue, rate: 3 });
+      // To be sold in a year: its mortgage is paid off from the sale, the rent stops, and the gain on
+      // what it was bought for is taxed (not being the home).
+      const letId = E.uid(), sell = a.letSell >= startYear && a.letSell <= startYear + 40 ? Math.round(a.letSell) : 0;
+      accounts.push({ id: letId, name: 'Rented-out property', type: 'property', owner: 'joint', balance: a.letValue, rate: 3, letOut: true,
+        ...(a.letBought > 0 ? { boughtFor: a.letBought } : {}), ...(sell ? { sellYear: sell } : {}) });
       if (a.letMortgage > 0) {
         // A payment that only covers the interest: the rate is the one that payment implies, so the debt stays level.
         const implied = a.letPay > 0 ? a.letPay * 12 / a.letMortgage * 100 : 0;
         const interestOnly = implied > 0 && a.letPay < mortgagePayment(a.letMortgage) * 0.8;
         accounts.push({ name: 'Mortgage on the rented-out property', type: 'debt', owner: 'joint', balance: a.letMortgage,
-          rate: interestOnly ? Math.floor(Math.min(12, Math.max(1, implied)) * 100) / 100 : MORTGAGE_RATE, payment: a.letPay > 0 ? a.letPay : mortgagePayment(a.letMortgage) });
+          rate: interestOnly ? Math.floor(Math.min(12, Math.max(1, implied)) * 100) / 100 : MORTGAGE_RATE, payment: a.letPay > 0 ? a.letPay : mortgagePayment(a.letMortgage), ...(sell ? { soldWith: letId } : {}) });
       }
-      if (a.letRent > 0) income.push({ name: 'Rent from the property', kind: 'rental', owner: 'joint', tax: 'uk', amount: a.letRent, freq: 'month', endRef: 'end', inflationLinked: true });
+      if (a.letRent > 0) income.push({ name: 'Rent from the property', kind: 'rental', owner: 'joint', tax: 'uk', amount: a.letRent, freq: 'month', ...(sell ? { endRef: 'year', toYear: sell } : { endRef: 'end' }), inflationLinked: true });
     }
     // Moving out in a month of that year: the keep is paid to the month before, the rent from then.
     const outMonth = monthOf(a.moveMonth);
@@ -227,8 +237,16 @@
     }
     // Maintenance paid for children who live elsewhere is spending, until the youngest is 18.
     if (a.childPaid > 0) expenses.push({ name: 'Maintenance for the children', amount: a.childPaid, freq: 'month', inflationLinked: true, endRef: 'year', toYear: startYear + Math.max(1, 18 - Math.min(17, Math.max(0, Math.round(a.youngest || 0)))) });
+    // Money given to family each month (a student, a parent, family abroad): to the end of the month given, or for good.
+    if (a.family > 0) {
+      const y = Math.round(a.familyYear || 0);
+      expenses.push({ name: 'Money to family', amount: a.family, freq: 'month', inflationLinked: true,
+        ...(y >= startYear ? { endRef: 'year', toYear: Math.min(startYear + 60, y), toMonth: monthOf(a.familyMonth || 12) } : {}) });
+    }
     if (a.spending > 0) expenses.push({ name: 'Everything else', amount: a.spending, freq: 'month', inflationLinked: true, note: 'One round figure from the quick start. The Spending check-up splits it into items.' });
     if (g.retire) goals.push({ type: 'retire', owner: 'p1', age: people[0].retireAge, confidence: 85 });
+    // A partner who works has a goal of their own: stopping at their age, with the money lasting for both.
+    if (g.retire2 && people[1] && people[1].retireAge > people[1].age && a.partner && works(a.people[1])) goals.push({ type: 'retire', owner: 'p2', age: people[1].retireAge, confidence: 85 });
     if (g.emergency) goals.push({ type: 'emergency', months: 3, counts: 'cash', year: startYear + 2, confidence: 80 });
     // Buying a home: the goal is the deposit, in savings by the year of the purchase.
     if (buyYear) goals.push({ type: 'netWorth', name: 'Deposit for the home', icon: 'home', measure: 'savings', basis: 'real', amount: Math.round(g.buyPrice * 0.1), year: buyYear, confidence: 80 });

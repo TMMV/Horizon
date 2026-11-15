@@ -154,7 +154,11 @@
       const rise = was > 0.5 ? v / was - 1 : 0;
       const kind = item.kind === 'salary' ? (item.tax === 'none' ? 'take-home pay' : 'pay before tax') : item.kind === 'dbpension' ? 'pension, before tax' : item.kind === 'rental' ? 'rent, after costs' : item.tax === 'none' ? 'no tax due' : 'before tax';
       incoming.push(line(item.name, v, `${cap(kind)}${rise > 0.004 ? `; up ${pct(rise, 1)} on last year` : rise < -0.004 ? `; down ${pct(-rise, 1)} on last year` : ''}`));
+      // A bonus is taxed with the pay but is not part of it: its own line, so the total is what is taxed.
+      const bonus = E.bonusAt(item, plan, t);
+      if (bonus > 0.5) incoming.push(line(`${item.name}: bonus`, bonus, 'Before tax; a usual year’s, it goes up and down'));
     }
+    ps.forEach((x, i) => { const v = pre.people[i].vest[t]; if (v > 0.5) incoming.push(line(`${cap(poss(x.name))} shares vesting`, v, 'Before tax; taxed as pay when they vest')); });
     ps.forEach((x, i) => { const v = pre.people[i].statePension[t]; if (v > 0.5) incoming.push(line(`${cap(poss(x.name))} State Pension`, v, 'Before tax; rises with prices each April')); });
     const before = incoming.reduce((a, l) => a + l.value, 0);
 
@@ -220,7 +224,7 @@
     if (prev && prev.toCash > 0.5 && !(r.toCash > 0.5) && r.withdrawals <= 0.5) changes.push('The cash buffer is full: nothing more needs to go into cash.');
     if (prev && (r.sacrificed || 0) > 0.5 && !((prev.sacrificed || 0) > 0.5)) changes.push(`Pay now goes over the line you chose, so ${gbp(r.sacrificed)} more is salary sacrificed into the pension this year. Ask payroll to raise the sacrifice.`);
     if ((r.unfunded || 0) > 0.5) changes.push(`The money runs short this year by about ${gbp(r.unfunded)}: on average returns, savings and pensions that can be used are spent.`);
-    if ((r.propSold || 0) > 0.5) changes.push(`A property is sold: about ${gbp(r.propSold)} comes in.`);
+    if ((r.propSold || 0) > 0.5) changes.push(`A property is sold: about ${gbp(r.propSold)} comes in${(r.propCgt || 0) > 0.5 ? `, and about ${gbp(r.propCgt)} of capital gains tax is due on the gain (report and pay it within 60 days of the sale)` : ''}.`);
     if ((r.propBought || 0) > 0.5) changes.push(`A home is bought for about ${gbp(r.propBought)}.`);
     if ((r.bondsMatured || 0) > 0.5) changes.push(`Bonds or gilts mature: about ${gbp(r.bondsMatured)} is paid back.`);
 

@@ -222,3 +222,17 @@ test('a change in pay is said as a change, not as pay that stops', () => {
   assert.ok(y.changes.some(c => /^Han’s pay has given way to Han’s pay from September 2027: about £[\d,]+ this year\.$/.test(c)), y.changes.join(' | '));
   assert.ok(!y.changes.some(c => /Han’s pay stops/.test(c)), y.changes.join(' | '));
 });
+
+test('a bonus and shares vesting are lines of their own under money coming in', () => {
+  const plan = E.normalizePlan(E.defaultWorkspace().scenarios[0].plan);
+  const pay = plan.income.find(i => i.kind === 'salary');
+  pay.bonus = 15000;
+  const { d, proj } = doc(E.normalizePlan(plan), { years: 3 });
+  const g = d.years[0].groups.find(x => x.id === 'in');
+  const line = g.lines.find(l => l.label === `${pay.name}: bonus`);
+  assert.ok(line && Math.abs(line.value - E.bonusAt(pay, plan, 0)) < 1, JSON.stringify(g.lines.map(l => l.label)));
+  // The total is everything taxed as earnings, the bonus included.
+  const r = proj.rows[0];
+  assert.ok(Math.abs(g.total.value - sum(g.lines)) < 1);
+  assert.ok(g.total.value >= r.earnings - 1, `${g.total.value} < ${r.earnings}`);
+});

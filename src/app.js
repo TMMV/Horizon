@@ -1195,6 +1195,14 @@
     const hidden = new Set(ws.dismissed);
     const ins = B.insights(p, proj).filter(i => !hidden.has(i.id) && i.tone !== 'good');
 
+    // Now: more going out than coming in while still working is the first thing to know.
+    if (mp.shortfall > 20 && ps.some(x => x.retireAge > x.age)) {
+      const r0 = rows[0];
+      const from = [[r0.wCash, 'savings'], [(r0.wIsa || 0) + (r0.wGia || 0), 'investments'], [r0.wPension, 'pensions']].filter(x => x[0] > 100).map(x => x[1]);
+      add('now', `Spending is about ${money(mp.shortfall)} a month more than comes in`,
+        `The plan takes the difference from ${from.length ? from.join(' and then ') : 'savings'}${r0.wPension > 100 ? ', although pay is still coming in' : ''}, so there is less each year for later, and the answers on Home count on it carrying on. To close the gap: spend less (Your figures → Spending has each item), or more coming in. If the figure looks too high, check the spending typed in: a bank statement shows what really goes out.`,
+        go('Spending', 'finances/spending'));
+    }
     // Now: where this month's money goes.
     const isas = p.accounts.filter(a => a.type === 'isa' && !a.excluded);
     if (mp.isa > 0.5) {
@@ -1234,6 +1242,19 @@
     if (mp.hiDebt > 0.5) {
       const dear = p.accounts.filter(a => a.type === 'debt' && !a.excluded && a.balance > 0 && a.rate >= 8).sort((x, y) => y.rate - x.rate);
       add('now', `Pay off ${dear.map(a => a.name).join(' and ') || 'expensive debt'} first: ${money(mp.hiDebt)} a month more`, `At ${dear.map(a => `${a.rate}%`).join(' and ')}, it costs more than any saving or investment earns, so everything left over goes to it before saving. Moving it to a 0% balance transfer card would save the interest meanwhile.${mp.cash > 0.5 ? ' The amount is this year’s total spread over twelve months: it is cleared within the year.' : ''}`, go('Accounts', 'finances/portfolio'));
+    } else {
+      // Nothing left over to pay it off with: say what it costs, and whether savings would clear it.
+      const dear = p.accounts.filter(a => a.type === 'debt' && !a.excluded && a.balance > 0 && a.rate >= 8).sort((x, y) => y.rate - x.rate);
+      if (dear.length) {
+        const owed = dear.reduce((acc, a) => acc + a.balance, 0), cost = dear.reduce((acc, a) => acc + a.balance * a.rate / 100, 0);
+        const cash = p.accounts.filter(a => a.type === 'cash' && !a.excluded).reduce((acc, a) => acc + a.balance, 0);
+        const names = dear.map(a => a.name).join(' and ');
+        add('now', cash >= owed ? `Pay off ${names} from savings` : `${names}: the dearest money you have`,
+          `At ${dear.map(a => `${a.rate}%`).join(' and ')}, the ${money(owed)} owed costs about ${money(cost)} a year in interest, more than any saving earns. ${cash >= owed
+            ? `The ${money(cash)} in savings would clear it, leaving ${money(cash - owed)}: a smaller cash buffer, but one that no longer has to cover the interest. Nothing is left over each month to pay it off from pay.`
+            : 'Nothing is left over each month to pay it off faster, so any spare money, before saving, is best put there.'} Moving it to a 0% balance transfer card would stop the interest meanwhile.`,
+          go('Accounts', 'finances/portfolio'));
+      }
     }
     if (mp.cash > 0.5) {
       const out12 = (rows[0].spending + (rows[0].debtRegular || 0)) / 12;
@@ -1293,8 +1314,12 @@
     const dEnd = rows.findIndex((r, t) => t > 0 && t < N && rows[0].debt > 0.5 && r.debt <= 0.5);
     if (dEnd > 0) add(rows[dEnd].year, `No more ${debtWord() === 'mortgage' ? 'mortgage' : 'loan or card'} payments`, `The last one was paid during ${rows[dEnd].year - 1}. ${where(rows[dEnd]) ? `The payments become savings: the plan then puts ${where(rows[dEnd])} (in ${rows[dEnd].year} pounds).` : 'That money stays in the budget: with more going out than coming in, it makes the gap smaller rather than going into savings.'}`, go('Set amounts', 'finances/saving'));
     const giaStart = rows.findIndex((r, t) => t > 0 && t < N && r.toGia > 100);
-    const fromSale = giaStart > 0 && (rows[giaStart].propSold || 0) > 0.5;
-    if (fromSale) add(rows[giaStart].year, `The sale puts ${money(rows[giaStart].propSold)} into savings`, `Up to ${money(p.strategy.isaAllowance * ps.length)} of it can go into ISAs that year; the rest goes into a general investment account, where gains are taxed. Each April after, move ${money(p.strategy.isaAllowance * ps.length)} of it into ISAs (“Bed and ISA”).`, go('Saving & investing', 'finances/saving'));
+    // A sale, or a sum coming in, fills the ISAs at once: one amount that year, not a monthly one.
+    const lumpIn = giaStart > 0 ? (rows[giaStart].propSold || 0) + (pre.eventsIn[giaStart] || 0) : 0;
+    const fromSale = giaStart > 0 && lumpIn > rows[giaStart].toGia * 0.5;
+    const rg = rows[giaStart] || {}, sold = (rg.propSold || 0) > 0.5;
+    // What is left of it once a mortgage on the property is paid off and the tax on the gain is paid.
+    if (fromSale) add(rg.year, `The ${sold ? 'sale' : 'money coming in'} puts ${money(lumpIn - (sold ? rg.lumpOverpay || 0 : 0) - (rg.propCgt || 0))} into savings`, `Up to ${money(p.strategy.isaAllowance * ps.length)} of it can go into ISAs that year; the rest goes into a general investment account, where gains are taxed. Each April after, move ${money(p.strategy.isaAllowance * ps.length)} of it into ISAs (“Bed and ISA”).`, go('Saving & investing', 'finances/saving'));
     else if (giaStart > 0 && !(dEnd > 0 && giaStart === dEnd)) add(rows[giaStart].year, 'ISAs full: the rest goes into the general account', `About ${m(rows[giaStart].toGia)} a month at first, where gains and dividends are taxed.${p.strategy.pensionFirst ? '' : ' “Pensions first” would put it into pensions with tax relief instead.'}`, ['Compare the options', () => openComparison('after-isa')]);
     const penStart = rows.findIndex((r, t) => t < N && (r.toPension || 0) > 0.5);
     if (penStart >= 0) add(penStart === 0 ? 'now' : rows[penStart].year, `Pay ${m(rows[penStart].toPension)} a month more into pensions`, 'Pensions first: once the ISAs are full, into the pension of whoever pays the most tax (with tax relief on top), by salary sacrifice or a personal contribution.', go('Saving & investing', 'finances/saving'));
@@ -1337,6 +1362,13 @@
       const what = [...p.events.filter(e => e.kind === 'income' && e.year === year).map(e => e.name),
         ...p.income.filter(i => i.kind === 'dbpension' && i.lumpMultiple > 0 && ps.some(x => x.id === i.owner && x.age + w.t === i.startAge)).map(i => `the lump sum from ${i.name}`)];
       const saved = `With nothing else decided, the plan saves it: ISAs first (up to ${money(p.strategy.isaAllowance)} each a tax year), then the general account, and draws on it when needed.`;
+      if (w.chosen) {
+        const left = w.amount - w.chosen.pay;
+        add(w.t === 0 ? 'now' : year, `${money(w.amount)} coming in: pay ${money(w.chosen.pay)} off ${w.chosen.debt}`,
+          `${what.length ? `${what.join(' and ')}. ` : ''}As set under Spending (a one-off “Pay off a loan” in ${year}).${left > 500 ? ` The other ${money(left)} is saved: ISAs first.` : ''} Before paying, ask the lender for a settlement figure and whether there is an early repayment charge; keep enough in cash for emergencies. To weigh it against saving the money, remove that one-off and this line shows both.`,
+          go('Spending', 'finances/spending'));
+        continue;
+      }
       if (!w.debt) {
         add(w.t === 0 ? 'now' : year, `${money(w.amount)} coming in: what to do with it`, `${what.length ? `${what.join(' and ')}. ` : ''}${saved} Use this year’s ISA allowances first: what goes in stays tax-free for good.`, go('Saving & investing', 'finances/saving'));
         continue;
@@ -1374,7 +1406,9 @@
       }
       const opts = s.options.map(o => `from ${o.age} (${o.year}): ${o.short && (!s.short || o.short < s.short) ? `money runs short from ${o.short}` : `${money(Math.abs(o.tax))} ${o.tax <= 0 ? 'less' : 'more'} income tax over the plan and ${money(Math.abs(o.end))} ${o.end >= 0 ? 'more' : 'less'} left at the end`}`);
       add(s.first === 0 ? 'now' : s.year, `${x.name}: start taking money from the pension${s.first === 0 ? '' : ` in ${s.year} (at ${s.from})`}`,
-        `The plan takes about ${money(s.monthly)} a month from ${whose}${s.first === 0 ? ' this year' : ` from ${s.year}`}, when other income and savings stop covering the spending, keeping it within the lower tax bands where it can.${opts.length ? ` Waiting instead, with savings paying the way meanwhile (today’s money): ${opts.join('; ')}.` : ''} ${how}`,
+        `The plan takes about ${money(s.monthly)} a month from ${whose}${s.first === 0 ? ' this year' : ` from ${s.year}`}, when other income and savings stop covering the spending, keeping it within the lower tax bands where it can.${s.from < x.retireAge
+          ? ` That is while ${x.name === 'You' ? 'you are' : `${x.name} is`} still working, to cover spending that pay does not: spending less instead keeps the pot growing. Once money is taken this way, no more than ${money(R.MPAA)} a year can go into pensions with tax relief (the money purchase annual allowance); taking only the tax-free quarter, or small pots, does not count.`
+          : ''}${opts.length ? ` Waiting instead, with savings paying the way meanwhile (today’s money): ${opts.join('; ')}.` : ''} ${how}`,
         go('Try another age', 'finances/assumptions'));
     });
     // Working for oneself with nothing going into a pension: what paying in would cost and build.
@@ -1445,8 +1479,12 @@
         `Up to ${money(R.LISA.maxContribution)} a tax year gets 25% added (up to ${money(R.LISA.maxContribution * R.LISA.bonus)}). The bonus on anything not paid in by 5 April is lost for good.`, go('Set amounts', 'finances/saving'), `${endY}-03-01`);
       if (earns('salary') || earns('self')) {
         const total = pre.people.reduce((acc, P) => acc + (P.contrib[0] || 0), 0) + (r0.toPension || 0);
+        // Over £100k: the top-up that brings the year's income back to the line, all of it before 5 April.
+        const trap = ps.map((x, i) => ({ x, i, over: aniAt(i, 0).ani - R.PA_TAPER_START * pre.g[0] }))
+          .filter(o => o.over > 100 && o.over < 2 * R.PERSONAL_ALLOWANCE * pre.g[0]);
+        const trapText = trap.map(({ x, i, over }) => ` ${x.name}: income is about ${money(over + R.PA_TAPER_START * pre.g[0])} this year, so about ${money(over)} more into the pension before 5 April brings it back to ${money(R.PA_TAPER_START)}, where each £1 paid in saves over 60% in tax.${p.income.some(it => it.kind === 'salary' && it.owner === x.id && it.bonus > 0) ? ' A bonus can usually be paid into the pension instead of as pay (bonus sacrifice): ask payroll before it is paid.' : ''} It is a top-up for the whole tax year, not a monthly amount.`).join('');
         add('tax', `${by}: decide on a pension top-up`,
-          `Anything paid into a pension before 5 April gets this tax year’s relief${(r0.hicbc || 0) > 0.5 ? `, and brings down the Child Benefit charge (about ${money(r0.hicbc)} a year in the plan)` : ''}. ${total > 0.5 ? `The plan pays in ${byThen(total)}, employers included` : 'The plan pays nothing in for now'}; up to ${money(R.PENSION_ANNUAL_ALLOWANCE)} a year is allowed (no more than you earn). It is worth most to anyone paying higher-rate tax. Money in a pension cannot be taken out before ${Math.min(...ps.map(x => x.pensionAccessAge))}.`, go('Saving & investing', 'finances/saving'), `${endY}-03-01`);
+          `Anything paid into a pension before 5 April gets this tax year’s relief${(r0.hicbc || 0) > 0.5 ? `, and brings down the Child Benefit charge (about ${money(r0.hicbc)} a year in the plan)` : ''}.${trapText} ${total > 0.5 ? `What the plan already pays in, employers included, is ${byThen(total)}: that is not a top-up` : 'The plan pays nothing in for now'}; up to ${money(R.PENSION_ANNUAL_ALLOWANCE)} a year is allowed (no more than you earn). It is worth most to anyone paying higher-rate tax. Money in a pension cannot be taken out before ${Math.min(...ps.map(x => x.pensionAccessAge))}.`, go('Saving & investing', 'finances/saving'), `${endY}-03-01`);
       }
     }
     // Next year: the amounts to set up, against this year's.
@@ -1565,7 +1603,7 @@
         h('div', { class: 'gt-facts' }, badge(st), h('span', { class: 'gt-when' }, goalWhen(res)),
           prog && prog.target > 0 ? h('div', { class: 'gt-progress' },
             h('div', { class: 'gt-bar', role: 'img', 'aria-label': `${pct(Math.min(1, prog.cur / prog.target))} of the target today` }, h('span', { style: `width:${Math.min(100, (prog.cur / prog.target) * 100)}%` })),
-            h('span', {}, `${fmtCompact(prog.cur)} of ${fmtCompact(prog.target)}${prog.perYear ? ' a year' : ''} today`)) : null)),
+            h('span', {}, progressText(prog, res))) : null)),
       (() => { const a = goalActions(res).find(x => x.main); return a ? h('p', { class: 'gt-action' }, h('span', {}, 'This year'), h('strong', {}, `${a.label} ${a.value}`)) : null; })(),
       driverLine(g.id));
     }), 'Goals', 'goals'));
@@ -1655,11 +1693,19 @@
   const chanceByYear = res => res.byYear || model.mc.fundedByYear;
   const chanceLabel = g => ({ emergency: 'Covered that year', debtFree: 'Mortgage-free by then', retire: 'Money still lasting' }[g.type] || 'Reached by then');
 
-  function goalProgressBar(prog) {
+  // "£12K of £17K": today's amount against the target. Short of it, "so far", with the year it is
+  // due, so a goal that is on track ("Yes") does not read as already missing.
+  function progressText(prog, res) {
+    const due = res && res.goal && res.goal.type !== 'retire' && res.goal.year > plan().startYear ? res.goal.year : 0;
+    const of = `${fmtCompact(prog.cur)} of ${fmtCompact(prog.target)}${prog.perYear ? ' a year' : ''}`;
+    return prog.cur + 0.5 >= prog.target ? `${of}: there today` : `${of} so far${due ? `, needed by ${due}` : ''}`;
+  }
+
+  function goalProgressBar(prog, res) {
     if (!prog || !(prog.target > 0)) return null;
     return h('div', { class: 'gt-progress' },
       h('div', { class: 'gt-bar', role: 'img', 'aria-label': `${pct(Math.min(1, prog.cur / prog.target))} of the target today` }, h('span', { style: `width:${Math.min(100, (prog.cur / prog.target) * 100)}%` })),
-      h('span', {}, `${fmtCompact(prog.cur)} of ${fmtCompact(prog.target)}${prog.perYear ? ' a year' : ''} today`));
+      h('span', {}, progressText(prog, res)));
   }
 
   // ---- one goal's own page
@@ -1713,7 +1759,7 @@
         h('div', {}, h('span', { class: 'rv-k' }, 'On average returns'), h('strong', {}, goalWhen(res))),
         h('div', {}, h('span', { class: 'rv-k' }, 'Chance'), h('strong', {}, `${pct(res.probability)} ${g.type === 'retire' ? 'the money lasts' : `by ${g.year}`}`)),
         h('div', {}, h('span', { class: 'rv-k' }, 'Measured from'), h('strong', {}, `Your figures as at ${fmtDate(asOf())}`))),
-      goalProgressBar(goalProgress(res)),
+      goalProgressBar(goalProgress(res), res),
       h('p', { class: 'note' }, res.summary));
 
     const track = h('section', { class: 'card', id: 'gpTrack' });
@@ -4765,7 +4811,11 @@
           });
           return input;
         })()),
-        field('Retirement age', numInput(...bind(p, 'retireAge'), { min: 16, max: 100 }))),
+        field('Retirement age', numInput(() => p.retireAge, v => {
+          // A goal testing the planned age moves with it (one that tests another age stays).
+          for (const g of plan().goals) if (g.type === 'retire' && E.retiree(plan(), g).id === p.id && g.age === p.retireAge) g.age = v;
+          p.retireAge = v;
+        }, { min: 16, max: 100 }))),
       more(`person-${i}`, 'More options',
         h('div', { class: 'fields' },
           field('Plan until age', numInput(...bind(p, 'endAge'), { min: 50, max: 120 })),
@@ -5185,17 +5235,26 @@
         refresh();
       } }, `+ ${kind === 'dbpension' ? 'Defined benefit pension' : label}`)),
         // A change of job or a redundancy, for whoever has pay that runs to retirement.
-        people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && i.endRef === 'retire')).map(x => h('button', { type: 'button', class: 'btn small', 'data-jobchange': x.id, title: 'The pay stops in a month you choose and a new one starts later, with a gap between if there is one', onclick: () => jobChange(x.id) }, people().length > 1 ? `${x.name}: a change of job` : 'A change of job')),
-        people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && i.endRef === 'retire')).map(x => h('button', { type: 'button', class: 'btn small', 'data-paychange': x.id, title: 'The pay changes from a month you choose, with no gap: a rise, a promotion, or fewer days a week', onclick: () => jobChange(x.id, false) }, people().length > 1 ? `${x.name}: a pay rise or fewer days` : 'A pay rise or fewer days')),
+        people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && i.endRef === 'retire')).map(x => h('button', { type: 'button', class: 'btn small', 'data-jobchange': x.id, title: 'The pay stops in a month you choose and a new one starts later, with a gap between if there is one', onclick: () => openJobDraft(x.id) }, people().length > 1 ? `${x.name}: a change of job` : 'A change of job')),
+        people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && i.endRef === 'retire')).map(x => h('button', { type: 'button', class: 'btn small', 'data-paychange': x.id, title: 'The pay changes from a month you choose, with no gap: a rise, a promotion, or fewer days a week', onclick: () => openJobDraft(x.id, false) }, people().length > 1 ? `${x.name}: a pay rise or fewer days` : 'A pay rise or fewer days')),
         people().some(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 1) > 0.5))
           ? h('label', { class: 'baby-year' }, 'A baby in', numInput(() => babyYear || p.startYear + 1, v => { babyYear = Math.round(v); }, { min: p.startYear, max: p.startYear + 20, label: 'Year of the baby' })) : null,
         people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 1) > 0.5)).map(x => h('button', { type: 'button', class: 'btn small', 'data-baby': x.id, title: 'A year of leave on reduced pay, the pay afterwards, nursery, everyday costs and Child Benefit', onclick: () => babyChange(x.id) }, people().length > 1 ? `A baby: ${x.name} takes the leave` : 'A baby'))),
+      jobDraftForm(p),
     ];
   }
 
+  // Pay that starts part way through this plan year: the first year holds only a few months of it,
+  // so say when it starts rather than show that sliver as if it were the yearly amount.
+  function startsLater(item, p) {
+    return item.startRef === 'year' && item.amount > 0 && E.incomeAfterCosts(item, p, 0) > 0 && E.partYear(item, p, 0) < 0.99
+      ?`${money(item.amount)} a ${item.freq === 'month' ? 'month' : 'year'} from ${QS.MONTHS[Math.max(1, item.fromMonth || 1) - 1]} ${item.fromYear}` : '';
+  }
   function incomeTag(item, p) {
     const afterCosts = E.incomeAfterCosts(item, p, 0);
     const net = E.taxOf(item, p) === 'flat' ? afterCosts * (1 - item.taxRate / 100) : afterCosts;
+    const later = startsLater(item, p);
+    if (later) return later;
     return net > 0 ? `${money(net / 12)}/month now` : notYetText(item, p);
   }
 
@@ -5212,6 +5271,8 @@
     const afterCosts = E.incomeAfterCosts(item, p, 0);
     const net = E.taxOf(item, p) === 'flat' ? afterCosts * (1 - item.taxRate / 100) : afterCosts;
     if (!(net > 0)) return { main: notYetText(item, p), other: '' };
+    const later = startsLater(item, p);
+    if (later) return { main: later, other: `${money(net)} of it in the plan’s first year` };
     return item.freq === 'year' ? { main: `${money(net)} a year`, other: `${money(net / 12)} a month` } : { main: `${money(net / 12)} a month`, other: `${money(net)} a year` };
   }
 
@@ -5471,6 +5532,8 @@
           } }, `+ Goal: the deposit by ${a.buyYear}`)));
         }
         extra.push(field('Sell in year', numInput(...bind(a, 'sellYear'), { min: 0, max: 2100 }), '0 = keep. Sale money is saved or invested (its mortgage, if marked under the mortgage’s More options, is paid off first); to move, add the next home as “Buying it later” in the same year.'));
+        extra.push(field('Not the home', switchInput('Let out, or a second home', ...bind(a, 'letOut'), { rerender: 'accounts' }), 'Its gain is then taxed when it is sold (capital gains tax, due within 60 days). The home you live in is not taxed.'));
+        if (a.letOut) extra.push(field('Bought for', moneyInput(...bind(a, 'boughtFor')), 'The price paid, plus buying costs and improvements such as an extension. 0 = not known: no tax is worked out.'));
         if (!buying) {
           extra.push(h('div', { class: 'field-group pot-alongside equity-release' },
             h('h4', {}, 'Equity release (a lifetime mortgage)'),
@@ -5508,7 +5571,7 @@
           a.rate > 0 ? null : `0% = no interest (e.g. family). Not sure? On the statement; typical now: a mortgage about ${QS.MORTGAGE_RATE}%, a loan or car finance about 9%, a credit card about 23%.`));
         main.push(field('Monthly payment', moneyInput(...bind(a, 'payment')), h('span', { 'data-payoff': a.id }, payoffText(a))));
         extra.push(field('Years left on the loan', numInput(...bind(a, 'termYears'), { min: 0, max: 40, label: 'Years left on the loan', rerender: 'accounts' }), '0 = not sure. From the statement; checked against the payment.'));
-        extra.push(field('Rate fixed until', numInput(...bind(a, 'fixedUntil'), { min: 0, max: 2100, rerender: 'accounts' }), '0 = fixed for good. The new rate applies from the following year.'));
+        extra.push(field('Rate fixed until', numInput(...bind(a, 'fixedUntil'), { min: 0, max: 2100, rerender: 'accounts' }), '0 = fixed for good. The new rate applies from the following year. Remortgaging, or changing the term? The year the current deal ends: the new rate and term go below.'));
         const buy = p.accounts.find(x => x.type === 'property' && x.buyYear >= p.startYear);
         extra.push(field('Written off in', numInput(...bind(a, 'forgiveYear'), { min: 0, max: 2100, label: 'Year the loan is written off' }),
           `0 = paid back in full. E.g. family who will let you off what is left${buy ? ` when you buy ${buy.name} (${buy.buyYear})` : ''}: whatever is still owed then is cleared, at no cost to you.`));
@@ -5520,7 +5583,9 @@
         if (a.fixedUntil) {
           extra.push(field('Rate after the fix ends', optNumInput(...bind(a, 'rateAfterFix'), { placeholder: `Same (${a.rate}%)`, suffix: '%', step: 0.05, label: 'Rate after the fix ends' }),
             `Empty = the same rate.${MARKET ? ` Bank Rate is ${MARKET.series.bankRate.value}% (${MARKET.series.bankRate.date}).` : ''} Simulations also move it with inflation surprises.`));
-          extra.push(field('When the fix ends', selectInput([['payment', 'Same payment, ends later'], ['term', 'Same end date, new payment']], ...bind(a, 'afterFix'), { label: 'When the fix ends' }),
+          extra.push(field('New term from then', numInput(...bind(a, 'termAfterFix'), { min: 0, max: 40, suffix: 'years', label: 'Years to pay off from the new deal', rerender: 'accounts' }),
+            '0 = no new term. A remortgage over, say, 15 years: the payment is reset then to clear what is owed in those years.'));
+          if (!(a.termAfterFix > 0)) extra.push(field('When the fix ends', selectInput([['payment', 'Same payment, ends later'], ['term', 'Same end date, new payment']], ...bind(a, 'afterFix'), { label: 'When the fix ends' }),
             'Lenders usually reset the payment to keep the end date; keeping the payment shows how long it would take.'));
         }
       }
@@ -7193,19 +7258,64 @@
   // A change of job (or a redundancy): the person's pay stops part-way through next year and a copy
   // of it, "New job", starts a few months later, both opened for the dates and the new pay to be typed.
   // gap = false: a pay rise, a promotion or fewer days a week: the new pay follows straight on (from September).
-  function jobChange(pid, gap = true) {
+  // A change of job, or of pay, is asked first in a short form under Income (`jobDraft`): the
+  // last month of the pay now, the first month of the new one, and the new pay. Nothing changes
+  // until it is set up.
+  let jobDraft = null;   // { pid, gap, endY, endM, startY, startM, amount }
+  function currentPay(p, pid) {
+    return p.income.find(i => i.kind === 'salary' && i.owner === pid && i.endRef === 'retire' && E.incomeAfterCosts(i, p, 0) > 0.5);
+  }
+  function openJobDraft(pid, gap = true) {
+    const p = plan(), y = p.startYear + 1, cur = currentPay(p, pid);
+    if (!cur) { toast('Add the pay first (Your figures → Income), then come back to this.'); return; }
+    jobDraft = { pid, gap, endY: y, endM: gap ? 6 : 8, startY: y, startM: gap ? 10 : 9, amount: 0 };
+    renderSection('income');
+    const el = $(`[data-jobdraft="${pid}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+  function jobDraftForm(p) {
+    const d = jobDraft, x = d && people().find(q => q.id === d.pid);
+    if (!d || !x || !currentPay(p, d.pid)) return null;
+    const monthSel = (get, set, label) => h('select', { 'aria-label': label, style: 'min-width: 8.5em', onchange: e => set(+e.target.value) },
+      QS.MONTHS.map((m, k) => h('option', { value: String(k + 1), selected: get() === k + 1 }, m)));
+    const yearIn = (get, set, label) => { const i = numInput(get, v => set(Math.round(v)), { min: p.startYear, max: p.startYear + 40, label }); i.style.width = '6.5em'; return i; };
+    const when = (...els) => h('div', { style: 'display:flex; gap:8px; align-items:center' }, ...els);
+    return h('div', { class: 'field-group job-draft', 'data-jobdraft': d.pid },
+      h('h4', {}, d.gap ? `${x.name}: a change of job` : `${x.name}: a pay rise or fewer days`),
+      h('div', { class: 'fields', style: 'grid-template-columns: repeat(auto-fit, minmax(250px, 1fr))' },
+        field('Last month of the pay now', when(monthSel(() => d.endM, v => { d.endM = v; }, 'Last month of the pay now'), yearIn(() => d.endY, v => { d.endY = v; }, 'Year of the last pay now'))),
+        field('New pay from', when(monthSel(() => d.startM, v => { d.startM = v; }, 'First month of the new pay'), yearIn(() => d.startY, v => { d.startY = v; }, 'Year the new pay starts'))),
+        field('New pay, a year before tax', (() => { const w = moneyInputPlain(() => d.amount, v => { d.amount = v; }, 'New pay a year'); w.querySelector('input').placeholder = 'Same pay'; return w; })(), 'As it will be then. Leave empty for the same pay, rising as now. Fewer days a week: the pay for those days.')),
+      h('p', { class: 'hint' }, d.gap ? 'Any months between have no pay. A redundancy or leaving payment goes in as a one-off amount received (Spending → one-off).' : 'The new pay follows on from the month after.'),
+      h('div', { class: 'add-row' },
+        h('button', { type: 'button', class: 'btn small primary', 'data-jobset': d.pid, onclick: () => {
+          if (d.startY * 12 + d.startM <= d.endY * 12 + d.endM) { toast('The new pay starts after the last month of the pay now.'); return; }
+          jobDraft = null;
+          jobChange(d.pid, d.gap, d);
+        } }, 'Set it up'),
+        h('button', { type: 'button', class: 'btn small', onclick: () => { jobDraft = null; renderSection('income'); } }, 'Cancel')));
+  }
+  function jobChange(pid, gap = true, d = null) {
     const p = plan(), y = p.startYear + 1;
-    const cur = p.income.find(i => i.kind === 'salary' && i.owner === pid && i.endRef === 'retire' && E.incomeAfterCosts(i, p, 0) > 0.5);
+    const cur = currentPay(p, pid);
     if (!cur) { toast('Add the pay first (Your figures → Income), then come back to this.'); return null; }
+    const o = d || { endY: y, endM: gap ? 6 : 8, startY: y, startM: gap ? 10 : 9, amount: 0 };
     const next = JSON.parse(JSON.stringify(cur));
-    Object.assign(cur, { endRef: 'year', toYear: y, toMonth: gap ? 6 : 8 });
-    Object.assign(next, { id: E.uid(), name: gap ? 'New job' : 'New pay', startRef: 'year', fromYear: y, fromMonth: gap ? 10 : 9, endRef: 'retire', toMonth: 0, note: gap ? 'After the job change: set the month it starts and the new pay' : 'A pay rise or fewer days a week: set the month it starts and the new pay' });
+    Object.assign(cur, { endRef: 'year', toYear: o.endY, toMonth: o.endM });
+    Object.assign(next, { id: E.uid(), name: gap ? 'New job' : 'New pay', startRef: 'year', fromYear: o.startY, fromMonth: o.startM, endRef: 'retire', toMonth: 0,
+      note: gap ? 'After the job change' : 'A pay rise or fewer days a week' });
+    if (o.startM === 1) next.fromJanuary = true; else delete next.fromJanuary;
+    // The new pay as it will be then, held in today's money as the item's amount is.
+    if (o.amount > 0) {
+      const yearly = o.amount / Math.pow(1 + (cur.growth || 0) / 100, Math.max(0, o.startY - p.startYear));
+      next.amount = Math.round(cur.freq === 'month' ? yearly / 12 : yearly);
+    }
     p.income.splice(p.income.indexOf(cur) + 1, 0, next);
     editing.add(cur.id); editing.add(next.id);
     renderSection('income');
     refresh();
-    toast(gap ? `${cur.name} now stops at the end of June ${y} and “New job” starts in October ${y}, on the same pay, with no pay between. Both are open: set the months and the new pay. A pay-off goes in as a one-off amount received.`
-      : `${cur.name} now runs to the end of August ${y} and “New pay” follows straight on from September ${y}, at the same pay for now. Both are open: set the month and the new pay (lower it for fewer days a week).`);
+    const M = QS.MONTHS;
+    toast(`${cur.name} now runs to the end of ${M[o.endM - 1]} ${o.endY}, and “${next.name}” starts in ${M[o.startM - 1]} ${o.startY}${o.amount > 0 ? ` at ${money(o.amount)} a year` : ', on the same pay'}${gap && (o.startY * 12 + o.startM) - (o.endY * 12 + o.endM) > 1 ? ', with no pay between' : ''}. Both are open to correct.`);
     return next;
   }
   const yearsFrom = n => plan().startYear + n;
@@ -7246,8 +7356,8 @@
     ] },
     { title: 'Work, benefits and tax', stages: ['starting', 'building'], items: [
       { title: 'Redundancy, or a change of job', how: 'A pay rise, a promotion or fewer days a week: the pay changes from a month you choose, with no gap. A new job or a redundancy is three things: the pay you have now stops in a month you choose; the new pay starts in a later month (the months between have no pay); and any pay-off is a one-off amount received in that year (the first £30,000 of a redundancy payment is not taxed). The button sets up the first two for you to correct.',
-        add: [...people().map(x => [people().length > 1 ? `${x.name} changes job` : 'Set up the job change', () => { goIncome(); jobChange(x.id); }]),
-          ...people().map(x => [people().length > 1 ? `${x.name}: a pay rise or fewer days` : 'A pay rise or fewer days (no gap)', () => { goIncome(); jobChange(x.id, false); }]),
+        add: [...people().map(x => [people().length > 1 ? `${x.name} changes job` : 'Set up the job change', () => { goIncome(); openJobDraft(x.id); }]),
+          ...people().map(x => [people().length > 1 ? `${x.name}: a pay rise or fewer days` : 'A pay rise or fewer days (no gap)', () => { goIncome(); openJobDraft(x.id, false); }]),
           ['Redundancy payment', () => { goSpend(); addEventOf({ name: 'Redundancy payment', kind: 'income', year: yearsFrom(1), note: 'After tax; the first £30,000 is not taxed' }); }]] },
       { title: 'Self-employed, freelance or a side business', how: 'Your yearly profit as Self-employed income. As profit before tax, Horizon works out income tax and Class 4 National Insurance; or choose “after tax” if you set it aside yourself. Under More options, choose when it starts and ends.',
         add: [['Self-employed profit', () => { goIncome(); addIncomeOf('self', { owner: people()[0].id, name: 'Self-employed profit', tax: 'uk', freq: 'year', endRef: 'retire' }); }]] },
@@ -7748,6 +7858,9 @@
             show();
             return [qsQ(`In which year did ${qsYou(i)} join it?`, qsNum(() => x.joined, v => { x.joined = v; }, 'Year joined the scheme', { placeholder: 'e.g. 2008', after: show }), null), est,
               qsQ('Or, if you have the yearly statement: the pension it shows a year', qsMoney(() => x.schemeFigure, v => { x.schemeFigure = v; }, 'Scheme pension from the statement', { suffix: 'a year' }), 'The figure at the scheme’s pension age, before tax. It is used instead of Horizon’s estimate. Leave empty if you do not have it.'),
+              h('div', { class: 'qs-row' },
+                qsQ('Paid from what age, as the statement says', qsNum(() => x.schemeAge, v => { x.schemeAge = v; }, 'Age the scheme pension is paid from'), 'For a pension paid from leaving (often the armed forces or police), the age then. Leave empty and Horizon takes it when work stops.'),
+                qsQ('And a tax-free lump sum with it', qsMoney(() => x.schemeLump, v => { x.schemeLump = v; }, 'Lump sum from the scheme'), 'If the statement shows one. Leave empty and Horizon assumes the scheme’s usual one.')),
               qsNote(`${QS.SCHEMES[x.scheme].member > 0 ? `Horizon assumes about ${QS.SCHEMES[x.scheme].member}% of pay comes off for it` : 'Nothing comes off pay for it'}, and that the pension is taken when work stops (it is smaller if that is before the scheme’s pension age${R.DB_SCHEMES[x.scheme] && R.DB_SCHEMES[x.scheme].age !== 'spa' ? `, ${R.DB_SCHEMES[x.scheme].age}` : ''}).${['police', 'fire', 'forces'].includes(x.scheme) ? ' Years in the older final-salary scheme count differently: the statement’s figure is the one to use.' : ''}${R.DB_SCHEMES[x.scheme] && typeof R.DB_SCHEMES[x.scheme].age === 'number' && !x.retireAge ? ` With no age typed for stopping work, Horizon plans for ${R.DB_SCHEMES[x.scheme].age}, when it is paid in full.` : ''}`, 'good')];
           })() : null,
           QS.employed(x) && (x.workPension === 'unsure' || (x.workPension === 'yes' && !QS.SCHEMES[x.scheme] && x.scheme !== 'set')) ? h('div', { class: 'qs-row' },
@@ -7759,7 +7872,9 @@
           h('div', { class: 'qs-row' },
             qsQ('If so, paid from what age?', qsNum(() => x.fixedAge || spa, v => { x.fixedAge = v; }, 'Age the set pension starts'), `As the letter says. If it is already being paid, type the age it started. Not sure? Leave it at ${spa}.`),
             qsQ('And a tax-free lump sum then?', qsMoney(() => x.fixedLump, v => { x.fixedLump = v; }, 'Lump sum with the set pension'), 'If the statement shows one, paid when the pension starts. Leave empty if none, or if it has already been paid.')),
-          (x.age || 0) < spa ? qsQ(`Years of National Insurance on ${qsYour(i)} State Pension forecast`, qsNum(() => x.niYears, v => { x.niYears = v; }, 'National Insurance years so far', { suffix: 'years' }), 'At gov.uk/check-state-pension (“full years”). 35 give a full State Pension; working years still to come are added. Leave empty if you do not know: Horizon then assumes a full one.') : null,
+          (x.age || 0) < spa ? h('div', { class: 'qs-person qs-sp' }, h('strong', { class: 'qs-label' }, `The State Pension, from ${spa}`),
+            h('span', { class: 'qs-hint' }, `The full one is ${money(R.STATE_PENSION_FULL)} a year, for 35 years of National Insurance (10 for any at all). Years living abroad, or not working and not claiming benefits or Child Benefit, may not count.`),
+            qsQ(`Years of National Insurance on ${qsYour(i)} State Pension forecast`, qsNum(() => x.niYears, v => { x.niYears = v; }, 'National Insurance years so far', { suffix: 'years' }), 'At gov.uk/check-state-pension (“full years”). Working years still to come are added. Leave empty if you do not know: Horizon then assumes a full one, and the plan says so.')) : null,
         ],
         check: () => (QS.employed(x) && !x.workPension ? 'Please choose Yes, No or Not sure.'
           : QS.employed(x) && x.workPension === 'yes' && QS.SCHEMES[x.scheme] && !(x.joined >= 1960 && x.joined <= ctx.startYear) ? `Please type the year ${qsYou(i)} joined the scheme (for example 2008).` : ''),
@@ -7770,7 +7885,7 @@
       render: () => [
         qsQ('How much is in bank and savings accounts?', qsMoney(() => a.cash, v => { a.cash = v; }, 'Bank and savings'), 'All accounts added together, including cash ISAs and Premium Bonds. If you are usually overdrawn, leave this empty: the overdraft goes in with debts.'),
         qsQ(a.partner ? `Anything in ${qsName(0) === 'You' ? 'your own' : `${qsName(0)}’s`} ISAs or other investments?` : 'Anything in ISAs or other investments?', qsMoney(() => a.investments, v => { a.investments = v; }, 'ISAs and investments'), 'Stocks and shares ISAs, funds, shares. A cash ISA goes in the box above, with the savings. Not a Lifetime ISA: that is asked next. Leave empty if none or not sure what this is.'),
-        a.partner ? qsQ(`And in ${qsName(1)}’s?`, qsMoney(() => a.investments2, v => { a.investments2 = v; }, 'Partner’s ISAs and investments'), 'An ISA belongs to one person, so each person’s is kept apart. Leave empty if none.') : null,
+        a.partner ? qsQ(`And in ${qsName(1)}’s?`, qsMoney(() => a.investments2, v => { a.investments2 = v; }, 'Partner’s ISAs and investments'), 'An ISA is always in one person’s name, never joint, so each person’s is kept apart (each has their own £20,000 a year). Only know the total for both? Put half in each; it can be corrected afterwards. Leave empty if none.') : null,
         ...qsWho().map((x, i) => ((x.age || 0) < 50 ? h('div', { class: 'qs-row' },
           qsQ(i === 0 ? 'Anything in a Lifetime ISA?' : `Anything in ${qsName(i)}’s Lifetime ISA?`, qsMoney(() => a.lisa[i], v => { a.lisa[i] = v; }, i === 0 ? 'Lifetime ISA' : 'Partner’s Lifetime ISA'), i === 0 ? 'The ISA for a first home or for after 60, with 25% added by the government. Leave empty if none.' : 'Leave empty if none.'),
           qsQ('Paid into it', qsMoney(() => a.lisaPay[i], v => { a.lisaPay[i] = v; }, i === 0 ? 'Paid into the Lifetime ISA a month' : 'Paid into the partner’s Lifetime ISA a month', { suffix: 'a month' }), 'Up to £333 a month gets the 25%.')) : null)),
@@ -7779,6 +7894,8 @@
         qsQ('If either, how old is the youngest child?', qsNum(() => a.youngest, v => { a.youngest = v; }, 'Age of the youngest child'), 'That money, coming in or going out, is counted until the youngest turns 18, then it stops.'),
         qsQ('Any other money coming in each month?', qsMoney(() => a.otherIncome, v => { a.otherIncome = v; }, 'Other money coming in', { suffix: 'a month' }), 'The rest of Universal Credit, money from a lodger or a grown-up child, help from family. Counted for good; you can give it an end date afterwards. Leave empty if none.'),
       ],
+      // Without the age, money for children would run for 18 years.
+      check: () => ((a.childMoney > 0 || a.childPaid > 0) && (a.youngest === null || a.youngest === undefined) ? 'Please type how old the youngest child is: the money for children stops when they turn 18.' : ''),
     });
     out.push({
       id: 'home', title: 'Your home',
@@ -7794,7 +7911,10 @@
         a.home === 'mortgage' ? qsQ('What is the mortgage payment?', qsMoney(() => a.mortgagePay, v => { a.mortgagePay = v; }, 'Mortgage payment a month', { suffix: 'a month' }), 'On the bank statement or the lender’s app.') : null,
         a.home === 'mortgage' ? h('div', { class: 'qs-row' },
           qsQ('Its interest rate, if you know it', qsNum(() => a.mortgageRate, v => { a.mortgageRate = v; }, 'Mortgage interest rate', { suffix: '%' }), `Not sure? Leave it empty: Horizon uses ${QS.MORTGAGE_RATE}%.`),
-          qsQ('Is the rate fixed? Until which year', qsNum(() => a.mortgageFix, v => { a.mortgageFix = v; }, 'Year the fixed rate ends'), `The plan then reminds you to look for a new deal the year before, and assumes about ${QS.MORTGAGE_RATE}% after it (a typical new deal now; change it afterwards). Leave empty if not fixed or not sure.`)) : null,
+          qsQ('When does the current deal end?', qsNum(() => a.mortgageFix, v => { a.mortgageFix = v; }, 'Year the fixed rate ends'), `The year the fixed rate (or the deal) ends, not when the mortgage is paid off. The plan reminds you to look for a new deal the year before. Remortgaging soon? The year it happens. Leave empty if not fixed or not sure.`)) : null,
+        a.home === 'mortgage' ? h('div', { class: 'qs-row' },
+          qsQ('If so: the rate after it, if you know it', qsNum(() => a.mortgageNewRate, v => { a.mortgageNewRate = v; }, 'Mortgage rate after the deal ends', { suffix: '%' }), `Leave empty: Horizon assumes ${QS.MORTGAGE_RATE}%, a typical new deal now.`),
+          qsQ('Paid off over how many years from then?', qsNum(() => a.mortgageTerm, v => { a.mortgageTerm = v; }, 'Years to pay off from the new deal', { suffix: 'years' }), 'For a remortgage over a new term, e.g. 15 years: the payment is reset then. Leave empty to keep the end date as it is.')) : null,
         a.home === 'rent' ? qsQ('How much is the rent?', qsMoney(() => a.rent, v => { a.rent = v; }, 'Rent a month', { suffix: 'a month' }), 'Your share, if you split it.') : null,
         a.home === 'family' ? qsQ('Do you pay anything towards the house?', qsMoney(() => a.rent, v => { a.rent = v; }, 'Keep a month', { suffix: 'a month' }), 'Keep or digs. Leave empty if nothing.') : null,
         // A move ahead: selling to buy somewhere cheaper, or moving out to rent.
@@ -7828,13 +7948,18 @@
           h('div', { class: 'qs-row' },
             qsQ('Mortgage left on it', qsMoney(() => a.letMortgage, v => { a.letMortgage = v; }, 'Mortgage left on the rented-out property')),
             qsQ('Its mortgage payment', qsMoney(() => a.letPay, v => { a.letPay = v; }, 'Mortgage payment on the rented-out property', { suffix: 'a month' }))),
-          h('span', { class: 'qs-hint' }, 'Rent after the letting agent’s fee, if there is one. Leave the mortgage boxes empty if none. If the payment only covers the interest, Horizon keeps the amount owed level; tax on the rent is worked out for you.')) : null,
+          h('span', { class: 'qs-hint' }, 'Rent after the letting agent’s fee, if there is one. Leave the mortgage boxes empty if none. If the payment only covers the interest, Horizon keeps the amount owed level; tax on the rent is worked out for you.'),
+          h('div', { class: 'qs-row' },
+            qsQ('Selling it in a year? Which', qsNum(() => a.letSell, v => { a.letSell = v; }, 'Year the rented-out property is sold', { placeholder: 'not selling' })),
+            qsQ('What it was bought for', qsMoney(() => a.letBought, v => { a.letBought = v; }, 'What the rented-out property was bought for'))),
+          h('span', { class: 'qs-hint' }, 'In the year it is sold, its mortgage is paid off from the sale and the rent stops. Not being your home, the gain on what it cost is taxed: Horizon works out the capital gains tax from the price paid (add the cost of improvements, such as an extension). Leave the price empty if you do not know it, and no tax is worked out.')) : null,
       ],
       check: () => (!a.home ? 'Please choose one of the four options.'
         : (a.home === 'mortgage' || a.home === 'own') && !(a.homeValue > 0) ? 'Please type roughly what the home is worth: what similar homes nearby have sold for.'
           : a.home === 'rent' && !(a.rent > 0) ? 'Please type the rent a month (your share, if you split it).'
           : a.home === 'mortgage' && !(a.mortgage > 0) ? 'Please type roughly how much is left on the mortgage. Paid off? Choose “A home I own outright”.'
             : a.home === 'mortgage' && a.mortgageFix > 0 && !(a.mortgageFix >= ctx.startYear && a.mortgageFix <= ctx.startYear + 15) ? `Please type the year the fixed rate ends, from ${ctx.startYear} on, or leave it empty.` : a.let && !(a.letValue > 0) ? 'Please type roughly what the rented-out property is worth, or untick that box.'
+            : a.let && a.letSell > 0 && !(a.letSell >= ctx.startYear && a.letSell <= ctx.startYear + 40) ? `Please type the year it is sold, from ${ctx.startYear} on, or leave it empty.`
         : a.move && (a.home === 'mortgage' || a.home === 'own' || a.home === 'family' || a.home === 'rent') && !(a.moveYear > ctx.startYear && a.moveYear <= ctx.startYear + 50) ? `Please type the year of the move, after ${ctx.startYear}, or untick that box.`
           : a.move && (a.home === 'family' || a.home === 'rent') && !(a.moveRent > 0) ? 'Please type roughly what the rent would be, or untick that box.'
             : a.move && a.home !== 'family' && (a.home === 'mortgage' || a.home === 'own') && !(a.movePrice > 0) ? 'Please type roughly what the next home would cost, or untick that box.'
@@ -7869,7 +7994,7 @@
       render: () => {
         let base = 0;
         const housing = a.home === 'mortgage' ? 'the mortgage' : a.home === 'rent' ? 'rent' : a.home === 'family' && a.rent > 0 ? 'keep' : '';
-        const countedNow = () => [housing, a.debts.some(d => d.pay > 0) ? 'debt payments' : '', a.childcare > 0 ? 'childcare' : ''].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1');
+        const countedNow = () => [housing, a.debts.some(d => d.pay > 0) ? 'debt payments' : '', a.childcare > 0 ? 'childcare' : '', a.family > 0 ? 'money to family' : ''].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1');
         const counted = countedNow();
         const result = h('div', { id: 'qsLeft' });
         const lead = h('p', { class: 'qs-lead' });
@@ -7886,11 +8011,19 @@
                 : left > base * 0.35 && left > 150 ? qsNote(`That would leave about ${money(left)} a month unspent. If your bank balance does not grow by about that much each month, this figure is too low, and the answers will look better than they are.`, 'warn')
                   : qsNote(`That leaves about ${money(Math.max(0, left))} a month to save.`, 'good'));
         };
-        show();
+        // The end of childcare matters only once there is some.
+        const until = qsQ('Paid until', h('div', { class: 'qs-money' }, qsMonth(() => a.childcareMonth || 8, v => { a.childcareMonth = v; }, 'Last month of childcare'), qsNum(() => a.childcareYear || ctx.startYear + 1, v => { a.childcareYear = v; }, 'Last year of childcare')), 'The last month it is paid, e.g. August before school starts.');
+        const show0 = show;
+        const famUntil = qsQ('Until', h('div', { class: 'qs-money' }, qsMonth(() => a.familyMonth || 6, v => { a.familyMonth = v; }, 'Last month of money to family'), qsNum(() => a.familyYear, v => { a.familyYear = v; }, 'Last year of money to family', { placeholder: 'for good' })), 'The last month it is paid, e.g. June when a student finishes. Leave the year empty if it carries on.');
+        const showAll = () => { show0(); until.style.display = a.childcare > 0 ? '' : 'none'; famUntil.style.display = a.family > 0 ? '' : 'none'; };
+        showAll();
         return [
           h('div', { class: 'qs-row' },
-          qsQ('Do you pay for childcare?', qsMoney(() => a.childcare, v => { a.childcare = v; }, 'Childcare a month', { suffix: 'a month', after: show }), 'Nursery, a childminder or after-school club, after any free hours or Tax-Free Childcare. Leave empty if none.'),
-          qsQ('Paid until', h('div', { class: 'qs-money' }, qsMonth(() => a.childcareMonth || 8, v => { a.childcareMonth = v; }, 'Last month of childcare'), qsNum(() => a.childcareYear || ctx.startYear + 1, v => { a.childcareYear = v; }, 'Last year of childcare')), 'The last month it is paid, e.g. August before school starts.')),
+          qsQ('Do you pay for childcare?', qsMoney(() => a.childcare, v => { a.childcare = v; }, 'Childcare a month', { suffix: 'a month', after: showAll }), 'Nursery, a childminder or after-school club, after any free hours or Tax-Free Childcare. Leave empty if none.'),
+          until),
+          h('div', { class: 'qs-row' },
+          qsQ('Money you give to family each month', qsMoney(() => a.family, v => { a.family = v; }, 'Money to family a month', { suffix: 'a month', after: showAll }), 'To a student, a parent, or family abroad. Leave empty if none.'),
+          famUntil),
           lead,
           qsQ('How would you rather answer?', qsChoices([
             ['spend', 'I know roughly what I spend a month'],
@@ -7960,7 +8093,8 @@
         const check = (key, label, sub) => { const box = h('input', { type: 'checkbox', checked: !!g[key] }); box.addEventListener('change', () => { g[key] = box.checked; renderQuick(true); }); return h('label', { class: 'qs-check' }, box, h('span', {}, h('strong', {}, label), h('small', {}, sub))); };
         return [
           h('p', { class: 'qs-lead' }, 'Tick what matters to you. Each becomes a goal that Horizon tracks, with a plain answer.'),
-          check('retire', QS.works(first) ? `Can I stop working at ${first.retireAge || QS.spaOf(first, ctx.startYear)}?` : 'Will my money last?', 'Whether the money lasts for the rest of your life.'),
+          check('retire', QS.works(first) ? `Can I stop working at ${first.retireAge || QS.spaOf(first, ctx.startYear)}?` : a.partner ? 'Will our money last?' : 'Will my money last?', a.partner ? 'Whether the money lasts for the rest of both your lives.' : 'Whether the money lasts for the rest of your life.'),
+          a.partner && QS.works(a.people[1]) ? check('retire2', `Can ${qsName(1)} stop working at ${a.people[1].retireAge || QS.spaOf(a.people[1], ctx.startYear)}?`, 'A goal of its own: whether the money still lasts with that age. Each can then be tried earlier or later.') : null,
           check('emergency', 'Do I have enough set aside for emergencies?', 'Three months of spending in cash, for a lost job or a broken boiler.'),
           a.home === 'rent' || a.home === 'family' ? check('buy', a.partner ? 'Could we buy a home?' : 'Could I buy a home?', 'Horizon works out the deposit and the mortgage, stops the rent that year, and shows what it does to everything else.') : null,
           g.buy && (a.home === 'rent' || a.home === 'family') ? h('div', { class: 'qs-person' },

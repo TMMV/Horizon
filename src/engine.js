@@ -33,7 +33,7 @@
     'spending', 'taxes', 'debtPay', 'saved', 'unfunded',
     'wCash', 'wGia', 'wIsa', 'wPension', 'toIsa', 'toGia', 'toCash', 'overpay', 'pensionIn',
     'cgt', 'gCash', 'gIsa', 'gGia', 'gPension', 'gBonds', 'gProperty',
-    'debtInterest', 'debtRegular', 'lumpOverpay', 'bondsMatured', 'bondsToIsa', 'propSold', 'extraPension', 'flatTax',
+    'debtInterest', 'debtRegular', 'lumpOverpay', 'bondsMatured', 'bondsToIsa', 'propSold', 'propCgt', 'extraPension', 'flatTax',
     'sweepIsa', 'sweepGia', 'nonWork', 'homeBuy', 'studentLoan', 'annuityBought', 'propBought', 'debtNew', 'debtForgiven', 'withdrawTax', 'hiDebtPay',
     'toLisa', 'lisaBonus', 'wLisa', 'lisaHome', 'lisaCharge', 'pensionRelief', 'toPension', 'sacrificed', 'sharesKept', 'hicbc', 'releaseIn', 'releaseRepaid',
   ];
@@ -374,6 +374,9 @@
         payment: Math.max(0, num(a.payment)),
         maturityYear: Math.round(num(a.maturityYear, 0)),
         sellYear: Math.round(num(a.sellYear, 0)),
+        // A property that is not the home (let out, or a second home): its gain is taxed when sold,
+        // on what it was bought for (0 = not known: no tax is worked out).
+        ...(type === 'property' ? { letOut: !!a.letOut, boughtFor: Math.max(0, num(a.boughtFor, 0)) } : {}),
         fixedUntil: Math.round(num(a.fixedUntil, 0)),
         // Years left on a loan, from the statement: only to check the payment against (0 = not given).
         ...(type === 'debt' ? { termYears: Math.max(0, Math.min(40, Math.round(num(a.termYears, 0)))) } : {}),
@@ -381,6 +384,8 @@
         // payment stays the same (the end date moves) or is reset to keep the end date.
         rateAfterFix: a.rateAfterFix === null || a.rateAfterFix === undefined || a.rateAfterFix === '' || !Number.isFinite(+a.rateAfterFix) ? null : +a.rateAfterFix,
         afterFix: oneOf(a.afterFix, ['payment', 'term'], 'payment'),
+        // A new deal over a new term when the fix ends (a remortgage): the years to pay it off from then (0 = not set).
+        ...(type === 'debt' ? { termAfterFix: Math.max(0, Math.min(40, Math.round(num(a.termAfterFix, 0)))) } : {}),
         excluded: !!a.excluded,
         // Equity release (a lifetime mortgage) on a home: a lump sum in `releaseYear` (today's
         // money), nothing to pay back while living there, interest rolling up at `releaseRate`%;
@@ -1367,6 +1372,12 @@
   }
 
   // Yearly payment that clears `bal` over the months left at the old rate and payment.
+  // The yearly payment (twelve monthly ones) that clears `bal` over `years` at `rate` (a fraction).
+  function termPayment(bal, rate, years) {
+    const m = rate / 12, n = years * 12;
+    return 12 * (m > 0 ? bal * m / (1 - Math.pow(1 + m, -n)) : bal / n);
+  }
+
   function renewalPayment(bal, oldRate, oldPay, newRate) {
     const i0 = oldRate / 12, m0 = oldPay / 12;
     if (m0 <= bal * i0) return oldPay; // never paid off at the old terms: keep the payment
@@ -1465,7 +1476,8 @@
           ? { id: `${x.id}:release`, bal: 0, rate: x.releaseRate / 100, pay: 0, varFrom: Infinity, after: x.releaseRate / 100, keepTerm: false, rollUp: true, at: x.releaseYear - plan.startYear, amount: x.releaseAmount }
           : null;
         if (rel) debts.push(rel);
-        props.push({ id: x.id, val: x.balance, rate: x.rate / 100, t: x.sellYear ? x.sellYear - plan.startYear : Infinity, buy, owned: buy < 0, deposit: x.deposit / 100, years: x.mortYears, mort, rel });
+        props.push({ id: x.id, val: x.balance, rate: x.rate / 100, t: x.sellYear ? x.sellYear - plan.startYear : Infinity, buy, owned: buy < 0, deposit: x.deposit / 100, years: x.mortYears, mort, rel,
+          gainFrom: x.letOut && x.boughtFor > 0 ? x.boughtFor : 0, own: x.owner === 'joint' ? -1 : personIndex(plan, x.owner) });
       }
       else if (x.type === 'debt') {
         debts.push({
@@ -1473,7 +1485,8 @@
           // A fix "until 2027" runs through 2027; the new rate applies from the next year.
           varFrom: x.fixedUntil ? x.fixedUntil - plan.startYear + 1 : Infinity,
           after: x.rateAfterFix === null ? x.rate / 100 : x.rateAfterFix / 100,
-          keepTerm: x.afterFix === 'term',
+          keepTerm: x.afterFix === 'term' || x.termAfterFix > 0,
+          newTerm: x.fixedUntil && x.termAfterFix > 0 ? x.termAfterFix : 0,
           forgive: x.forgiveYear ? x.forgiveYear - plan.startYear : Infinity,
           soldWith: x.soldWith || '',
         });
@@ -1579,6 +1592,7 @@
         }
       }
       let gProperty = 0, propSold = 0, homeBuy = 0, propBought = 0, debtNew = 0, releaseIn = 0, releaseRepaid = 0, saleRepaid = 0;
+      const propGain = Array(n).fill(0);   // gains on property that is not the home, sold this year: each owner's
       for (const p of props) {
         if (!p.owned && t === p.buy) {
           // Bought at the start of the year, at that year's price.
@@ -1616,6 +1630,10 @@
             d.bal -= x; left -= x; saleRepaid += x;
           }
           propSold += p.val - owe;
+          if (p.gainFrom > 0) {
+            const gain = Math.max(0, p.val - p.gainFrom);
+            if (p.own >= 0) propGain[p.own] += gain; else for (let i = 0; i < n; i++) propGain[i] += gain / n;
+          }
           p.val = 0;
         }
       }
@@ -1649,7 +1667,8 @@
         const rate = t >= d.varFrom ? Math.max(0, d.after + dr) : d.rate;
         // On renewal, optionally reset the payment so the mortgage still ends when it would have;
         // after that it is reset whenever the rate moves (a new deal), keeping the same end date.
-        if (d.keepTerm && t >= d.varFrom && d.bal > 0) {
+        if (d.newTerm && t === d.varFrom && d.bal > 0) d.pay = termPayment(d.bal, rate, d.newTerm);
+        else if (d.keepTerm && t >= d.varFrom && d.bal > 0) {
           const was = t === d.varFrom ? d.rate : d.last;
           if (Math.abs(rate - was) > 1e-9) d.pay = renewalPayment(d.bal, was, d.pay, rate);
         }
@@ -1684,6 +1703,9 @@
       // 4. Net cash flow after the year's base taxes
       let baseTax = pre.flatTax[t], earnings = 0, employee = 0, other = 0, statePension = 0;
       const income = people.map((_, i) => pre.people[i].taxable[t]);
+      // Capital gains tax on a let property sold this year, at each owner's rates (due within 60 days).
+      let propCgt = 0;
+      for (let i = 0; i < n; i++) if (propGain[i] > 0) propCgt += T.capitalGainsTax(propGain[i], income[i], g);
       for (let i = 0; i < n; i++) {
         const P = pre.people[i];
         baseTax += P.baseTax[t];
@@ -1701,14 +1723,15 @@
         if (acc) { acc.bal += x; acc.basis += x; } else share(ownedBy(gias, k.owner), x, a => a.bal);
         vestKept += x;
       }
+      baseTax += propCgt;
       const net = earnings - employee - extraOut + other + statePension - baseTax
         - pre.expenses[t] - pre.eventsOut[t] - debtRegular - lumpOverpay - homeBuy - annuityShort - vestKept;
 
-      let extraTax = 0, cgt = 0, unfunded = 0, sweepIsa = 0, sweepGia = 0;
+      let extraTax = 0, cgt = propCgt, unfunded = 0, sweepIsa = 0, sweepGia = 0;
       let toCash = 0, overpay = 0, toIsa = 0, toGia = 0, toLisa = 0, lisaBonus = 0, wLisa = 0, lisaCharge = 0, toPension = 0;
       let wCash = 0, wGia = 0, wIsa = 0, wPension = 0;
       const drawn = people.map(() => 0), taxFreeTaken = people.map(() => 0);
-      const gains = people.map(() => 0);
+      const gains = propGain.slice();   // the year's allowance is used by a property's gain first
 
       let hiDebtPay = 0;
       if (net >= 0) {
@@ -1983,7 +2006,7 @@
         out.unfunded[t] = unfunded;
         out.gCash[t] = gCash; out.gIsa[t] = gIsa; out.gGia[t] = gGia; out.gPension[t] = gPension;
         out.gBonds[t] = gBonds; out.gProperty[t] = gProperty;
-        out.bondsMatured[t] = bondsMatured; out.bondsToIsa[t] = bondsToIsa; out.propSold[t] = propSold;
+        out.bondsMatured[t] = bondsMatured; out.bondsToIsa[t] = bondsToIsa; out.propSold[t] = propSold; out.propCgt[t] = propCgt;
         out.sweepIsa[t] = sweepIsa; out.sweepGia[t] = sweepGia;
         out.nonWork[t] = nonWorkIncome(pre, t);
         for (let i = 0; i < n; i++) {
@@ -2079,6 +2102,13 @@
       const v = pre.eventsIn[t];
       if (!(v >= least * pre.price[t])) continue;
       const year = plan.startYear + t;
+      // Already decided: a loan is paid off with it that year.
+      const chosen = plan.events.filter(e => e.kind === 'overpay' && e.year === year && e.amount > 0);
+      if (chosen.length) {
+        const names = chosen.map(e => (plan.accounts.find(a => a.id === e.debtId) || plan.accounts.find(a => a.type === 'debt' && !a.excluded) || {}).name).filter(Boolean);
+        list.push({ t, year, amount: v, chosen: { pay: chosen.reduce((acc, e) => acc + e.amount * pre.price[t], 0), debt: [...new Set(names)].join(' and ') || 'a loan' } });
+        continue;
+      }
       const live = (out.debts || []).map(d => ({ d, a: plan.accounts.find(x => x.id === d.id) })).filter(z => z.a && z.d.bal[t] > 1);
       const pick = live.find(z => z.a.id === goal) || live.find(z => isMortgage(plan, z.a)) || live.sort((x, y) => y.a.rate - x.a.rate)[0];
       if (!pick) { list.push({ t, year, amount: v }); continue; }
@@ -2999,7 +3029,7 @@
 
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
-    incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
+    incomeAfterCosts, termPayment, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
     uid, currentYear, todayISO, isDate, asOfDate, isMortgage, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     waysThere, ownPensionTrial, goalDebtId, pensionStartTrial, selfTaxBill, windfallTrial, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,

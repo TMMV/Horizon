@@ -302,3 +302,17 @@ test('a gap before a pension can be reached is "runs short", not "runs out"', ()
   // A small one: it really does run out.
   assert.match(words(60000), /the money runs out at about \d+ \(\d{4}\), \d+ years before the plan ends\./);
 });
+
+test('money coming in already chosen to pay off a loan: the trial says so instead of weighing it again', () => {
+  const E = require('../../src/engine.js');
+  const plan = E.normalizePlan(E.defaultWorkspace().scenarios[0].plan);
+  const mort = plan.accounts.find(a => a.type === 'debt');
+  plan.events.push({ name: 'Inheritance', kind: 'income', year: plan.startYear + 1, amount: 40000 });
+  let w = E.windfallTrial(E.normalizePlan(plan), E.project(E.normalizePlan(plan)));
+  assert.ok(w.length === 1 && w[0].debt && !w[0].chosen);
+  plan.events.push({ name: 'Pay off', kind: 'overpay', debtId: mort.id, year: plan.startYear + 1, amount: 30000 });
+  const q = E.normalizePlan(plan);
+  w = E.windfallTrial(q, E.project(q));
+  assert.equal(w[0].chosen.debt, mort.name);
+  assert.ok(Math.abs(w[0].chosen.pay - 30000 * E.project(q).pre.price[1]) < 1);
+});

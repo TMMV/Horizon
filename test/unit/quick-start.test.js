@@ -548,7 +548,9 @@ test('a couple: retiring earlier compares both, and each on their own', () => {
   const q = JSON.parse(JSON.stringify(p));
   opts[2].apply(q);
   assert.deepEqual(q.household.people.map(x => x.retireAge), [60, 60]);
-  assert.deepEqual(q.goals.filter(g => g.type === 'retire').map(g => g.age), p.goals.filter(g => g.type === 'retire').map(g => g.age));   // the goal is Pat's
+  // Each has a goal of their own: Pat's stays at 60, Sam's moves with Sam.
+  assert.deepEqual(p.goals.filter(g => g.type === 'retire').map(g => [g.owner, g.age]), [['p1', 60], ['p2', 63]]);
+  assert.deepEqual(q.goals.filter(g => g.type === 'retire').map(g => [g.owner, g.age]), [['p1', 60], ['p2', 60]]);
 });
 
 test('police, fire and armed forces schemes: built up from the year joined, paid in full from 60', () => {
@@ -608,4 +610,84 @@ test('a baby ahead in the quick start: set up for its year, as the button does',
   a.big.push({ kind: 'baby', who: 1, year: 2033 });
   const q = Q.build(a, ctx).income.filter(i => i.owner === 'p2' && i.kind === 'salary').map(i => i.name);
   assert.ok(q.every(n => !/after the baby: /.test(n)), q.join(' | '));
+});
+
+test('a rented-out property sold in a year: its mortgage paid from the sale, the rent stops, the gain taxed', () => {
+  const a = Q.blank('ruk');
+  a.partner = true;
+  a.people[0] = { ...Q.person(), name: 'Mo', age: 48, pay: 'salary', amount: 52000 };
+  a.people[1] = { ...Q.person(), name: 'Raz', age: 50, pay: 'self', amount: 35000 };
+  Object.assign(a, { cash: 25000, home: 'mortgage', homeValue: 330000, mortgage: 70000, mortgagePay: 690, spending: 3000,
+    let: true, letValue: 160000, letRent: 850, letMortgage: 100000, letPay: 433, letSell: 2030, letBought: 95000 });
+  const p = Q.build(a, ctx);
+  const flat = p.accounts.find(x => x.name === 'Rented-out property'), mort = p.accounts.find(x => x.name === 'Mortgage on the rented-out property');
+  assert.deepEqual([flat.sellYear, flat.letOut, flat.boughtFor, mort.soldWith], [2030, true, 95000, flat.id]);
+  const rent = p.income.find(i => i.kind === 'rental');
+  assert.deepEqual([rent.endRef, rent.toYear], ['year', 2030]);
+  const rows = E.project(p).rows, t = 2030 - 2026;
+  assert.ok(rows[t].propSold > 160000, String(rows[t].propSold));
+  // The gain over £95,000, less each owner's £3,000 allowance, taxed at 18% or 24%.
+  const gain = rows[t].propSold - 95000;
+  assert.ok(rows[t].propCgt > (gain - 6000) * 0.18 - 1 && rows[t].propCgt < (gain - 6000) * 0.24 + 1, String(rows[t].propCgt));
+  assert.equal(rows[t + 1].debt < rows[t].debt - 90000, true);
+  // The home itself is never taxed when sold; nor is a let property with no price paid.
+  const home = Q.build({ ...a, letBought: 0 }, ctx);
+  assert.equal(E.project(home).rows[t].propCgt, 0);
+});
+
+test('money given to family each month: until the month given, or for good', () => {
+  const a = renter();
+  Object.assign(a, { spending: 900, family: 150 });
+  assert.equal(Q.build(a, ctx).expenses.find(e => e.name === 'Money to family').endRef, 'end');
+  Object.assign(a, { family: 600, familyYear: 2028, familyMonth: 6 });
+  const e = Q.build(a, ctx).expenses.find(x => x.name === 'Money to family');
+  assert.deepEqual([e.amount, e.endRef, e.toYear, e.toMonth], [600, 'year', 2028, 6]);
+});
+
+test('a scheme pension from the statement: the age it is paid from and its lump sum, not cut again', () => {
+  const a = Q.blank('ruk');
+  a.people[0] = { ...Q.person(), name: 'Gaz', age: 49, pay: 'salary', amount: 42000, workPension: 'yes', scheme: 'forces', joined: 2003, retireAge: 67, schemeFigure: 13500, schemeAge: 50, schemeLump: 40000 };
+  Object.assign(a, { cash: 14000, home: 'rent', rent: 900, spending: 2000 });
+  const p = Q.build(a, ctx);
+  const db = p.income.find(i => i.kind === 'dbpension');
+  assert.deepEqual([db.amount, db.startAge, db.dbNpa], [13500, 50, 50]);
+  assert.ok(Math.abs(db.lumpMultiple * 13500 - 40000) < 20, String(db.lumpMultiple));
+  assert.equal(E.dbEarly(db, p.household.people[0]).factor, 1);
+  // Without an age it is still taken when work stops, at most at the scheme's age.
+  const plain = Q.build({ ...a, people: [{ ...a.people[0], schemeAge: 0, schemeLump: 0 }, a.people[1]] }, ctx).income.find(i => i.kind === 'dbpension');
+  assert.equal(plain.startAge, 60);
+});
+
+test('a remortgage over a new term: the payment is reset when the deal ends, and the mortgage ends then', () => {
+  const a = Q.blank('scotland');
+  a.people[0] = { ...Q.person(), name: 'Claire', age: 52, pay: 'salary', amount: 44000, retireAge: 60 };
+  Object.assign(a, { cash: 9000, home: 'mortgage', homeValue: 260000, mortgage: 120000, mortgagePay: 900, mortgageRate: 4.2, spending: 1900,
+    mortgageFix: 2026, mortgageNewRate: 4.8, mortgageTerm: 15 });
+  const p = Q.build(a, ctx);
+  const m = p.accounts.find(x => x.name === 'Mortgage');
+  assert.deepEqual([m.fixedUntil, m.rateAfterFix, m.termAfterFix], [2026, 4.8, 15]);
+  const proj = E.project(p), k = proj.out.debts.findIndex(d => d.id === m.id);
+  const bal = proj.out.debts[k].bal;
+  // Paid off at the end of the 15 years from the new deal (2027), not before 2040.
+  const last = bal.findIndex((b, t) => t > 0 && b <= 1);
+  assert.ok(last >= 1 + 14 && last <= 1 + 16, `cleared at t=${last}`);
+  // The new payment is what 15 years at 4.8% takes.
+  const start = bal[1];
+  const pay = E.termPayment(start, 0.048, 15) / 12;
+  assert.ok(pay > 850 && pay < 950, String(pay));
+});
+
+test('a couple who both work: a goal for each one stopping', () => {
+  const a = Q.blank('ruk');
+  a.partner = true;
+  a.people[0] = { ...Q.person(), name: 'Mo', age: 48, pay: 'salary', amount: 52000, retireAge: 60 };
+  a.people[1] = { ...Q.person(), name: 'Raz', age: 50, pay: 'self', amount: 35000, retireAge: 65 };
+  Object.assign(a, { cash: 25000, home: 'rent', rent: 900, spending: 2500 });
+  const goals = Q.build(a, ctx).goals.filter(g => g.type === 'retire').map(g => [g.owner, g.age]);
+  assert.deepEqual(goals, [['p1', 60], ['p2', 65]]);
+  a.goals.retire2 = false;
+  assert.equal(Q.build(a, ctx).goals.filter(g => g.type === 'retire').length, 1);
+  a.goals.retire2 = true;
+  a.people[1] = { ...a.people[1], pay: 'none' };   // a partner not working has no stopping age to test
+  assert.equal(Q.build(a, ctx).goals.filter(g => g.type === 'retire').length, 1);
 });
