@@ -1484,8 +1484,10 @@
     const g = res.goal;
     if (g.type === 'retire') return res.retired ? 'Retired' : `Retire ${res.expectedYear}`;
     if (g.type === 'debtFree') return !plan().accounts.some(a => a.type === 'debt' && a.balance > 0 && !a.excluded && (!E.goalDebtId(plan()) || a.id === E.goalDebtId(plan()))) ? 'Nothing owed' : res.expectedYear ? `Nothing owed from ${res.expectedYear}` : 'Not paid off in the plan';
-    if (g.type === 'emergency') return res.expectedYear ? `Covered from ${res.expectedYear}` : 'Not covered yet';
-    return res.expectedYear ? `Expected ${res.expectedYear}` : 'Not reached on average';
+    // Reached in the first year of the plan: there already, not "expected" this year.
+    const now = res.expectedYear && res.expectedYear <= plan().startYear;
+    if (g.type === 'emergency') return now ? 'Covered now' : res.expectedYear ? `Covered from ${res.expectedYear}` : 'Not covered yet';
+    return now ? 'There already' : res.expectedYear ? `Expected ${res.expectedYear}` : 'Not reached on average';
   }
 
   function driverLine(goalId) {
@@ -5126,6 +5128,7 @@
       } }, `+ ${kind === 'dbpension' ? 'Defined benefit pension' : label}`)),
         // A change of job or a redundancy, for whoever has pay that runs to retirement.
         people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && i.endRef === 'retire')).map(x => h('button', { type: 'button', class: 'btn small', 'data-jobchange': x.id, title: 'The pay stops in a month you choose and a new one starts later, with a gap between if there is one', onclick: () => jobChange(x.id) }, people().length > 1 ? `${x.name}: a change of job` : 'A change of job')),
+        people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && i.endRef === 'retire')).map(x => h('button', { type: 'button', class: 'btn small', 'data-paychange': x.id, title: 'The pay changes from a month you choose, with no gap: a rise, a promotion, or fewer days a week', onclick: () => jobChange(x.id, false) }, people().length > 1 ? `${x.name}: a pay rise or fewer days` : 'A pay rise or fewer days')),
         people().filter(x => p.income.some(i => i.kind === 'salary' && i.owner === x.id && E.incomeAfterCosts(i, p, 1) > 0.5)).map(x => h('button', { type: 'button', class: 'btn small', 'data-baby': x.id, title: 'A year of leave on reduced pay, the pay afterwards, nursery, everyday costs and Child Benefit', onclick: () => babyChange(x.id) }, people().length > 1 ? `A baby: ${x.name} takes the leave` : 'A baby'))),
     ];
   }
@@ -7100,18 +7103,20 @@
   }
   // A change of job (or a redundancy): the person's pay stops part-way through next year and a copy
   // of it, "New job", starts a few months later, both opened for the dates and the new pay to be typed.
-  function jobChange(pid) {
+  // gap = false: a pay rise, a promotion or fewer days a week: the new pay follows straight on (from September).
+  function jobChange(pid, gap = true) {
     const p = plan(), y = p.startYear + 1;
     const cur = p.income.find(i => i.kind === 'salary' && i.owner === pid && i.endRef === 'retire' && E.incomeAfterCosts(i, p, 0) > 0.5);
     if (!cur) { toast('Add the pay first (Your figures → Income), then come back to this.'); return null; }
     const next = JSON.parse(JSON.stringify(cur));
-    Object.assign(cur, { endRef: 'year', toYear: y, toMonth: 6 });
-    Object.assign(next, { id: E.uid(), name: 'New job', startRef: 'year', fromYear: y, fromMonth: 10, endRef: 'retire', toMonth: 0, note: 'After the job change: set the month it starts and the new pay' });
+    Object.assign(cur, { endRef: 'year', toYear: y, toMonth: gap ? 6 : 8 });
+    Object.assign(next, { id: E.uid(), name: gap ? 'New job' : 'New pay', startRef: 'year', fromYear: y, fromMonth: gap ? 10 : 9, endRef: 'retire', toMonth: 0, note: gap ? 'After the job change: set the month it starts and the new pay' : 'A pay rise or fewer days a week: set the month it starts and the new pay' });
     p.income.splice(p.income.indexOf(cur) + 1, 0, next);
     editing.add(cur.id); editing.add(next.id);
     renderSection('income');
     refresh();
-    toast(`${cur.name} now stops at the end of June ${y} and “New job” starts in October ${y}, on the same pay. Both are open: set the months and the new pay. A pay-off goes in as a one-off amount received.`);
+    toast(gap ? `${cur.name} now stops at the end of June ${y} and “New job” starts in October ${y}, on the same pay, with no pay between. Both are open: set the months and the new pay. A pay-off goes in as a one-off amount received.`
+      : `${cur.name} now runs to the end of August ${y} and “New pay” follows straight on from September ${y}, at the same pay for now. Both are open: set the month and the new pay (lower it for fewer days a week).`);
     return next;
   }
   const yearsFrom = n => plan().startYear + n;
@@ -7151,8 +7156,9 @@
         add: [['Inheritance', () => { goSpend(); addEventOf({ name: 'Inheritance', kind: 'income', year: yearsFrom(15), note: 'Uncertain' }); }]] },
     ] },
     { title: 'Work, benefits and tax', stages: ['starting', 'building'], items: [
-      { title: 'Redundancy, or a change of job', how: 'Three things: the pay you have now stops in a month you choose; the new pay starts in a later month (the months between have no pay); and any pay-off is a one-off amount received in that year (the first £30,000 of a redundancy payment is not taxed). The button sets up the first two for you to correct.',
+      { title: 'Redundancy, or a change of job', how: 'A pay rise, a promotion or fewer days a week: the pay changes from a month you choose, with no gap. A new job or a redundancy is three things: the pay you have now stops in a month you choose; the new pay starts in a later month (the months between have no pay); and any pay-off is a one-off amount received in that year (the first £30,000 of a redundancy payment is not taxed). The button sets up the first two for you to correct.',
         add: [...people().map(x => [people().length > 1 ? `${x.name} changes job` : 'Set up the job change', () => { goIncome(); jobChange(x.id); }]),
+          ...people().map(x => [people().length > 1 ? `${x.name}: a pay rise or fewer days` : 'A pay rise or fewer days (no gap)', () => { goIncome(); jobChange(x.id, false); }]),
           ['Redundancy payment', () => { goSpend(); addEventOf({ name: 'Redundancy payment', kind: 'income', year: yearsFrom(1), note: 'After tax; the first £30,000 is not taxed' }); }]] },
       { title: 'Self-employed, freelance or a side business', how: 'Your yearly profit as Self-employed income. As profit before tax, Horizon works out income tax and Class 4 National Insurance; or choose “after tax” if you set it aside yourself. Under More options, choose when it starts and ends.',
         add: [['Self-employed profit', () => { goIncome(); addIncomeOf('self', { owner: people()[0].id, name: 'Self-employed profit', tax: 'uk', freq: 'year', endRef: 'retire' }); }]] },

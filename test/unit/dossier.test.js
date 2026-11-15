@@ -193,3 +193,18 @@ test('the action sheet covers the four years after next: what to set up and what
   assert.ok(d.sheet.later[1].changes.some(c => /Replace car/.test(c)), JSON.stringify(d.sheet.later[1].changes));
   assert.equal(d.years.length, 1);
 });
+
+test('a year that buys a home names the deposit instead of a monthly draw', () => {
+  const E = require('../../src/engine.js'), Q = require('../../src/quick-start.js');
+  const a = Q.blank('ruk');
+  Object.assign(a.people[0], { name: 'Pia', age: 34, pay: 'salary', amount: 38500, workPension: 'yes' });
+  a.cash = 3200; a.lisa = [7500, 0]; a.lisaPay = [250, 0]; a.home = 'rent'; a.rent = 895; a.spending = 1300;
+  Object.assign(a.goals, { buy: true, buyPrice: 200000, buyYear: 2029 });
+  const p = Q.build(a, { startYear: 2026, asOf: '2026-11-15' }), proj = E.project(p);
+  const y = D.yearBlock(p, proj, null, 3, []), step = y.todo.find(s => s.auto);
+  assert.equal(y.year, 2029);
+  assert.match(step.title, /^Pay the deposit for the home from savings: about £[\d,]+$/);
+  assert.match(step.text, /Lifetime ISA .* is paid out towards it.*it is paid once, when you buy\./);
+  // The years either side are the usual monthly amounts.
+  assert.equal(D.yearBlock(p, proj, null, 4, []).todo.find(s => s.auto).title, 'Set the monthly amounts for the year');
+});

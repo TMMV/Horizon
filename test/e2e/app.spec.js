@@ -150,6 +150,17 @@ test.describe('Horizon app', () => {
     await expect.poll(() => page.locator('#sec-income input').evaluateAll(els => els.filter(e => e.value === 'New job' || e.value === 'Alex salary').length)).toBe(2);
   });
 
+  test('a pay rise or fewer days: the new pay follows straight on, with no gap', async ({ page }) => {
+    await go(page, 'finances/income');
+    const before = await page.evaluate(() => window.__horizon.model.proj.rows[1].earnings);
+    await page.click('#sec-income button[data-paychange="p1"]');
+    await expect(page.locator('#toast')).toContainText('runs to the end of August 2027 and “New pay” follows straight on from September 2027');
+    const inc = await page.evaluate(() => { const H = window.__horizon; return H.ws.scenarios.find(s => s.id === H.ws.activeId).plan.income.filter(i => i.kind === 'salary' && i.owner === 'p1').map(i => [i.name, i.toYear || 0, i.toMonth || 0, i.fromYear || 0, i.fromMonth || 0]); });
+    expect(inc).toEqual([['Alex salary', 2027, 8, inc[0][3], inc[0][4]], ['New pay', inc[1][1], 0, 2027, 9]]);
+    // At the same pay for now, nothing is lost: every year earns what it did.
+    await expect.poll(() => page.evaluate(() => window.__horizon.model.proj.rows[1].earnings)).toBeCloseTo(before, 0);
+  });
+
   test('a baby: leave on reduced pay, the pay afterwards, nursery, everyday costs and Child Benefit in one click', async ({ page }) => {
     await go(page, 'finances/income');
     await page.click('#sec-income button[data-baby="p2"]');

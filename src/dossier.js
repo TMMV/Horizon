@@ -108,6 +108,9 @@
     if (left < -0.5) {
       const parts = SOURCES.filter(([k]) => (r[k] || 0) > 0.5).map(([k, label]) => `${m(r[k])} ${label}`);
       if (!parts.length) return null;
+      // A year that buys a home: most of what is taken is the deposit, paid once, not a monthly draw.
+      const dep = r.homeBuy || 0, rest = Math.max(0, (r.withdrawals || -left) - dep);
+      if (dep > 0.5) return { title: `Pay the deposit for the home from savings: about ${gbp(dep)}`, text: `${(r.lisaHome || 0) > 0.5 ? `The Lifetime ISA (about ${gbp(r.lisaHome)}) is paid out towards it. ` : ''}It comes ${list(parts.map(x => x.replace(/^£[\d,]+ /, '')))}, in the order that keeps tax low.${rest > 0.5 ? ` Apart from the deposit, about ${m(rest)} a month comes from savings this year.` : ''} The tables spread it over the year as about ${m(r.withdrawals || -left)} a month: it is paid once, when you buy.`, draw: true, auto: true };
       return { title: `Take about ${m(r.withdrawals || -left)} a month from savings and pensions`, text: `${cap(list(parts))}${(prev.withdrawals || 0) > 0.5 ? ` (${m(prev.withdrawals)} a month last year)` : ''}. In this order, tax stays low.`, draw: true, auto: true };
     }
     const parts = [];
