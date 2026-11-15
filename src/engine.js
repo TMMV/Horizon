@@ -2041,6 +2041,13 @@
     };
   }
 
+  // A debt that is a mortgage: called one, or a large debt in a household that owns a home now.
+  function isMortgage(plan, a) {
+    if (!a || a.type !== 'debt' || a.excluded) return false;
+    if (/mortgage/i.test(a.name || '')) return true;
+    return a.balance >= 25000 && a.rate < HIGH_RATE * 100 && plan.accounts.some(x => x.type === 'property' && !x.excluded && !(x.buyYear >= plan.startYear));
+  }
+
   function milestones(plan, proj) {
     const { rows, pre } = proj;
     const people = plan.household.people;
@@ -2054,12 +2061,21 @@
       add(p.pensionAccessAge, people.length > 1 ? 'can access pension' : 'Pension access', 'pension');
       add(spStart(p), people.length > 1 ? 'starts State Pension' : 'State Pension starts', 'sp');
     });
-    // Mortgage-free: the first year with nothing owed after borrowing (now, or for a home bought later).
-    const owing = rows.findIndex(x => x.debt > 0.5);
-    if (owing >= 0) {
-      const r = rows.slice(owing).find(x => x.debt <= 0.5);
-      if (r) list.push({ year: r.year, label: 'Mortgage-free', kind: 'debt' });
-    }
+    // Mortgage-free: the first year with nothing owed on a mortgage after borrowing (now, or for a
+    // home bought later). Loans and cards have their own date: clearing a credit card is not the
+    // end of a mortgage, least of all for someone who rents.
+    const debts = (proj.out && proj.out.debts) || [];
+    const isMort = d => /:mortgage$/.test(d.id) || plan.accounts.some(a => a.id === d.id && isMortgage(plan, a));
+    const cleared = (set, label) => {
+      const owed = t => set.reduce((acc, d) => acc + d.bal[t], 0);
+      let from = -1;
+      for (let t = 0; t <= pre.N; t++) {
+        if (from < 0 && owed(t) > 0.5) from = t;
+        else if (from >= 0 && owed(t) <= 0.5) { list.push({ year: rows[t].year, label, kind: 'debt' }); return; }
+      }
+    };
+    cleared(debts.filter(isMort), 'Mortgage-free');
+    cleared(debts.filter(d => !isMort(d) && !/:release$/.test(d.id)), 'Loans and cards paid off');
     for (const a of plan.accounts) {
       if (a.type === 'property' && !a.excluded && a.buyYear >= plan.startYear && inRange(a.buyYear)) list.push({ year: a.buyYear, label: `Buy ${a.name}`, kind: 'home' });
     }
@@ -2882,7 +2898,7 @@
   const api = {
     R, ACCOUNT_TYPES, OWNED_TYPES, GOAL_TYPES, INCOME_KINDS, TAX_TREATMENTS, FLOW_KEYS, LEVERS, GOAL_MEASURES, BASIC_RELIEF,
     incomeAfterCosts, taxOf, pensionSplit, spYears, bonusAt, stayUnderLine, isChildBenefit, dbPensionAt, dbEarly, nonWorkIncome, passiveIncome, estimateDb, renewalPayment, emergencyNeed, emergencyHave, emergencyYear, solveEmergency,
-    uid, currentYear, todayISO, isDate, asOfDate, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
+    uid, currentYear, todayISO, isDate, asOfDate, isMortgage, reservesAt, RESERVE_KINDS, RESERVE_ACCOUNTS, lastSeptember, defaultPlan, defaultWorkspace, defaultAssumptions, defaultStrategy, defaultGoals,
     normalizePlan, normalizeWorkspace, normalizeCheckin, normalizeGoal, validatePlan,
     waysThere, ownPensionTrial, goalDebtId, streamAt, streamWindow, isActive, growthFactor, expectedGrowth, partYear, pensionContrib, thresholdFactor, stockWeight, horizon, personIndex,
     expectedEcon, makeRandomEcon, precompute, runPath, newPath, project, monthlyPlan, milestones,

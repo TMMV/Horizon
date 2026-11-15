@@ -41,7 +41,7 @@
   function blank(region) {
     return {
       region: region === 'ruk' ? 'ruk' : 'scotland', partner: false, people: [person(), person()],
-      otherIncome: 0, childMoney: 0, youngest: null, cash: 0, investments: 0,
+      otherIncome: 0, childMoney: 0, childPaid: 0, youngest: null, cash: 0, investments: 0,
       home: '', homeValue: 0, mortgage: 0, mortgagePay: 0, rent: 0,
       let: false, letValue: 0, letMortgage: 0, letPay: 0, letRent: 0,
       debts: [],
@@ -119,7 +119,9 @@
       }
       // A pension that pays a set amount a year (an old job, council, NHS, teachers): used as the statement gives it.
       if (x.fixedPension > 0) {
-        const from = Math.min(75, Math.max(Math.max(50, age(x) + 1), Math.round(x.fixedAge || spaOf(x, startYear))));
+        // One that has already started is being paid now, from the age given; one still to come starts next year at the earliest.
+        const given = Math.round(x.fixedAge || spaOf(x, startYear));
+        const from = given <= age(x) ? Math.max(40, given) : Math.min(75, Math.max(Math.max(50, age(x) + 1), given));
         income.push({ name: mine ? 'My pension with a set amount' : `${n}’s pension with a set amount`, kind: 'dbpension', dbScheme: 'other', owner: id, tax: 'uk', amount: x.fixedPension, freq: 'year', startAge: from, dbAccrual: 0, lumpMultiple: 0 });
       }
       if (x.pot > 0 || (x.pay === 'self' && x.ownPension > 0) || (employed(x) && x.workPension !== 'no' && !scheme)) accounts.push({ name: mine ? 'My pension' : `${n}’s pension`, type: 'pension', owner: id, balance: x.pot || 0 });
@@ -152,6 +154,8 @@
       const k = DEBTS[d.kind] || DEBTS.loan;
       accounts.push({ name: k.label, type: 'debt', owner: 'joint', balance: d.owed, rate: k.rate, payment: d.pay || 0 });
     }
+    // Maintenance paid for children who live elsewhere is spending, until the youngest is 18.
+    if (a.childPaid > 0) expenses.push({ name: 'Maintenance for the children', amount: a.childPaid, freq: 'month', inflationLinked: true, endRef: 'year', toYear: startYear + Math.max(1, 18 - Math.min(17, Math.max(0, Math.round(a.youngest || 0)))) });
     if (a.spending > 0) expenses.push({ name: 'Everything else', amount: a.spending, freq: 'month', inflationLinked: true, note: 'One round figure from the quick start. The Spending check-up splits it into items.' });
     if (g.retire) goals.push({ type: 'retire', owner: 'p1', age: people[0].retireAge, confidence: 85 });
     if (g.emergency) goals.push({ type: 'emergency', months: 3, counts: 'cash', year: startYear + 2, confidence: 80 });

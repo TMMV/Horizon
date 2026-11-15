@@ -227,3 +227,54 @@ test('a “paid off by” goal can follow one mortgage: it is overpaid first, an
   // A goal about a debt that is gone falls back to everything owed.
   assert.equal(E.goalDebtId(withGoal('nope')), '');
 });
+
+test('a renter who clears a car loan is not told the mortgage ends; a home bought later has its own date', () => {
+  const a = renter();
+  a.spending = 900;
+  Object.assign(a.goals, { buy: true, buyPrice: 140000, buyYear: 2031 });
+  const p = Q.build(a, ctx), proj = E.project(p);
+  const ms = E.milestones(p, proj);
+  const loans = ms.find(m => m.label === 'Loans and cards paid off');
+  assert.ok(loans && loans.year < 2031, JSON.stringify(ms));
+  // The only mortgage is the one that starts with the home, so "mortgage-free" cannot come before it.
+  for (const m of ms.filter(x => x.label === 'Mortgage-free')) assert.ok(m.year > 2031, JSON.stringify(m));
+  assert.equal(p.accounts.some(x => E.isMortgage(p, x)), false);
+  // A debt called a mortgage is one; so is a large debt beside a home owned now; a card is not.
+  const d = E.defaultPlan(2026);
+  assert.equal(E.isMortgage(d, d.accounts.find(x => x.type === 'debt')), true);
+  assert.equal(E.isMortgage(d, { type: 'debt', name: 'Home loan', balance: 90000, rate: 5 }), true);
+  assert.equal(E.isMortgage(d, { type: 'debt', name: 'Credit card', balance: 3000, rate: 23 }), false);
+  assert.ok(E.milestones(d, E.project(d)).some(m => m.label === 'Mortgage-free'));
+});
+
+test('maintenance paid is spending until the youngest is 18, not money coming in', () => {
+  const a = renter();
+  a.spending = 900;
+  a.childPaid = 480;
+  a.youngest = 12;
+  const p = Q.build(a, ctx);
+  const e = p.expenses.find(x => x.name === 'Maintenance for the children');
+  assert.ok(e);
+  assert.equal(e.amount, 480);
+  assert.equal(e.toYear, 2032);
+  assert.equal(p.income.some(i => /children/i.test(i.name)), false);
+  const proj = E.project(p), without = E.project(Q.build({ ...a, childPaid: 0 }, ctx));
+  assert.ok(Math.abs((without.rows[0].spending === undefined ? 0 : proj.rows[0].spending - without.rows[0].spending) - 480 * 12) < 1);
+});
+
+test('a retired person: a set-amount pension that has already started is paid from now', () => {
+  const a = Q.blank('scotland');
+  Object.assign(a.people[0], { name: 'Ian', age: 68, pay: 'none', fixedPension: 11500, fixedAge: 63 });
+  a.cash = 60000; a.home = 'own'; a.homeValue = 180000; a.spending = 1600;
+  const p = Q.build(a, ctx);
+  const db = p.income.find(i => i.kind === 'dbpension');
+  assert.equal(db.startAge, 63);
+  const proj = E.project(p);
+  // Paid, and taxed with the State Pension, in the first year.
+  assert.ok(proj.pre.people[0].other[0] >= 11499, String(proj.pre.people[0].other[0]));
+  assert.ok(proj.rows[0].taxes > 1000, String(proj.rows[0].taxes));
+  // One still to come starts next year at the earliest, as before.
+  const b = Q.blank('scotland');
+  Object.assign(b.people[0], { name: 'Ian', age: 58, pay: 'none', fixedPension: 5000, fixedAge: 65 });
+  assert.equal(Q.build(b, ctx).income.find(i => i.kind === 'dbpension').startAge, 65);
+});

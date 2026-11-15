@@ -1112,7 +1112,8 @@
 
   // ---- home: what to do, and when (instructions worked out from the plan)
   // "Mortgage" when there is one (or a home), otherwise "loans".
-  const debtWord = () => (plan().accounts.some(a => !a.excluded && (a.type === 'property' || (a.type === 'debt' && /mortgage/i.test(a.name)))) ? 'mortgage' : 'loans');
+  // What is owed now, in a word: a mortgage, or loans (a home to buy later, or one owned outright, does not make a card a mortgage).
+  const debtWord = () => (plan().accounts.some(a => a.balance > 0 && E.isMortgage(plan(), a)) ? 'mortgage' : 'loans');
 
   // ---- home: the answer in a few plain sentences, before any figures
   function renderShort() {
@@ -1290,7 +1291,7 @@
       }
     }
     const dEnd = rows.findIndex((r, t) => t > 0 && t < N && rows[0].debt > 0.5 && r.debt <= 0.5);
-    if (dEnd > 0) add(rows[dEnd].year, `No more ${debtWord()} payments`, `The last one was paid during ${rows[dEnd].year - 1}. The payments become savings: the plan then puts ${where(rows[dEnd])} (in ${rows[dEnd].year} pounds).`, go('Set amounts', 'finances/saving'));
+    if (dEnd > 0) add(rows[dEnd].year, `No more ${debtWord() === 'mortgage' ? 'mortgage' : 'loan or card'} payments`, `The last one was paid during ${rows[dEnd].year - 1}. The payments become savings: the plan then puts ${where(rows[dEnd])} (in ${rows[dEnd].year} pounds).`, go('Set amounts', 'finances/saving'));
     const giaStart = rows.findIndex((r, t) => t > 0 && t < N && r.toGia > 100);
     const fromSale = giaStart > 0 && (rows[giaStart].propSold || 0) > 0.5;
     if (fromSale) add(rows[giaStart].year, `The sale puts ${money(rows[giaStart].propSold)} into savings`, `Up to ${money(p.strategy.isaAllowance * ps.length)} of it can go into ISAs that year; the rest goes into a general investment account, where gains are taxed. Each April after, move ${money(p.strategy.isaAllowance * ps.length)} of it into ISAs (“Bed and ISA”).`, go('Saving & investing', 'finances/saving'));
@@ -4096,7 +4097,7 @@
     const p = plan();
     const markers = p.events.filter(e => e.kind === 'expense' && e.year >= xs[0] && e.year <= xs[xs.length - 1]).map(e => ({ x: e.year, label: e.name, color: '--s3' }));
     const debtEnd = s.find((x, i) => i > 0 && s[0].mortgage > 0.5 && x.mortgage <= 0.5);
-    if (debtEnd) markers.push({ x: debtEnd.year, label: `No more ${debtWord()} payments`, color: '--s8' });
+    if (debtEnd) markers.push({ x: debtEnd.year, label: `No more ${debtWord() === 'mortgage' ? 'mortgage' : 'loan or card'} payments`, color: '--s8' });
     for (const x of people()) { const y = p.startYear + x.retireAge - x.age; if (y <= xs[xs.length - 1]) markers.push({ x: y, label: `${people().length > 1 ? `${x.name} retires` : 'Retire'}`, color: '--muted' }); }
     const m = x => money(x / 12);
     const out0 = now.everyday + now.future + now.oneOff + now.mortgage;
@@ -7563,7 +7564,7 @@
             qsQ('Hourly rate', qsMoney(() => x.hourly, v => { x.hourly = v; }, 'Hourly rate', { suffix: 'an hour' })),
             qsQ('Hours in a normal week', qsNum(() => x.hours, v => { x.hours = v; }, 'Hours a week', { suffix: 'hours' }))) : null,
           x.pay === 'hourly' ? h('span', { class: 'qs-hint' }, 'Horizon turns this into a yearly figure and works out the tax. Extra shifts: add them to the hours if they are regular.') : null,
-          x.pay === 'none' ? qsQ(`Pensions ${qsYou(i)} ${i === 0 ? 'are' : 'is'} paid now, if any`, qsMoney(() => x.pensionNow, v => { x.pensionNow = v; }, 'Pensions paid now a month', { suffix: 'a month' }), `What arrives in the bank from work or private pensions. Leave out the State Pension: Horizon adds that itself from age ${spa}. Leave empty if none.`) : null,
+          x.pay === 'none' ? qsQ(`Pensions ${qsYou(i)} ${i === 0 ? 'are' : 'is'} paid now, if any`, qsMoney(() => x.pensionNow, v => { x.pensionNow = v; }, 'Pensions paid now a month', { suffix: 'a month' }), `What arrives in the bank each month from work or private pensions, after tax. Leave out the State Pension: Horizon adds that itself from age ${spa}. If you only know a pension’s yearly amount before tax, leave it out here and give it in the next step instead. Leave empty if none.`) : null,
           QS.works(x) ? qsQ(`At what age would ${qsYou(i)} like to stop working?`, qsNum(() => x.retireAge || spa, v => { x.retireAge = v; }, 'Age to stop working'), `Not sure? Leave it at ${spa}, when the State Pension starts for ${qsYou(i)}. You can try other ages afterwards and see what each does.`) : null,
         ],
         check: () => (!x.pay ? 'Please choose one of the options.' : QS.works(x) && !(x.pay === 'hourly' ? x.hourly > 0 && x.hours > 0 : x.amount > 0) ? 'Please type the amount. A round figure is fine.' : ''),
@@ -7595,8 +7596,8 @@
             qsQ('The employer pays in', qsNum(() => (x.erPct === null ? QS.AUTO_ENROL.employer : x.erPct), v => { x.erPct = v; }, 'Employer pension contribution, % of pay', { suffix: '% of pay' }))) : null,
           QS.employed(x) && (x.workPension === 'unsure' || (x.workPension === 'yes' && !QS.SCHEMES[x.scheme])) ? h('span', { class: 'qs-hint' }, `On the payslip or the pension letter. Not sure? Leave them: ${QS.AUTO_ENROL.employee}% and ${QS.AUTO_ENROL.employer}% are the usual amounts.`) : null,
           qsQ(QS.schemeOf(x) ? `Roughly how much is in any other pension pots of ${i === 0 ? 'yours' : `${qsName(i)}’s`}?` : `Roughly how much is in ${qsYour(i)} pensions so far?`, qsMoney(() => x.pot, v => { x.pot = v; }, 'Pension pots so far'), 'All pension pots added together: this job and old ones. It is on the yearly statement or the provider’s app. Not sure? Leave it empty for now and add it when you find out; the answer will be on the cautious side.'),
-          qsQ(`Any pension that will pay ${qsYou(i)} a set amount a year?`, qsMoney(() => x.fixedPension, v => { x.fixedPension = v; }, 'Pension paying a set amount', { suffix: 'a year' }), 'From an old job, or the council, NHS, teachers’ or civil service scheme: the letter or yearly statement says “£X a year from age Y”. Add them together if there is more than one. Leave empty if none, or if you have lost the paperwork (gov.uk/find-pension-contact-details can trace it).'),
-          qsQ('If so, paid from what age?', qsNum(() => x.fixedAge || spa, v => { x.fixedAge = v; }, 'Age the set pension starts'), `As the letter says. Not sure? Leave it at ${spa}.`),
+          qsQ(x.pay === 'none' ? `Any other pension that pays ${qsYou(i)} a set amount a year, now or later?` : `Any pension that will pay ${qsYou(i)} a set amount a year?`, qsMoney(() => x.fixedPension, v => { x.fixedPension = v; }, 'Pension paying a set amount', { suffix: 'a year' }), 'From an old job, or the council, NHS, teachers’ or civil service scheme: the letter or yearly statement says “£X a year from age Y”. Add them together if there is more than one. Leave empty if none, or if you have lost the paperwork (gov.uk/find-pension-contact-details can trace it).' + (x.pay === 'none' ? ' Do not repeat a pension you counted in the step before.' : '')),
+          qsQ('If so, paid from what age?', qsNum(() => x.fixedAge || spa, v => { x.fixedAge = v; }, 'Age the set pension starts'), `As the letter says. If it is already being paid, type the age it started. Not sure? Leave it at ${spa}.`),
           (x.age || 0) < spa ? qsQ(`Years of National Insurance on ${qsYour(i)} State Pension forecast`, qsNum(() => x.niYears, v => { x.niYears = v; }, 'National Insurance years so far', { suffix: 'years' }), 'At gov.uk/check-state-pension (“full years”). 35 give a full State Pension; working years still to come are added. Leave empty if you do not know: Horizon then assumes a full one.') : null,
         ],
         check: () => (QS.employed(x) && !x.workPension ? 'Please choose Yes, No or Not sure.'
@@ -7608,8 +7609,9 @@
       render: () => [
         qsQ('How much is in bank and savings accounts?', qsMoney(() => a.cash, v => { a.cash = v; }, 'Bank and savings'), 'All accounts added together, including Premium Bonds. If you are usually overdrawn, leave this empty: the overdraft goes in with debts.'),
         qsQ('Anything in ISAs or other investments?', qsMoney(() => a.investments, v => { a.investments = v; }, 'ISAs and investments'), 'Stocks and shares ISAs, funds, shares. Leave empty if none or not sure what this is.'),
-        qsQ('Any money coming in each month because of children?', qsMoney(() => a.childMoney, v => { a.childMoney = v; }, 'Money for children', { suffix: 'a month' }), 'Child Benefit, maintenance from the other parent, the child part of Universal Credit. Leave empty if none.'),
-        qsQ('If so, how old is the youngest child?', qsNum(() => a.youngest, v => { a.youngest = v; }, 'Age of the youngest child'), 'That money is counted until the youngest turns 18, then it stops.'),
+        qsQ('Any money coming in each month because of children?', qsMoney(() => a.childMoney, v => { a.childMoney = v; }, 'Money for children', { suffix: 'a month' }), 'Child Benefit, maintenance from the other parent, the child part of Universal Credit. Leave empty if none. Maintenance you pay goes in the next box.'),
+        qsQ('Do you pay maintenance for children each month?', qsMoney(() => a.childPaid, v => { a.childPaid = v; }, 'Maintenance you pay', { suffix: 'a month' }), 'Money you pay to the other parent for children who live with them. It is counted as spending. Leave empty if none.'),
+        qsQ('If either, how old is the youngest child?', qsNum(() => a.youngest, v => { a.youngest = v; }, 'Age of the youngest child'), 'That money, coming in or going out, is counted until the youngest turns 18, then it stops.'),
         qsQ('Any other money coming in each month?', qsMoney(() => a.otherIncome, v => { a.otherIncome = v; }, 'Other money coming in', { suffix: 'a month' }), 'The rest of Universal Credit, money from a lodger or a grown-up child, help from family. Counted for good; you can give it an end date afterwards. Leave empty if none.'),
       ],
     });

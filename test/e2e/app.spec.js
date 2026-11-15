@@ -2590,6 +2590,7 @@ test.describe('the guide beside the page', () => {
     await fill('Age the set pension starts', 65);
     await next();
     await fill('Money for children', 510);
+    await fill('Maintenance you pay', 120);   // money going out for children is asked for on its own
     await fill('Age of the youngest child', 15);
     await next();
     await pick('Renting');
@@ -2608,6 +2609,8 @@ test.describe('the guide beside the page', () => {
     const plan = await page.evaluate(() => window.__horizon.ws.scenarios[0].plan);
     expect(plan.income.find(i => i.kind === 'dbpension').amount).toBe(3200);
     expect(plan.income.find(i => i.name === 'Money for the children').toYear).toBe(plan.startYear + 3);
+    const paid = plan.expenses.find(e => e.name === 'Maintenance for the children');
+    expect([paid.amount, paid.toYear]).toEqual([120, plan.startYear + 3]);
     expect(plan.household.people[0].loanPlan).toBe('plan4');
     const home = plan.accounts.find(a => a.type === 'property');
     expect(home.buyYear).toBe(plan.startYear + 5);
