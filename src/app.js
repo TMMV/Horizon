@@ -4008,13 +4008,13 @@
       // The start of the plan year that begins in year y ('' while a year is still being typed).
       const yearFrom = y => (y >= 1900 && y <= 2200 ? ` (${y === item.fromYear && which === 'start' ? 'the plan year ' : ''}from ${fmtDate(planYearSpan(asOf(), y - plan().startYear).from)})` : '');
       const say = () => (which === 'start'
-        ? (item.fromMonth > 1 ? `First paid in ${MONTHS[item.fromMonth - 1]} ${item.fromYear}${cal ? `: ${13 - item.fromMonth} months that year` : ''}.` : `First paid in ${item.fromYear}${cal ? '' : yearFrom(item.fromYear)}.`)
+        ? (item.fromMonth > 1 || item.fromJanuary ? `First paid in ${MONTHS[item.fromMonth - 1]} ${item.fromYear}${cal ? `: ${13 - item.fromMonth} months that year` : ''}.` : `First paid in ${item.fromYear}${cal ? '' : yearFrom(item.fromYear)}.`)
         : (item.toMonth > 0 ? `Paid to the end of ${MONTHS[item.toMonth - 1]} ${item.toYear}${cal ? `: ${item.toMonth} month${item.toMonth === 1 ? '' : 's'} that year` : ''}.` : `Not paid in ${item.toYear}${cal ? '' : yearFrom(item.toYear)}: ${item.toYear - 1} is the last year.`));
       const note = h('small', { class: 'hint' }, say());
       const num = numInput(...bind(item, yearKey), { label: which === 'start' ? 'First year' : 'Year it stops', min: 1950, max: 2150, step: 1 });
       (num.tagName === 'INPUT' ? num : num.querySelector('input')).addEventListener('input', () => { note.textContent = say(); });
       const month = which === 'start'
-        ? h('select', { 'aria-label': 'First month', onchange: e => { item.fromMonth = +e.target.value; note.textContent = say(); schedule(); } }, MONTHS.map((m, k) => h('option', { value: String(k + 1), selected: item.fromMonth === k + 1 }, m)))
+        ? h('select', { 'aria-label': 'First month', onchange: e => { item.fromMonth = +e.target.value; if (item.fromMonth === 1) item.fromJanuary = true; else delete item.fromJanuary; note.textContent = say(); schedule(); } }, MONTHS.map((m, k) => h('option', { value: String(k + 1), selected: item.fromMonth === k + 1 }, m)))
         : h('select', { 'aria-label': 'Last month paid', onchange: e => { item.toMonth = +e.target.value; note.textContent = say(); schedule(); } },
           [h('option', { value: '0', selected: !(item.toMonth > 0) }, 'Not at all that year'), ...MONTHS.map((m, k) => h('option', { value: String(k + 1), selected: item.toMonth === k + 1 }, `To the end of ${m}`))]);
       return h('div', { class: 'timing-year' }, h('div', { class: 'pair' }, sel, num), month, note);
@@ -4391,7 +4391,7 @@
     if (kid) return kid;
     const person = p.household.people[E.personIndex(p, item.owner === 'joint' ? 'p1' : item.owner)];
     const end = item.endRef === 'retire' ? 'until retirement' : item.endRef === 'end' ? 'for good' : item.endRef === 'year' ? (item.toMonth > 0 ? `to the end of ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][item.toMonth - 1]} ${item.toYear}` : `last paid in ${item.toYear - 1}`) : `until ${person ? `${person.name.split(' ')[0]} is ` : 'age '}${item.endAge}`;
-    const start = item.startRef === 'age' ? `from ${person ? `${person.name.split(' ')[0]} at ` : 'age '}${item.startAge}, ` : item.startRef === 'retire' ? 'from retirement, ' : item.startRef === 'year' ? `from ${item.fromMonth > 1 ? `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][item.fromMonth - 1]} ` : ''}${item.fromYear}, ` : '';
+    const start = item.startRef === 'age' ? `from ${person ? `${person.name.split(' ')[0]} at ` : 'age '}${item.startAge}, ` : item.startRef === 'retire' ? 'from retirement, ' : item.startRef === 'year' ? `from ${item.fromMonth > 1 || item.fromJanuary ? `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][item.fromMonth - 1]} ` : ''}${item.fromYear}, ` : '';
     return start + end;
   };
 
@@ -5438,7 +5438,9 @@
         extra.push(h('p', { class: 'hint' }, 'Something you own that is not money in an account: a business, your share of a family property, land, a car or art you will sell. It counts in net worth but not as money to spend until it is sold.'));
       }
       if (a.type === 'debt') {
-        main.push(field('Interest rate', numInput(...bind(a, 'rate'), { step: 0.05, suffix: '%' })));
+        // Left at 0, say what is typical: a debt at 0% is paid off sooner than it really will be.
+        main.push(field('Interest rate', numInput(...bind(a, 'rate'), { step: 0.05, suffix: '%', rerender: 'accounts' }),
+          a.rate > 0 ? null : `0% = no interest (e.g. family). Not sure? On the statement; typical now: a mortgage about ${QS.MORTGAGE_RATE}%, a loan or car finance about 9%, a credit card about 23%.`));
         main.push(field('Monthly payment', moneyInput(...bind(a, 'payment')), h('span', { 'data-payoff': a.id }, payoffText(a))));
         extra.push(field('Years left on the loan', numInput(...bind(a, 'termYears'), { min: 0, max: 40, label: 'Years left on the loan', rerender: 'accounts' }), '0 = not sure. From the statement; checked against the payment.'));
         extra.push(field('Rate fixed until', numInput(...bind(a, 'fixedUntil'), { min: 0, max: 2100, rerender: 'accounts' }), '0 = fixed for good. The new rate applies from the following year.'));
@@ -7383,7 +7385,7 @@
             for (const e of rents) { e.endRef = 'year'; e.toYear = home.buyYear; e.toMonth = 0; }
             if (rents.length) { renderSection('expenses'); refresh(); toast(`${rents.map(e => e.name).join(' and ')} now ends in ${home.buyYear}, when the home is bought. If you change the year you buy, change it in Spending too.`); }
           }), sAdd('+ Loan, credit card or overdraft', () => addAccountOf('debt', { name: 'Loan or credit card' })))
-          : sAdds(sAdd('+ Property', () => addAccountOf('property', { name: 'Home' })), sAdd('+ Mortgage', () => addAccountOf('debt', { name: 'Mortgage' })), sAdd('+ Loan, credit card or overdraft', () => addAccountOf('debt', { name: 'Loan or credit card' })), sAdd('+ A home I’ll buy later', () => addAccountOf('property', { name: 'Next home', buyYear: yearsFrom(5), balance: 300000, rate: 3, deposit: 10, mortRate: 4.5, mortYears: 25 }))),
+          : sAdds(sAdd('+ Property', () => addAccountOf('property', { name: 'Home' })), sAdd('+ Mortgage', () => addAccountOf('debt', { name: 'Mortgage', rate: QS.MORTGAGE_RATE })), sAdd('+ Loan, credit card or overdraft', () => addAccountOf('debt', { name: 'Loan or credit card' })), sAdd('+ A home I’ll buy later', () => addAccountOf('property', { name: 'Next home', buyYear: yearsFrom(5), balance: 300000, rate: 3, deposit: 10, mortRate: 4.5, mortYears: 25 }))),
         sFields(
           sField('A home I’ll buy later', 'Choose “Buying it later” and the year. Enter what a similar home costs today, the deposit as a % of the price and the mortgage you expect. In that year the deposit comes out of your savings, the home is counted and the mortgage starts. End your rent that year (Ends → In year…) and add stamp duty and moving costs as a one-off event.', firstHome() ? `${firstHome().name}: ${buyWorking(firstHome())}` : null),
           stage() === 'nearing' || stage() === 'retired' ? sField('Downsizing', 'On your home, under More options, set “Sell in year”. Then add the smaller home as “A home I’ll buy later” in the same year with a 100% deposit: the difference is saved or invested.') : null,
@@ -7585,6 +7587,13 @@
     i.addEventListener('input', () => { set(parseAmount(i.value) || 0); if (opts.after) opts.after(); });
     return h('div', { class: 'qs-money' }, h('span', {}, '£'), i, opts.suffix ? h('small', {}, opts.suffix) : null);
   }
+  // A month of the year, for the quick start (1 = January).
+  function qsMonth(get, set, label) {
+    const s = h('select', { 'aria-label': label, class: 'qs-select' }, QS.MONTHS.map((m, k) => h('option', { value: String(k + 1) }, m)));
+    s.value = String(get() || 1);
+    s.addEventListener('change', () => set(+s.value));
+    return s;
+  }
   const qsQ = (label, control, hint) => h('div', { class: 'qs-q' }, h('span', { class: 'qs-label' }, label), control, hint ? h('span', { class: 'qs-hint' }, hint) : null);
   const qsChoices = (options, current, pick, two) => h('div', { class: `qs-choices${two ? ' two' : ''}` }, options.map(([value, label, sub]) => h('button', {
     type: 'button', class: 'qs-choice', 'aria-pressed': String(current === value), onclick: () => { pick(value); renderQuick(true); },
@@ -7734,7 +7743,8 @@
         a.move && a.home === 'family' ? h('div', { class: 'qs-person' },
           h('div', { class: 'qs-row' },
             qsQ('In which year?', qsNum(() => a.moveYear, v => { a.moveYear = v; }, 'Year of the move')),
-            qsQ('Rent a month', qsMoney(() => a.moveRent, v => { a.moveRent = v; }, 'Rent after moving out', { suffix: 'a month' }), 'Your share, at today’s prices.'))) : null,
+            qsQ('Which month?', qsMonth(() => a.moveMonth, v => { a.moveMonth = v; }, 'Month of the move'))),
+          qsQ('Rent a month', qsMoney(() => a.moveRent, v => { a.moveRent = v; }, 'Rent after moving out', { suffix: 'a month' }), 'Your share, at today’s prices. What you pay the family is paid to the month before.')) : null,
         (() => {
           const box = h('input', { type: 'checkbox', checked: !!a.let, id: 'qsLet' });
           box.addEventListener('change', () => { a.let = box.checked; renderQuick(true); });
@@ -7749,7 +7759,10 @@
             qsQ('Its mortgage payment', qsMoney(() => a.letPay, v => { a.letPay = v; }, 'Mortgage payment on the rented-out property', { suffix: 'a month' }))),
           h('span', { class: 'qs-hint' }, 'Rent after the letting agent’s fee, if there is one. Leave the mortgage boxes empty if none. If the payment only covers the interest, Horizon keeps the amount owed level; tax on the rent is worked out for you.')) : null,
       ],
-      check: () => (!a.home ? 'Please choose one of the four options.' : a.home === 'mortgage' && a.mortgageFix > 0 && !(a.mortgageFix >= ctx.startYear && a.mortgageFix <= ctx.startYear + 15) ? `Please type the year the fixed rate ends, from ${ctx.startYear} on, or leave it empty.` : a.let && !(a.letValue > 0) ? 'Please type roughly what the rented-out property is worth, or untick that box.'
+      check: () => (!a.home ? 'Please choose one of the four options.'
+        : (a.home === 'mortgage' || a.home === 'own') && !(a.homeValue > 0) ? 'Please type roughly what the home is worth: what similar homes nearby have sold for.'
+          : a.home === 'mortgage' && !(a.mortgage > 0) ? 'Please type roughly how much is left on the mortgage. Paid off? Choose “A home I own outright”.'
+            : a.home === 'mortgage' && a.mortgageFix > 0 && !(a.mortgageFix >= ctx.startYear && a.mortgageFix <= ctx.startYear + 15) ? `Please type the year the fixed rate ends, from ${ctx.startYear} on, or leave it empty.` : a.let && !(a.letValue > 0) ? 'Please type roughly what the rented-out property is worth, or untick that box.'
         : a.move && (a.home === 'mortgage' || a.home === 'own' || a.home === 'family') && !(a.moveYear > ctx.startYear && a.moveYear <= ctx.startYear + 50) ? `Please type the year of the move, after ${ctx.startYear}, or untick that box.`
           : a.move && a.home === 'family' && !(a.moveRent > 0) ? 'Please type roughly what the rent would be, or untick that box.'
             : a.move && a.home !== 'family' && (a.home === 'mortgage' || a.home === 'own') && !(a.movePrice > 0) ? 'Please type roughly what the next home would cost, or untick that box.'
@@ -7814,15 +7827,38 @@
     out.push({
       id: 'coming', title: 'Anything big coming up?',
       render: () => [
-        h('p', { class: 'qs-lead' }, 'One-off things in the years ahead, so each lands in its own year of your plan. A cost: a wedding, a car, a new kitchen, help for a child. Money coming in: selling a business or a property, an inheritance, a redundancy payment. Nothing in sight? Just continue.'),
-        ...a.big.map((b, k) => h('div', { class: 'qs-debt qs-big' },
-          h('label', {}, 'Is it', (() => { const s = h('select', { 'aria-label': 'A cost or money coming in' }, h('option', { value: 'cost' }, 'A cost'), h('option', { value: 'money' }, 'Money coming in')); s.value = b.kind; s.addEventListener('change', () => { b.kind = s.value; renderQuick(true); }); return s; })()),
-          h('label', {}, 'What is it?', qsText(() => b.name, v => { b.name = v; }, 'What it is', b.kind === 'money' ? 'Sale of the business' : 'A new car')),
-          h('label', {}, 'How much', qsMoney(() => b.amount, v => { b.amount = v; }, 'About how much')),
-          h('label', {}, 'Year', qsNum(() => b.year, v => { b.year = v; }, 'In which year')),
-          h('button', { type: 'button', class: 'btn ghost icon-btn', 'aria-label': 'Remove this', onclick: () => { a.big.splice(k, 1); renderQuick(true); } }, '✕'))),
+        h('p', { class: 'qs-lead' }, 'Things in the years ahead, so each lands in its own year of your plan. A cost: a wedding, a car, a new kitchen, help for a child. Money coming in: selling a business or a property, an inheritance, a redundancy payment. A change in pay: a pay rise or promotion, a new job, fewer days a week. Nothing in sight? Just continue.'),
+        ...a.big.map((b, k) => {
+          const earners = QS.peopleOf(a).map((x, i) => [x, i]).filter(([x]) => QS.works(x));
+          const kind = h('label', {}, 'Is it', (() => {
+            const s = h('select', { 'aria-label': 'What kind of thing' }, h('option', { value: 'cost' }, 'A cost'), h('option', { value: 'money' }, 'Money coming in'), earners.length ? h('option', { value: 'pay' }, 'A change in pay') : null);
+            s.value = b.kind;
+            s.addEventListener('change', () => { b.kind = s.value; if (b.kind === 'pay') { b.who = earners[0] ? earners[0][1] : 0; b.month = b.month || 4; } renderQuick(true); });
+            return s;
+          })());
+          const remove = h('button', { type: 'button', class: 'btn ghost icon-btn', 'aria-label': 'Remove this', onclick: () => { a.big.splice(k, 1); renderQuick(true); } }, '✕');
+          if (b.kind === 'pay') {
+            const x = a.people[b.who === 1 && a.partner ? 1 : 0];
+            // The new pay, asked the way that person's pay was given.
+            const unit = x.pay === 'takehome' ? ['New take-home pay', 'a month'] : x.pay === 'self' ? ['New profit before tax', 'a year'] : ['New pay before tax', 'a year'];
+            return h('div', { class: 'qs-debt qs-big qs-pay' }, kind,
+              earners.length > 1 ? h('label', {}, 'Whose', (() => {
+                const s = h('select', { 'aria-label': 'Whose pay' }, earners.map(([p, i]) => h('option', { value: String(i) }, qsName(i))));
+                s.value = String(b.who || 0); s.addEventListener('change', () => { b.who = +s.value; renderQuick(true); }); return s;
+              })()) : null,
+              h('label', {}, unit[0], qsMoney(() => b.amount, v => { b.amount = v; }, 'New pay', { suffix: unit[1] })),
+              h('label', {}, 'Year', qsNum(() => b.year, v => { b.year = v; }, 'In which year')),
+              h('label', {}, 'Month', qsMonth(() => b.month, v => { b.month = v; }, 'From which month')),
+              remove);
+          }
+          return h('div', { class: 'qs-debt qs-big' }, kind,
+            h('label', {}, 'What is it?', qsText(() => b.name, v => { b.name = v; }, 'What it is', b.kind === 'money' ? 'Sale of the business' : 'A new car')),
+            h('label', {}, 'How much', qsMoney(() => b.amount, v => { b.amount = v; }, 'About how much')),
+            h('label', {}, 'Year', qsNum(() => b.year, v => { b.year = v; }, 'In which year')),
+            remove);
+        }),
         h('div', {}, h('button', { type: 'button', class: 'btn', id: 'qsAddBig', onclick: () => { a.big.push({ kind: 'cost', name: '', amount: 0, year: ctx.startYear + 2 }); renderQuick(true); } }, a.big.length ? '+ Add another' : '+ Add something coming up')),
-        qsNote('Amounts in today’s money: Horizon raises a cost with prices by its year. A new job on different pay or a baby cannot be answered here: afterwards, “Your figures” → Income has a button for each (“A change of job”, “A baby”), and one-off things like these can be changed there too.'),
+        qsNote('Costs and money coming in are in today’s money: Horizon raises a cost with prices by its year. A new pay is the figure you expect then; it rises as pay does afterwards. A baby, or months out of work between jobs, cannot be answered here: afterwards, “Your figures” → Income has a button for each (“A baby”, “A change of job”), and everything here can be changed there too.'),
       ],
       check: () => (a.big.some(b => b.amount > 0 && !(b.year >= ctx.startYear && b.year <= ctx.startYear + 60)) ? `Please type a year from ${ctx.startYear} on for each one.` : ''),
     });
@@ -8225,6 +8261,13 @@
       navigate(next.dataset.tab);
     });
     window.addEventListener('popstate', () => applyRoute(parseRoute(location.hash)));
+    $('#dossier').addEventListener('click', e => {
+      const a = e.target.closest && e.target.closest('a[href^="#doc-"]');
+      if (!a) return;
+      e.preventDefault();
+      const to = document.getElementById(a.getAttribute('href').slice(1));
+      if (to) to.scrollIntoView({ block: 'start' });
+    });
     window.addEventListener('hashchange', () => { const r = parseRoute(location.hash); if (r.tab !== route.tab || r.sub !== route.sub) applyRoute(r); });
     $('#scenarioSelect').addEventListener('change', e => { ws.activeId = e.target.value; afterScenarioChange(); });
     $('#dupScenario').addEventListener('click', () => {

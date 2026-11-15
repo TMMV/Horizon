@@ -46,11 +46,13 @@
       investments2: 0,   // the partner's own ISAs and investments
       // A move ahead: an owner selling to buy somewhere cheaper (the year and its price), or
       // someone living with family moving out to rent (the year and the rent a month).
-      move: false, moveYear: 0, movePrice: 0, moveRent: 0,
+      move: false, moveYear: 0, moveMonth: 0, movePrice: 0, moveRent: 0,
       lisa: [0, 0], lisaPay: [0, 0],   // each person's Lifetime ISA: what is in it, and what goes in a month
       let: false, letValue: 0, letMortgage: 0, letPay: 0, letRent: 0,
       debts: [],
-      big: [],   // one-off things in the years ahead: { kind: 'cost' | 'money', name, amount, year }
+      // Things in the years ahead: one-offs { kind: 'cost' | 'money', name, amount, year }, and changes
+      // in pay { kind: 'pay', who: 0 | 1, amount (the new pay, in that person's way of giving it), year, month }.
+      big: [],
       spending: 0,
       goals: { retire: true, emergency: true, save: false, saveName: 'A new car', saveAmount: 0, saveYear: 0, buy: false, buyPrice: 0, buyYear: 0 },
     };
@@ -65,6 +67,11 @@
   const grossOf = (x, region) => (x.pay === 'hourly' ? Math.round(x.hourly * x.hours * 52) : x.pay === 'takehome' ? Math.round(R.grossFromTakeHome(x.amount * 12, region)) : x.amount);
   // What a scheme has built up, from the year joined and pay now (today's money, a year).
   const schemeEstimate = (x, region, startYear) => E.estimateDb({ scheme: schemeOf(x), joined: Math.min(startYear, Math.max(1960, Math.round(x.joined || startYear))), salary: grossOf(x, region), startYear, realGrowth: 1 });
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthOf = m => Math.min(12, Math.max(1, Math.round(m || 1)));
+  // Calendar months: paid from month m of year y, and so last paid the month before.
+  const startAt = (y, m) => ({ startRef: 'year', fromYear: y, fromMonth: m, ...(m === 1 ? { fromJanuary: true } : {}) });
+  const endBefore = (y, m) => ({ endRef: 'year', ...(m > 1 ? { toYear: y, toMonth: m - 1 } : { toYear: y - 1, toMonth: 12 }) });
   const nameOf = (x, i) => (x.name || '').trim() || (i === 0 ? 'You' : 'Partner');
   const spaOf = (x, startYear) => R.statePensionAge(startYear - (x.age || 40));
 
@@ -142,6 +149,22 @@
       }
       if (x.pot > 0 || (x.pay === 'self' && x.ownPension > 0) || (employed(x) && x.workPension !== 'no' && !scheme)) accounts.push({ name: mine ? 'My pension' : `${n}’s pension`, type: 'pension', owner: id, balance: x.pot || 0 });
     });
+    // A change in pay ahead (a rise, a new job, fewer days): the pay so far stops the month before and
+    // the new pay follows on, as typed for that year (it then rises as pay does).
+    (a.big || []).filter(b => b.kind === 'pay' && b.amount > 0)
+      .map(b => ({ ...b, y: Math.min(startYear + 50, Math.max(startYear, Math.round(b.year || startYear + 1))), m: monthOf(b.month) }))
+      .sort((p, q) => p.y - q.y || p.m - q.m)
+      .forEach(b => {
+        const i = a.partner && b.who === 1 ? 1 : 0, id = `p${i + 1}`;
+        const cur = income.filter(x => x.owner === id && (x.kind === 'salary' || x.kind === 'self') && x.endRef === 'retire').pop();
+        if (!cur) return;
+        const base = cur.baseName || cur.name;
+        const next = { ...cur, baseName: base, name: `${base} from ${MONTHS[b.m - 1]} ${b.y}`, ...startAt(b.y, b.m), endRef: 'retire',
+          amount: Math.round(b.amount / Math.pow(1 + (cur.growth || 0) / 100, b.y - startYear)) };
+        Object.assign(cur, endBefore(b.y, b.m));
+        income.splice(income.indexOf(cur) + 1, 0, next);
+      });
+    income.forEach(x => { delete x.baseName; });
     // Money that comes because of the children stops when the youngest is 18.
     if (a.childMoney > 0) income.push({ name: 'Money for the children', kind: 'other', owner: 'joint', tax: 'none', amount: a.childMoney, freq: 'month', endRef: 'year', toYear: startYear + Math.max(1, 18 - Math.min(17, Math.max(0, Math.round(a.youngest || 0)))), inflationLinked: true });
     if (a.otherIncome > 0) income.push({ name: 'Other money coming in', kind: 'other', owner: 'joint', tax: 'none', amount: a.otherIncome, freq: 'month', endRef: 'end', inflationLinked: true });
@@ -173,9 +196,11 @@
       }
       if (a.letRent > 0) income.push({ name: 'Rent from the property', kind: 'rental', owner: 'joint', tax: 'uk', amount: a.letRent, freq: 'month', endRef: 'end', inflationLinked: true });
     }
-    const keepTo = moveOut || buyYear;
-    if ((a.home === 'rent' || a.home === 'family') && a.rent > 0) expenses.push({ name: a.home === 'rent' ? 'Rent' : 'Keep paid to family', amount: a.rent, freq: 'month', inflationLinked: true, ...(keepTo ? { endRef: 'year', toYear: keepTo } : {}) });
-    if (moveOut) expenses.push({ name: 'Rent', amount: a.moveRent, freq: 'month', inflationLinked: true, startRef: 'year', fromYear: moveOut, ...(buyYear ? { endRef: 'year', toYear: buyYear } : {}) });
+    // Moving out in a month of that year: the keep is paid to the month before, the rent from then.
+    const outMonth = monthOf(a.moveMonth);
+    const keepEnd = moveOut ? endBefore(moveOut, outMonth) : buyYear ? { endRef: 'year', toYear: buyYear } : {};
+    if ((a.home === 'rent' || a.home === 'family') && a.rent > 0) expenses.push({ name: a.home === 'rent' ? 'Rent' : 'Keep paid to family', amount: a.rent, freq: 'month', inflationLinked: true, ...keepEnd });
+    if (moveOut) expenses.push({ name: 'Rent', amount: a.moveRent, freq: 'month', inflationLinked: true, ...startAt(moveOut, outMonth), ...(buyYear ? { endRef: 'year', toYear: buyYear } : {}) });
     if (buyYear) accounts.push({ name: 'First home', type: 'property', owner: 'joint', balance: g.buyPrice, rate: 3, buyYear, deposit: 10, mortRate: MORTGAGE_RATE, mortYears: 30 });
     for (const d of a.debts) {
       if (!(d.owed > 0)) continue;
@@ -195,7 +220,7 @@
       household: { region: a.region, people },
       accounts, income, expenses, goals,
       // One-off costs and money coming in, each in its year (today's money).
-      events: (a.big || []).filter(b => b.amount > 0).map(b => ({
+      events: (a.big || []).filter(b => b.amount > 0 && b.kind !== 'pay').map(b => ({
         name: String(b.name || '').trim().slice(0, 60) || (b.kind === 'money' ? 'Money coming in' : 'A one-off cost'),
         kind: b.kind === 'money' ? 'income' : 'expense', amount: b.amount,
         year: Math.min(startYear + 60, Math.max(startYear, Math.round(b.year || startYear + 1))),
@@ -220,7 +245,7 @@
     return Math.max(0, Math.round((leftover(build({ ...a, spending: 0 }, opts)) - (saved || 0)) / 10) * 10);
   }
 
-  const api = { DEBTS, AUTO_ENROL, SCHEMES, schemeOf, schemeEstimate, grossOf, employed, MORTGAGE_RATE, LOAN_TYPICAL, loanPlanFor, blank, person, peopleOf, works, nameOf, spaOf, mortgagePayment, build, leftover, spendingFor };
+  const api = { MONTHS, DEBTS, AUTO_ENROL, SCHEMES, schemeOf, schemeEstimate, grossOf, employed, MORTGAGE_RATE, LOAN_TYPICAL, loanPlanFor, blank, person, peopleOf, works, nameOf, spaOf, mortgagePayment, build, leftover, spendingFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.QuickStart = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

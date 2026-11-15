@@ -410,9 +410,47 @@ test('moving out to rent: what is paid to the family stops that year and rent st
   Object.assign(a, { home: 'family', rent: 300, spending: 600, move: true, moveYear: 2028, moveRent: 800 });
   const ex = Q.build(a, ctx).expenses;
   const keep = ex.find(e => e.name === 'Keep paid to family'), rent = ex.find(e => e.name === 'Rent');
-  assert.deepEqual([keep.endRef, keep.toYear, rent.amount, rent.startRef, rent.fromYear, rent.endRef], ['year', 2028, 800, 'year', 2028, 'end']);
+  // No month chosen: January (the keep is paid to the end of the December before).
+  assert.deepEqual([keep.endRef, keep.toYear, keep.toMonth, rent.amount, rent.startRef, rent.fromYear, rent.fromMonth, rent.endRef], ['year', 2027, 12, 800, 'year', 2028, 1, 'end']);
   // Buying a home later ends the rent too.
   a.goals.buy = true; a.goals.buyPrice = 180000; a.goals.buyYear = 2032;
   const r2 = Q.build(a, ctx).expenses.find(e => e.name === 'Rent');
   assert.deepEqual([r2.endRef, r2.toYear], ['year', 2032]);
+});
+
+test('moving out in a month: the keep is paid to the month before and rent from then, January included', () => {
+  const a = renter();
+  Object.assign(a, { home: 'family', rent: 250, spending: 600, move: true, moveYear: 2027, moveMonth: 4, moveRent: 475 });
+  const p = Q.build(a, ctx);
+  const keep = p.expenses.find(e => e.name === 'Keep paid to family'), rent = p.expenses.find(e => e.name === 'Rent');
+  assert.deepEqual([keep.toYear, keep.toMonth, rent.fromYear, rent.fromMonth], [2027, 3, 2027, 4]);
+  // January: the calendar month, not the start of the plan year that begins in it.
+  a.moveMonth = 1;
+  const q = Q.build(a, ctx);
+  const k2 = q.expenses.find(e => e.name === 'Keep paid to family'), r2 = q.expenses.find(e => e.name === 'Rent');
+  assert.deepEqual([k2.toYear, k2.toMonth, r2.fromYear, r2.fromMonth, r2.fromJanuary], [2026, 12, 2027, 1, true]);
+  // Figures as at 13 November 2026: the keep for the rest of 2026, the rent from January, in the first plan year.
+  const m0 = 11 + 12 / 31;
+  assert.ok(Math.abs(E.partYear(k2, q, 0) - (13 - m0) / 12) < 1e-6, String(E.partYear(k2, q, 0)));
+  assert.ok(Math.abs(E.partYear(r2, q, 0) - (m0 - 1) / 12) < 1e-6, String(E.partYear(r2, q, 0)));
+});
+
+test('a change in pay ahead: the pay so far stops the month before and the new pay follows, as typed for that year', () => {
+  const a = Q.blank('scotland');
+  Object.assign(a.people[0], { name: '', age: 25, pay: 'salary', amount: 24500 });
+  a.cash = 3500; a.home = 'rent'; a.rent = 500; a.spending = 900;
+  a.big = [{ kind: 'pay', who: 0, amount: 27000, year: 2027, month: 4 }, { kind: 'cost', name: 'A car', amount: 5000, year: 2028 }];
+  const p = Q.build(a, ctx);
+  const pay = p.income.filter(i => i.kind === 'salary');
+  assert.deepEqual(pay.map(i => i.name), ['My pay', 'My pay from April 2027']);
+  assert.deepEqual([pay[0].endRef, pay[0].toYear, pay[0].toMonth], ['year', 2027, 3]);
+  assert.deepEqual([pay[1].startRef, pay[1].fromYear, pay[1].fromMonth, pay[1].endRef], ['year', 2027, 4, 'retire']);
+  // £27,000 in 2027: stored a year's growth lower, so it is £27,000 then.
+  assert.ok(Math.abs(pay[1].amount * 1.03 - 27000) < 2, String(pay[1].amount));
+  // Only the car is a one-off.
+  assert.deepEqual(p.events.map(e => e.name), ['A car']);
+  // A second change for the same person follows on from the first.
+  a.big.push({ kind: 'pay', who: 0, amount: 30000, year: 2029, month: 1 });
+  const q = Q.build(a, ctx).income.filter(i => i.kind === 'salary');
+  assert.deepEqual(q.map(i => [i.name, i.toYear, i.toMonth]), [['My pay', 2027, 3], ['My pay from April 2027', 2028, 12], ['My pay from January 2029', 0, 0]]);
 });

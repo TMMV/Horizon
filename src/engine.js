@@ -294,6 +294,9 @@
       // the end of `toMonth` of `toYear` (0 = not paid in `toYear` at all).
       fromMonth: Math.min(12, Math.max(1, Math.round(num(item.fromMonth, 1)))),
       toMonth: Math.min(12, Math.max(0, Math.round(num(item.toMonth, 0)))),
+      // A month of 1 alone means the start of the plan year (older plans); chosen as January, it is
+      // the calendar month, like the others.
+      ...(item.fromJanuary && Math.round(num(item.fromMonth, 1)) === 1 ? { fromJanuary: true } : {}),
     };
   }
 
@@ -736,7 +739,7 @@
   function streamWindow(item, person, startYear, m0 = 1) {
     const yearAge = y => person.age + y - (startYear || 0);
     const start = item.startRef === 'now' ? -Infinity : item.startRef === 'retire' ? person.retireAge
-      : item.startRef === 'year' ? yearAge(item.fromYear) + (item.fromMonth > 1 ? (item.fromMonth - m0) / 12 : 0) : item.startAge;
+      : item.startRef === 'year' ? yearAge(item.fromYear) + (item.fromMonth > 1 || item.fromJanuary ? (item.fromMonth - m0) / 12 : 0) : item.startAge;
     const end = item.endRef === 'retire' ? person.retireAge : item.endRef === 'end' ? Infinity
       : item.endRef === 'year' ? (item.toYear ? yearAge(item.toYear) + (item.toMonth > 0 ? (item.toMonth + 1 - m0) / 12 : 0) : Infinity) : item.endAge;
     return [start, end];
@@ -834,7 +837,7 @@
   // Nominal amount of an income or expense stream in year t (expected economy by default).
   // The share of year t a stream is paid for, when it starts or stops part-way through a year.
   function partYear(item, plan, t) {
-    if (!(item.startRef === 'year' && item.fromMonth > 1) && !(item.endRef === 'year' && item.toMonth > 0)) return 1;
+    if (!(item.startRef === 'year' && (item.fromMonth > 1 || item.fromJanuary)) && !(item.endRef === 'year' && item.toMonth > 0)) return 1;
     const person = ownerOf(plan, item), age = person.age + t;
     const [start, end] = streamWindow(item, person, plan.startYear, planMonth(plan));
     return Math.max(0, Math.min(1, Math.min(end, age + 1) - Math.max(start, age)));

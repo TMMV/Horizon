@@ -2455,6 +2455,17 @@ test.describe('quick start', () => {
 });
 
 test.describe('the dossier', () => {
+  test('the contents links move within the plan and leave the page behind it alone', async ({ page }) => {
+    const { problems } = await openApp(page, 'finances/income');
+    await page.click('#tabDossier');
+    await page.locator('#dossier a[href="#doc-do"]').click();
+    await expect(page.locator('#doc-do')).toBeInViewport();
+    expect(await page.evaluate(() => location.hash)).toBe('#finances/income');
+    await page.click('#docClose');
+    await expect(page.locator('#sec-income')).toBeVisible();
+    expect(problems).toEqual([]);
+  });
+
   test('the plan written out year by year, opened from Home, shortened, and closed again', async ({ page }) => {
     const { problems } = await openApp(page);
     await page.click('#shortDossier');
@@ -2700,7 +2711,13 @@ test.describe('the guide beside the page', () => {
     await pick('what is left at the end');
     await fill('Left over a month', 100);
     await next();
-    await next();   // nothing big coming up
+    // A pay rise ahead: the new pay and the month it starts.
+    await page.click('#qsAddBig');
+    await body.locator('select[aria-label="What kind of thing"]').selectOption('pay');
+    await fill('New pay', 31000);
+    await fill('In which year', 2028);
+    await body.locator('select[aria-label="From which month"]').selectOption('1');
+    await next();
     // The box keeps its place and size when a tick opens more questions: Continue does not move.
     const boxOf = () => page.evaluate(() => { const d = document.querySelector('#quickDlg').getBoundingClientRect(), n = document.querySelector('#qsNext').getBoundingClientRect(); return [Math.round(d.top), Math.round(d.height), Math.round(n.top)]; });
     const boxBefore = await boxOf();
@@ -2721,6 +2738,8 @@ test.describe('the guide beside the page', () => {
     const home = plan.accounts.find(a => a.type === 'property');
     expect(home.buyYear).toBe(plan.startYear + 5);
     expect(plan.expenses.find(e => e.name === 'Rent').toYear).toBe(home.buyYear);
+    const pay = plan.income.filter(i => i.kind === 'salary');
+    expect(pay.map(i => [i.name, i.toYear, i.toMonth, i.fromYear, i.fromMonth, !!i.fromJanuary])).toEqual([['My pay', 2027, 12, 0, 1, false], ['My pay from January 2028', 0, 0, 2028, 1, true]]);
     expect(problems).toEqual([]);
   });
 
@@ -2767,7 +2786,12 @@ test.describe('the guide beside the page', () => {
     await fill('Paid into the Lifetime ISA a month', 200);
     await next();
     await pick('own, with a mortgage');
+    // The home and the mortgage are asked for before going on: left out, the plan would be wrong.
+    await next();
+    await expect(body.locator('.qs-err')).toContainText('what the home is worth');
     await fill('Home value', 340000);
+    await next();
+    await expect(body.locator('.qs-err')).toContainText('how much is left on the mortgage');
     await fill('Mortgage left', 215000);
     await fill('Mortgage payment a month', 1340);
     // The rate and the year a fix ends, for those who know them.
