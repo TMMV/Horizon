@@ -2691,11 +2691,22 @@ test.describe('the guide beside the page', () => {
     await expect(body).toContainText(/About £[\d,]+ a year of pension built up so far \(9 years\)/);
     await fill('National Insurance years so far', 14);
     await next();
+    // Savings: each person's ISA is their own, and a Lifetime ISA is asked for by name.
+    await expect(body).toContainText('Anything in Cal’s ISAs or other investments?');
+    await fill('Partner’s ISAs and investments', 6500);
+    await fill('Lifetime ISA', 9000);
+    await fill('Paid into the Lifetime ISA a month', 200);
     await next();
     await pick('own, with a mortgage');
     await fill('Home value', 340000);
     await fill('Mortgage left', 215000);
     await fill('Mortgage payment a month', 1340);
+    // The rate and the year a fix ends, for those who know them.
+    await fill('Mortgage interest rate', 5.1);
+    await fill('Year the fixed rate ends', 2020);
+    await next();
+    await expect(body.locator('.qs-err')).toContainText('the year the fixed rate ends');
+    await fill('Year the fixed rate ends', 2029);
     await body.locator('.qs-check', { hasText: 'also own a property that is rented out' }).click();
     await next();
     await expect(body.locator('.qs-err')).toContainText('what the rented-out property is worth');
@@ -2723,6 +2734,13 @@ test.describe('the guide beside the page', () => {
     expect(plan.household.people[1].niYears).toBe(14);
     expect(plan.income.find(i => i.kind === 'rental').amount).toBe(850);
     expect(plan.accounts.find(a => a.name === 'Mortgage on the rented-out property').rate).toBe(5.23);
+    const mort = plan.accounts.find(a => a.name === 'Mortgage');
+    expect([mort.rate, mort.fixedUntil]).toEqual([5.1, 2029]);
+    expect(plan.accounts.filter(a => a.type === 'isa').map(a => [a.name, a.owner, a.balance])).toEqual([['Ash’s ISAs and investments', 'p2', 6500]]);
+    const lisa = plan.accounts.find(a => a.type === 'lisa');
+    expect([lisa.name, lisa.owner, lisa.balance, lisa.contribution]).toEqual(['Cal’s Lifetime ISA', 'p1', 9000, 2400]);
+    // The fix ending is on the five-year sheet's dates.
+    await expect(page.locator('#ovTodo')).toContainText(/fixed rate ends|new deals/);
     // Nothing goes into Cal's pension: a step says what paying in would cost and build.
     const step = page.locator('#ovTodo li', { hasText: 'Cal: decide how much to pay into a pension' });
     await expect(step).toContainText(/For example, £[\d,]+ a month: the government adds £[\d,]+ of tax relief/);

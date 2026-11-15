@@ -7629,7 +7629,11 @@
       id: 'savings', title: 'Savings, and other money coming in',
       render: () => [
         qsQ('How much is in bank and savings accounts?', qsMoney(() => a.cash, v => { a.cash = v; }, 'Bank and savings'), 'All accounts added together, including Premium Bonds. If you are usually overdrawn, leave this empty: the overdraft goes in with debts.'),
-        qsQ('Anything in ISAs or other investments?', qsMoney(() => a.investments, v => { a.investments = v; }, 'ISAs and investments'), 'Stocks and shares ISAs, funds, shares. Leave empty if none or not sure what this is.'),
+        qsQ(a.partner ? `Anything in ${qsName(0) === 'You' ? 'your own' : `${qsName(0)}’s`} ISAs or other investments?` : 'Anything in ISAs or other investments?', qsMoney(() => a.investments, v => { a.investments = v; }, 'ISAs and investments'), 'Stocks and shares ISAs, funds, shares. Not a Lifetime ISA: that is asked next. Leave empty if none or not sure what this is.'),
+        a.partner ? qsQ(`And in ${qsName(1)}’s?`, qsMoney(() => a.investments2, v => { a.investments2 = v; }, 'Partner’s ISAs and investments'), 'An ISA belongs to one person, so each person’s is kept apart. Leave empty if none.') : null,
+        ...qsWho().map((x, i) => ((x.age || 0) < 50 ? h('div', { class: 'qs-row' },
+          qsQ(i === 0 ? 'Anything in a Lifetime ISA?' : `Anything in ${qsName(i)}’s Lifetime ISA?`, qsMoney(() => a.lisa[i], v => { a.lisa[i] = v; }, i === 0 ? 'Lifetime ISA' : 'Partner’s Lifetime ISA'), i === 0 ? 'The ISA for a first home or for after 60, with 25% added by the government. Leave empty if none.' : 'Leave empty if none.'),
+          qsQ('Paid into it', qsMoney(() => a.lisaPay[i], v => { a.lisaPay[i] = v; }, i === 0 ? 'Paid into the Lifetime ISA a month' : 'Paid into the partner’s Lifetime ISA a month', { suffix: 'a month' }), 'Up to £333 a month gets the 25%.')) : null)),
         qsQ('Any money coming in each month because of children?', qsMoney(() => a.childMoney, v => { a.childMoney = v; }, 'Money for children', { suffix: 'a month' }), 'Child Benefit, maintenance from the other parent, the child part of Universal Credit. Leave empty if none. Maintenance you pay goes in the next box.'),
         qsQ('Do you pay maintenance for children each month?', qsMoney(() => a.childPaid, v => { a.childPaid = v; }, 'Maintenance you pay', { suffix: 'a month' }), 'Money you pay to the other parent for children who live with them. It is counted as spending. Leave empty if none.'),
         qsQ('If either, how old is the youngest child?', qsNum(() => a.youngest, v => { a.youngest = v; }, 'Age of the youngest child'), 'That money, coming in or going out, is counted until the youngest turns 18, then it stops.'),
@@ -7647,7 +7651,10 @@
         ], a.home, v => { a.home = v; })),
         a.home === 'mortgage' || a.home === 'own' ? qsQ('About what is the home worth?', qsMoney(() => a.homeValue, v => { a.homeValue = v; }, 'Home value'), 'What similar homes nearby have sold for. A rough figure is fine.') : null,
         a.home === 'mortgage' ? qsQ('How much is left on the mortgage?', qsMoney(() => a.mortgage, v => { a.mortgage = v; }, 'Mortgage left'), 'On the yearly mortgage statement or the lender’s app.') : null,
-        a.home === 'mortgage' ? qsQ('What is the mortgage payment?', qsMoney(() => a.mortgagePay, v => { a.mortgagePay = v; }, 'Mortgage payment a month', { suffix: 'a month' }), `Horizon assumes an interest rate of ${QS.MORTGAGE_RATE}%. You can put your own rate in afterwards.`) : null,
+        a.home === 'mortgage' ? qsQ('What is the mortgage payment?', qsMoney(() => a.mortgagePay, v => { a.mortgagePay = v; }, 'Mortgage payment a month', { suffix: 'a month' }), 'On the bank statement or the lender’s app.') : null,
+        a.home === 'mortgage' ? h('div', { class: 'qs-row' },
+          qsQ('Its interest rate, if you know it', qsNum(() => a.mortgageRate, v => { a.mortgageRate = v; }, 'Mortgage interest rate', { suffix: '%' }), `Not sure? Leave it empty: Horizon uses ${QS.MORTGAGE_RATE}%.`),
+          qsQ('Is the rate fixed? Until which year', qsNum(() => a.mortgageFix, v => { a.mortgageFix = v; }, 'Year the fixed rate ends'), 'The plan then reminds you to look for a new deal the year before. Leave empty if not fixed or not sure.')) : null,
         a.home === 'rent' ? qsQ('How much is the rent?', qsMoney(() => a.rent, v => { a.rent = v; }, 'Rent a month', { suffix: 'a month' }), 'Your share, if you split it.') : null,
         a.home === 'family' ? qsQ('Do you pay anything towards the house?', qsMoney(() => a.rent, v => { a.rent = v; }, 'Keep a month', { suffix: 'a month' }), 'Keep or digs. Leave empty if nothing.') : null,
         (() => {
@@ -7664,7 +7671,7 @@
             qsQ('Its mortgage payment', qsMoney(() => a.letPay, v => { a.letPay = v; }, 'Mortgage payment on the rented-out property', { suffix: 'a month' }))),
           h('span', { class: 'qs-hint' }, 'Rent after the letting agent’s fee, if there is one. Leave the mortgage boxes empty if none. If the payment only covers the interest, Horizon keeps the amount owed level; tax on the rent is worked out for you.')) : null,
       ],
-      check: () => (!a.home ? 'Please choose one of the four options.' : a.let && !(a.letValue > 0) ? 'Please type roughly what the rented-out property is worth, or untick that box.' : ''),
+      check: () => (!a.home ? 'Please choose one of the four options.' : a.home === 'mortgage' && a.mortgageFix > 0 && !(a.mortgageFix >= ctx.startYear && a.mortgageFix <= ctx.startYear + 15) ? `Please type the year the fixed rate ends, from ${ctx.startYear} on, or leave it empty.` : a.let && !(a.letValue > 0) ? 'Please type roughly what the rented-out property is worth, or untick that box.' : ''),
     });
     out.push({
       id: 'debts', title: 'Anything you owe',
@@ -7674,9 +7681,10 @@
           h('label', {}, 'What is it?', (() => { const s = h('select', { 'aria-label': 'Kind of debt' }, Object.entries(QS.DEBTS).map(([v, o]) => h('option', { value: v }, o.label))); s.value = d.kind; s.addEventListener('change', () => { d.kind = s.value; }); return s; })()),
           h('label', {}, 'Owed now', qsMoney(() => d.owed, v => { d.owed = v; }, 'Amount owed')),
           h('label', {}, 'Paid a month', qsMoney(() => d.pay, v => { d.pay = v; }, 'Paid a month')),
+          h('label', {}, 'Rate, if known', qsNum(() => d.rate, v => { d.rate = v; }, 'Interest rate of the debt', { suffix: '%' })),
           h('button', { type: 'button', class: 'btn ghost icon-btn', 'aria-label': 'Remove this debt', onclick: () => { a.debts.splice(k, 1); renderQuick(true); } }, '✕'))),
         h('div', {}, h('button', { type: 'button', class: 'btn', id: 'qsAddDebt', onclick: () => { a.debts.push({ kind: 'card', owed: 0, pay: 0 }); renderQuick(true); } }, a.debts.length ? '+ Add another' : '+ Add something I owe')),
-        a.debts.length ? qsNote('Not sure of the interest rate? You do not need it: Horizon uses a typical rate for each kind, and you can correct it afterwards. For an overdraft, or if you do not know the payment, leave “Paid a month” empty.') : null,
+        a.debts.length ? qsNote('Not sure of the interest rate? Leave it empty: Horizon uses a typical rate for each kind, and you can correct it afterwards. For an overdraft, or if you do not know the payment, leave “Paid a month” empty.') : null,
         ...qsWho().map((x, i) => QS.works(x) ? (() => {
           const box = h('input', { type: 'checkbox', checked: !!x.loan });
           box.addEventListener('change', () => { x.loan = box.checked; renderQuick(true); });

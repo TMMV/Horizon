@@ -297,3 +297,38 @@ test('big things coming up land in their year: a cost and money coming in', () =
   assert.ok(d.dates.some(x => x.year === 2028 && /Wedding/.test(x.label)));
   assert.ok(d.sheet.later[0].changes.some(c => /Wedding/.test(c)));
 });
+
+test('the quick start takes a mortgage rate and fix, a rate for a debt, a Lifetime ISA each and a partner’s own ISA', () => {
+  const a = Q.blank('scotland');
+  a.partner = true;
+  Object.assign(a.people[0], { name: 'Erin', age: 30, pay: 'salary', amount: 41000, workPension: 'yes' });
+  Object.assign(a.people[1], { name: 'Rob', age: 29, pay: 'salary', amount: 36000, workPension: 'yes' });
+  a.cash = 4000; a.investments = 0; a.investments2 = 6500;
+  a.lisa = [9000, 0]; a.lisaPay = [200, 0];
+  a.home = 'mortgage'; a.homeValue = 250000; a.mortgage = 180000; a.mortgagePay = 1000; a.mortgageRate = 5.1; a.mortgageFix = 2029;
+  a.debts = [{ kind: 'car', owed: 5200, pay: 210, rate: 7.9 }, { kind: 'card', owed: 900, pay: 50 }];
+  a.spending = 1900;
+  const p = Q.build(a, ctx);
+  const m = p.accounts.find(x => x.name === 'Mortgage');
+  assert.deepEqual([m.rate, m.fixedUntil], [5.1, 2029]);
+  assert.deepEqual(p.accounts.filter(x => x.type === 'debt' && x.name !== 'Mortgage').map(x => [x.name, x.rate]), [['Car finance', 7.9], ['Credit card', 23]]);
+  // An ISA is one person's: the partner's is theirs.
+  assert.deepEqual(p.accounts.filter(x => x.type === 'isa').map(x => [x.name, x.owner, x.balance]), [['Rob’s ISAs and investments', 'p2', 6500]]);
+  const l = p.accounts.find(x => x.type === 'lisa');
+  assert.deepEqual([l.name, l.owner, l.balance, l.contribution, l.purpose], ['Erin’s Lifetime ISA', 'p1', 9000, 2400, 'retirement']);
+  // The plan pays into it, with the bonus.
+  const proj = E.project(p);
+  assert.ok(Math.abs(proj.rows[0].toLisa - 2400) < 1 && Math.abs(proj.rows[0].lisaBonus - 600) < 1, `${proj.rows[0].toLisa} ${proj.rows[0].lisaBonus}`);
+  // Left empty, the usual rates and no fix; a Lifetime ISA for someone buying is for the home.
+  const b = renter();
+  b.spending = 900; b.lisa = [3000, 0]; b.lisaPay = [100, 0];
+  Object.assign(b.goals, { buy: true, buyPrice: 140000, buyYear: 2031 });
+  const q = Q.build(b, ctx);
+  assert.equal(q.accounts.find(x => x.type === 'lisa').purpose, 'home');
+  assert.equal(q.accounts.find(x => x.type === 'lisa').name, 'Lifetime ISA');
+  const c = Q.blank('ruk');
+  Object.assign(c.people[0], { age: 40, pay: 'salary', amount: 30000 });
+  c.home = 'mortgage'; c.homeValue = 200000; c.mortgage = 100000; c.spending = 1000;
+  const mm = Q.build(c, ctx).accounts.find(x => x.name === 'Mortgage');
+  assert.deepEqual([mm.rate, mm.fixedUntil || 0], [Q.MORTGAGE_RATE, 0]);
+});

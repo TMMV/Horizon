@@ -42,7 +42,9 @@
     return {
       region: region === 'ruk' ? 'ruk' : 'scotland', partner: false, people: [person(), person()],
       otherIncome: 0, childMoney: 0, childPaid: 0, youngest: null, cash: 0, investments: 0,
-      home: '', homeValue: 0, mortgage: 0, mortgagePay: 0, rent: 0,
+      home: '', homeValue: 0, mortgage: 0, mortgagePay: 0, mortgageRate: 0, mortgageFix: 0, rent: 0,
+      investments2: 0,   // the partner's own ISAs and investments
+      lisa: [0, 0], lisaPay: [0, 0],   // each person's Lifetime ISA: what is in it, and what goes in a month
       let: false, letValue: 0, letMortgage: 0, letPay: 0, letRent: 0,
       debts: [],
       big: [],   // one-off things in the years ahead: { kind: 'cost' | 'money', name, amount, year }
@@ -131,10 +133,17 @@
     if (a.childMoney > 0) income.push({ name: 'Money for the children', kind: 'other', owner: 'joint', tax: 'none', amount: a.childMoney, freq: 'month', endRef: 'year', toYear: startYear + Math.max(1, 18 - Math.min(17, Math.max(0, Math.round(a.youngest || 0)))), inflationLinked: true });
     if (a.otherIncome > 0) income.push({ name: 'Other money coming in', kind: 'other', owner: 'joint', tax: 'none', amount: a.otherIncome, freq: 'month', endRef: 'end', inflationLinked: true });
     if (a.cash > 0) accounts.push({ name: 'Bank and savings', type: 'cash', owner: 'joint', balance: a.cash });
-    if (a.investments > 0) accounts.push({ name: 'ISAs and investments', type: 'isa', owner: 'p1', balance: a.investments });
+    if (a.investments > 0) accounts.push({ name: a.partner && a.investments2 > 0 ? `${nameOf(a.people[0], 0)}’s ISAs and investments`.replace(/^You’s/, 'My') : 'ISAs and investments', type: 'isa', owner: 'p1', balance: a.investments });
+    if (a.partner && a.investments2 > 0) accounts.push({ name: `${nameOf(a.people[1], 1)}’s ISAs and investments`, type: 'isa', owner: 'p2', balance: a.investments2 });
+    // A Lifetime ISA each: for the home when one is to be bought, otherwise for after 60.
+    people.forEach((x, i) => {
+      const bal = (a.lisa || [])[i] || 0, pay = (a.lisaPay || [])[i] || 0;
+      if (!(bal > 0 || pay > 0)) return;
+      accounts.push({ name: i === 0 && !a.partner ? 'Lifetime ISA' : `${nameOf(a.people[i], i)}’s Lifetime ISA`.replace(/^You’s/, 'My'), type: 'lisa', owner: i === 0 ? 'p1' : 'p2', balance: bal, contribution: Math.min(4000, pay * 12), purpose: buyYear ? 'home' : 'retirement' });
+    });
     if (a.home === 'mortgage' || a.home === 'own') {
       if (a.homeValue > 0) accounts.push({ name: 'Home', type: 'property', owner: 'joint', balance: a.homeValue, rate: 3 });
-      if (a.home === 'mortgage' && a.mortgage > 0) accounts.push({ name: 'Mortgage', type: 'debt', owner: 'joint', balance: a.mortgage, rate: MORTGAGE_RATE, payment: a.mortgagePay > 0 ? a.mortgagePay : mortgagePayment(a.mortgage) });
+      if (a.home === 'mortgage' && a.mortgage > 0) accounts.push({ name: 'Mortgage', type: 'debt', owner: 'joint', balance: a.mortgage, rate: a.mortgageRate > 0 && a.mortgageRate < 20 ? a.mortgageRate : MORTGAGE_RATE, payment: a.mortgagePay > 0 ? a.mortgagePay : mortgagePayment(a.mortgage), ...(a.mortgageFix >= startYear ? { fixedUntil: Math.round(a.mortgageFix) } : {}) });
     }
     // A property that is rented out: its value, what is owed on it, and the rent.
     if (a.let && a.letValue > 0) {
@@ -153,7 +162,7 @@
     for (const d of a.debts) {
       if (!(d.owed > 0)) continue;
       const k = DEBTS[d.kind] || DEBTS.loan;
-      accounts.push({ name: k.label, type: 'debt', owner: 'joint', balance: d.owed, rate: k.rate, payment: d.pay || 0 });
+      accounts.push({ name: k.label, type: 'debt', owner: 'joint', balance: d.owed, rate: d.rate > 0 && d.rate < 100 ? d.rate : k.rate, payment: d.pay || 0 });
     }
     // Maintenance paid for children who live elsewhere is spending, until the youngest is 18.
     if (a.childPaid > 0) expenses.push({ name: 'Maintenance for the children', amount: a.childPaid, freq: 'month', inflationLinked: true, endRef: 'year', toYear: startYear + Math.max(1, 18 - Math.min(17, Math.max(0, Math.round(a.youngest || 0)))) });
