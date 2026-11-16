@@ -3,13 +3,13 @@
 // "suggested" values are long-run planning assumptions derived from the latest data,
 // not forecasts. The user chooses whether to apply them.
 window.MARKET_DATA = {
-  "asOf": "2026-11-09",
+  "asOf": "2026-11-16",
   "updatedBy": "github-actions",
   "series": {
     "bankRate": {
       "label": "Bank of England Bank Rate",
       "value": 4,
-      "date": "2026-11-06",
+      "date": "2026-11-13",
       "source": "https://www.bankofengland.co.uk/monetary-policy/the-interest-rate-bank-rate"
     },
     "cpi": {
@@ -20,8 +20,8 @@ window.MARKET_DATA = {
     },
     "gilt10y": {
       "label": "10-year gilt yield",
-      "value": 5.14,
-      "date": "2026-11-05",
+      "value": 5.25,
+      "date": "2026-11-12",
       "source": "https://www.bankofengland.co.uk/statistics/yield-curves"
     }
   },
@@ -35,8 +35,8 @@ window.MARKET_DATA = {
       "why": "Easy-access savings typically pay a little below Bank Rate (4%)."
     },
     "bondReturn": {
-      "value": 4.8,
-      "why": "Starting yields are the best guide to long-run bond returns; 10-year gilts yield about 5.1%."
+      "value": 5,
+      "why": "Starting yields are the best guide to long-run bond returns; 10-year gilts yield about 5.3%."
     }
   }
 };
